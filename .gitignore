@@ -1,0 +1,17 @@
+# launcher binary
+/tui
+
+# built app binaries (each project also ignores its own)
+/x/x-tui
+/inoreader/inoreader-tui
+/slack/slack-tui
+
+# secrets, in any project
+**/.env
+
+# playwright capture data, in any project
+**/.playwright-cli/
+**/pw-profile/
+
+go.work
+go.work.sum

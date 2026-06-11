@@ -1,0 +1,14 @@
+# build artifact (binary shares the repo name)
+/x-tui
+
+# secrets and local env
+.env
+.env.*
+!.env.sample
+
+# playwright-cli session/profile data
+.playwright-cli/
+pw-profile/
+
+go.work
+go.work.sum

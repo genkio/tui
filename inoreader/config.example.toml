@@ -1,0 +1,28 @@
+# inoreader-tui configuration (all optional; values shown are the built-in defaults).
+#
+# Copy to one of:
+#   $XDG_CONFIG_HOME/inoreader-tui/config.toml
+#   ~/.config/inoreader-tui/config.toml
+# or point at it explicitly with: inoreader-tui --config ./config.toml
+#
+# Your session cookie does NOT go here. It is read from the environment
+# (INOREADER_COOKIE); use `make auth` to capture it.
+
+# Color theme: auto (match the terminal background) | light | dark
+theme = "auto"
+
+# Unread-only triage (true) vs the full "All articles" view (false).
+unread_only = true
+
+# Auto-refresh the list on this interval, e.g. "5m" or "30s". Empty = off.
+# The --refresh flag overrides this.
+refresh = ""
+
+# How many articles to fetch per load, oldest first.
+max_articles = 50
+
+# Inoreader site root. Only change if you use a different host.
+base_url = "https://www.inoreader.com"
+
+# Browser User-Agent sent with requests.
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"

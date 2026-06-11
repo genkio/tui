@@ -1,0 +1,37 @@
+# slack-tui configuration (all optional; values shown are the built-in defaults).
+#
+# Copy to one of:
+#   $XDG_CONFIG_HOME/slack-tui/config.toml
+#   ~/.config/slack-tui/config.toml
+# or point at it explicitly with: slack-tui --config ./config.toml
+#
+# Tokens do NOT go here. They are read from the environment (SLACK_MCP_*).
+
+# Color theme: auto (match the terminal background) | light | dark
+theme = "auto"
+
+# Workspace used to build "open in browser" (o) links, e.g. acme -> acme.slack.com.
+# Needed because Slack omits permalinks from message history.
+slack_domain = ""
+
+# Auto-refresh the unread list on this interval, e.g. "30s" or "2m". Empty = off.
+# The --refresh flag overrides this.
+refresh = ""
+
+[server]
+# How to launch slack-mcp-server over stdio. The default uses npx, so you need
+# nothing installed but Node. To run it in Docker instead:
+#   command = "docker"
+#   args = ["run", "-i", "--rm",
+#           "-e", "SLACK_MCP_XOXP_TOKEN", "-e", "SLACK_MCP_MARK_TOOL", "-e", "SLACK_MCP_REACTION_TOOL",
+#           "ghcr.io/korotovsky/slack-mcp-server:1.3.0", "--transport", "stdio"]
+command = "npx"
+args = ["-y", "slack-mcp-server@1.3.0", "--transport", "stdio"]
+
+[unreads]
+# Which conversations to list: all | dm | group_dm | partner | internal
+channel_types = "all"
+max_channels = 50
+max_messages_per_channel = 10
+# mentions_only requires browser-session (xoxc/xoxd) tokens.
+mentions_only = false
