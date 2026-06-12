@@ -23,7 +23,9 @@ command -v jq >/dev/null || { echo "jq not found on PATH"; exit 1; }
 
 mkdir -p "$PROFILE"
 echo "Opening a browser for '$SESSION' (persistent profile: $PROFILE)..."
-playwright-cli -s="$SESSION" open "$URL" --headed --profile="$PROFILE" >/dev/null 2>&1 || true
+# default --browser is branded Chrome; bundled chromium needs no Chrome install
+playwright-cli -s="$SESSION" open "$URL" --browser=chromium --headed --profile="$PROFILE" >/dev/null ||
+  { echo "Failed to open the browser (see error above)."; exit 1; }
 
 echo
 echo "  1. Log in to the site in the browser window that just opened."

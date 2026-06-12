@@ -21,7 +21,9 @@ command -v node >/dev/null || { echo "node not found on PATH"; exit 1; }
 
 mkdir -p "$PROFILE"
 echo "Opening a browser for x.com (persistent profile: $PROFILE)..."
-playwright-cli -s="$SESSION" open "https://x.com/home" --headed --profile="$PROFILE" >/dev/null 2>&1 || true
+# default --browser is branded Chrome; bundled chromium needs no Chrome install
+playwright-cli -s="$SESSION" open "https://x.com/home" --browser=chromium --headed --profile="$PROFILE" >/dev/null ||
+  { echo "Failed to open the browser (see error above)."; exit 1; }
 
 echo
 echo "  1. Log into x.com in the browser window."
