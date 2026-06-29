@@ -1,0 +1,31 @@
+# folo-tui configuration (all optional; values shown are the built-in defaults).
+#
+# Copy to one of:
+#   $XDG_CONFIG_HOME/folo-tui/config.toml
+#   ~/.config/folo-tui/config.toml
+# or point at it explicitly with: folo-tui --config ./config.toml
+#
+# Your session cookie does NOT go here. It is read from the environment
+# (FOLO_COOKIE); use `make auth` to capture it.
+
+# Color theme: auto (match the terminal background) | light | dark
+theme = "auto"
+
+# Pending (unread) triage (true) vs all articles (false).
+unread_only = true
+
+# Auto-refresh the list on this interval, e.g. "5m" or "30s". Empty = off.
+# The --refresh flag overrides this.
+refresh = ""
+
+# How many articles to fetch per load, newest first.
+max_articles = 50
+
+# Folo API host. Only change if you self-host or use a different host.
+base_url = "https://api.folo.is"
+
+# Folo web app origin, sent as the Origin/Referer header.
+web_url = "https://app.folo.is"
+
+# Browser User-Agent sent with requests.
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"

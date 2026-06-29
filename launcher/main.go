@@ -1,5 +1,5 @@
 // Command tui is a launcher for the terminal apps in this repo (x, inoreader,
-// slack). It lists them, runs the selected one as a subprocess, and kicks off
+// slack, folo). It lists them, runs the selected one as a subprocess, and kicks off
 // that project's `make auth` first when it isn't logged in yet. Because each TUI
 // runs as a child process, quitting it (q) drops back here; q again exits.
 package main
@@ -32,6 +32,8 @@ func appsIn(root string) []app {
 			[][]string{{"INOREADER_COOKIE"}}},
 		{"slack", "Slack unread messages and threads", filepath.Join(root, "slack"),
 			[][]string{{"SLACK_MCP_XOXP_TOKEN"}, {"SLACK_MCP_XOXC_TOKEN", "SLACK_MCP_XOXD_TOKEN"}}},
+		{"folo", "Folo pending articles (Follow reader)", filepath.Join(root, "folo"),
+			[][]string{{"FOLO_COOKIE"}}},
 	}
 }
 

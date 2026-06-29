@@ -1,0 +1,23 @@
+# Built binaries
+/folo-tui
+/dist/
+/bin/
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Secrets and local env (never commit your cookie)
+.env
+.env.*
+!.env.sample
+
+# playwright-cli run artifacts
+.playwright-cli/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
