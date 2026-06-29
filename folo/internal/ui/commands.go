@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"encoding/base64"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -31,6 +33,7 @@ type (
 		err error
 	}
 	openedMsg      struct{}
+	copiedMsg      struct{}
 	autoRefreshMsg struct{}
 	errMsg         struct{ err error }
 )
@@ -83,6 +86,21 @@ func openURL(url string) tea.Cmd {
 			return errMsg{err}
 		}
 		return openedMsg{}
+	}
+}
+
+func copyToClipboard(s string) tea.Cmd {
+	return func() tea.Msg {
+		seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(s)) + "\a"
+		// tmux doesn't forward an app's bare OSC52 to the outer terminal; wrap it
+		// in DCS passthrough (needs allow-passthrough on) so tmux re-emits it.
+		if os.Getenv("TMUX") != "" {
+			seq = "\x1bPtmux;\x1b" + seq + "\x1b\\"
+		}
+		if _, err := os.Stdout.WriteString(seq); err != nil {
+			return errMsg{err}
+		}
+		return copiedMsg{}
 	}
 }
 

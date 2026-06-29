@@ -156,6 +156,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Opened in browser.", false)
 		return m, nil
 
+	case copiedMsg:
+		m.setStatus("Copied URL to clipboard.", false)
+		return m, nil
+
 	case errMsg:
 		m.loading = false
 		m.setStatus(friendlyError(msg.err), true)
@@ -242,6 +246,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, openURL(a.URL)
+
+	case key.Matches(msg, m.keys.CopyURL):
+		a, ok := m.feed.selectedArticle()
+		if !ok {
+			return m, nil
+		}
+		if a.URL == "" {
+			m.setStatus("No URL for this item.", true)
+			return m, nil
+		}
+		return m, copyToClipboard(a.URL)
 
 	case key.Matches(msg, m.keys.Keep):
 		// Kept articles render normally (never grey); the status line is the

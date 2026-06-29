@@ -9,6 +9,7 @@ type keyMap struct {
 	Bottom     key.Binding
 	Expand     key.Binding
 	OpenURL    key.Binding
+	CopyURL    key.Binding
 	Mark       key.Binding
 	Keep       key.Binding
 	ToggleFeed key.Binding
@@ -25,6 +26,7 @@ func defaultKeys() keyMap {
 		Bottom:     key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
 		Expand:     key.NewBinding(key.WithKeys("space", " "), key.WithHelp("space", "expand/collapse (marks read)")),
 		OpenURL:    key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		CopyURL:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy URL")),
 		Mark:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "mark read")),
 		Keep:       key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "keep unread")),
 		ToggleFeed: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle feed column")),
@@ -35,13 +37,13 @@ func defaultKeys() keyMap {
 }
 
 func (k keyMap) shortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Expand, k.OpenURL, k.Mark, k.Keep, k.Refresh, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Expand, k.OpenURL, k.CopyURL, k.Mark, k.Keep, k.Refresh, k.Help, k.Quit}
 }
 
 func (k keyMap) fullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.Expand, k.OpenURL, k.Mark, k.Keep, k.ToggleFeed, k.Refresh},
+		{k.Expand, k.OpenURL, k.CopyURL, k.Mark, k.Keep, k.ToggleFeed, k.Refresh},
 		{k.Help, k.Quit},
 	}
 }

@@ -156,6 +156,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Opened in browser.", false)
 		return m, nil
 
+	case copiedMsg:
+		m.setStatus("Copied URL to clipboard.", false)
+		return m, nil
+
 	case errMsg:
 		m.loading = false
 		m.setStatus(friendlyError(msg.err), true)
@@ -248,6 +252,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, openURL(t.URL)
+
+	case key.Matches(msg, m.keys.CopyURL):
+		t, ok := m.feed.selectedTweet()
+		if !ok {
+			return m, nil
+		}
+		if t.URL == "" {
+			m.setStatus("No URL for this post.", true)
+			return m, nil
+		}
+		return m, copyToClipboard(t.URL)
 	}
 
 	var cmd tea.Cmd
