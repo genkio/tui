@@ -169,6 +169,7 @@ make run                     # launch the TUI
 | `space` | Expand/collapse the full text of the selected message (detail view) |
 | `esc` / `h` / `backspace` | Back to the list |
 | `o` | Open the selected message/thread in your browser (detail view) |
+| `O` | Render the message link in [carbonyl](https://github.com/genkio/carbonyl) inside the terminal; `q` quits back (detail view) |
 | `e` | React to the selected message: fuzzy-search custom emoji, enter toggles it (detail view) |
 | `r` | Mark read (list: highlighted conversation; detail: up to the latest message) |
 | `R` | Refresh unreads |

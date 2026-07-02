@@ -51,6 +51,7 @@ for confirming the session works before opening the UI.
 | `←` / `→`  | switch For You / Following      |
 | `tab`      | toggle the left `@handle` column |
 | `o`        | open the post in the browser    |
+| `O`        | render the post in [carbonyl](https://github.com/genkio/carbonyl) in the terminal; `q` quits back |
 | `R`        | refresh the current timeline    |
 | `?`        | toggle help                     |
 | `q` / esc  | collapse an expanded post, else quit |

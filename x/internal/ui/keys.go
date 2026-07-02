@@ -9,6 +9,7 @@ type keyMap struct {
 	Bottom       key.Binding
 	Expand       key.Binding
 	OpenURL      key.Binding
+	Carbonyl     key.Binding
 	CopyURL      key.Binding
 	SwitchTab    key.Binding
 	ToggleHandle key.Binding
@@ -25,6 +26,7 @@ func defaultKeys() keyMap {
 		Bottom:       key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
 		Expand:       key.NewBinding(key.WithKeys("space", " "), key.WithHelp("space", "expand/collapse")),
 		OpenURL:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		Carbonyl:     key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "read in carbonyl")),
 		CopyURL:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy URL")),
 		SwitchTab:    key.NewBinding(key.WithKeys("left", "right", "h", "l"), key.WithHelp("←/→", "For You / Following")),
 		ToggleHandle: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle @handle column")),
@@ -35,13 +37,13 @@ func defaultKeys() keyMap {
 }
 
 func (k keyMap) shortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.SwitchTab, k.Expand, k.OpenURL, k.CopyURL, k.ToggleHandle, k.Refresh, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.SwitchTab, k.Expand, k.OpenURL, k.Carbonyl, k.CopyURL, k.ToggleHandle, k.Refresh, k.Help, k.Quit}
 }
 
 func (k keyMap) fullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.SwitchTab, k.Expand, k.OpenURL, k.CopyURL, k.ToggleHandle, k.Refresh},
+		{k.SwitchTab, k.Expand, k.OpenURL, k.Carbonyl, k.CopyURL, k.ToggleHandle, k.Refresh},
 		{k.Help, k.Quit},
 	}
 }

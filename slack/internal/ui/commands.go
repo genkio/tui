@@ -28,11 +28,12 @@ type (
 		threadTS string
 		msgs     []slack.Message
 	}
-	markedMsg      struct{ label string }
-	openedMsg      struct{}
-	copiedMsg      struct{}
-	autoRefreshMsg struct{}
-	errMsg         struct{ err error }
+	markedMsg       struct{ label string }
+	openedMsg       struct{}
+	carbonylDoneMsg struct{}
+	copiedMsg       struct{}
+	autoRefreshMsg  struct{}
+	errMsg          struct{ err error }
 
 	emojiListMsg struct{ names []string }
 	emojiErrMsg  struct{ err error }

@@ -194,6 +194,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Opened in browser.", false)
 		return m, nil
 
+	case carbonylDoneMsg:
+		m.clearStatus()
+		return m, nil
+
 	case copiedMsg:
 		m.setStatus("Copied URL to clipboard.", false)
 		return m, nil
@@ -332,6 +336,14 @@ func (m Model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, openURL(url)
+
+	case key.Matches(msg, m.keys.Carbonyl):
+		url := m.detail.selectedMessageURL(m.cfg.SlackBaseURL())
+		if url == "" {
+			m.setStatus(noLinkMsg, true)
+			return m, nil
+		}
+		return m, openCarbonyl(url)
 
 	case key.Matches(msg, m.keys.CopyURL):
 		url := m.detail.selectedMessageURL(m.cfg.SlackBaseURL())

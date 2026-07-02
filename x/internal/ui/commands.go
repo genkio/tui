@@ -20,10 +20,11 @@ type (
 		tweets []x.Tweet
 		reset  bool // jump cursor to the top (tab switch / manual refresh), vs keep position
 	}
-	openedMsg      struct{}
-	copiedMsg      struct{}
-	autoRefreshMsg struct{}
-	errMsg         struct{ err error }
+	openedMsg       struct{}
+	carbonylDoneMsg struct{}
+	copiedMsg       struct{}
+	autoRefreshMsg  struct{}
+	errMsg          struct{ err error }
 )
 
 func fetchTimeline(ctx context.Context, c *x.Client, tab x.Tab, max int, reset bool) tea.Cmd {

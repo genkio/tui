@@ -131,6 +131,7 @@ source .env && folo-tui            # launch the TUI
 | `j` / `↓`, `k` / `↑` | Move down / up, marking the article you leave read; inside a long expanded article, scroll its body line by line |
 | `space` | Expand / collapse the selected article inline; expanding fetches the body and marks it read |
 | `o` | Open the selected article's URL in your browser |
+| `O` | Render the article in [carbonyl](https://github.com/genkio/carbonyl) inside the terminal; `q` quits back to the list |
 | `r` | Mark the selected article read |
 | `K` | Keep unread: moving past won't mark it read, a greyed article is un-read on the server too; `K` again unlocks (pins cleared by `R`) |
 | `q` / `esc` | Collapse the expanded article; on the bare list, `q` quits |

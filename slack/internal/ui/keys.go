@@ -10,6 +10,7 @@ type keyMap struct {
 	Mark       key.Binding
 	React      key.Binding
 	OpenURL    key.Binding
+	Carbonyl   key.Binding
 	CopyURL    key.Binding
 	ToggleBody key.Binding
 	Refresh    key.Binding
@@ -28,6 +29,7 @@ func defaultKeys() keyMap {
 		Mark:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "mark read")),
 		React:      key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "react")),
 		OpenURL:    key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+		Carbonyl:   key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "read in carbonyl")),
 		CopyURL:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy URL")),
 		ToggleBody: key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "expand text")),
 		Refresh:    key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
@@ -44,13 +46,13 @@ func (k keyMap) listShortHelp() []key.Binding {
 
 func (k keyMap) detailShortHelp() []key.Binding {
 	expand := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "expand thread"))
-	return []key.Binding{k.Up, k.Down, expand, k.ToggleBody, k.React, k.OpenURL, k.CopyURL, k.Back, k.Mark, k.Help, k.Quit}
+	return []key.Binding{k.Up, k.Down, expand, k.ToggleBody, k.React, k.OpenURL, k.Carbonyl, k.CopyURL, k.Back, k.Mark, k.Help, k.Quit}
 }
 
 func (k keyMap) fullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.Open, k.ToggleBody, k.React, k.OpenURL, k.CopyURL, k.Back, k.Mark, k.Refresh},
+		{k.Open, k.ToggleBody, k.React, k.OpenURL, k.Carbonyl, k.CopyURL, k.Back, k.Mark, k.Refresh},
 		{k.Help, k.Quit},
 	}
 }
