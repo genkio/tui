@@ -48,7 +48,8 @@ reading stops working, that is the first place to look
   `q`, `esc`, or `space` again collapses it.
 - While an expanded body is taller than the window, `j`/`k` scroll it line by
   line; once you reach the end, `j` moves on and collapses it.
-- `o` opens the article's original URL in your browser.
+- `o` renders the article in carbonyl inside the terminal (`q` quits back);
+  `b` opens it in your browser.
 - `r` marks the selected article read; on the next refresh it drops off, so you
   triage top to bottom.
 - `K` keeps the selected article unread: moving past it no longer marks it read
@@ -130,8 +131,9 @@ source .env && folo-tui            # launch the TUI
 | --- | --- |
 | `j` / `↓`, `k` / `↑` | Move down / up, marking the article you leave read; inside a long expanded article, scroll its body line by line |
 | `space` | Expand / collapse the selected article inline; expanding fetches the body and marks it read |
-| `o` | Open the selected article's URL in your browser |
-| `O` | Render the article in [carbonyl](https://github.com/genkio/carbonyl) inside the terminal; `q` quits back to the list |
+| `o` | Render the article in [carbonyl](https://github.com/genkio/carbonyl) inside the terminal (adblock + vim keys); `q` quits back to the list |
+| `O` | Same as `o` but rendered with `--graphics` (kitty graphics protocol) |
+| `b` | Open the selected article's URL in your browser |
 | `r` | Mark the selected article read |
 | `K` | Keep unread: moving past won't mark it read, a greyed article is un-read on the server too; `K` again unlocks (pins cleared by `R`) |
 | `q` / `esc` | Collapse the expanded article; on the bare list, `q` quits |
@@ -182,10 +184,10 @@ Environment variables win over the file.
 - **`--check` says 0 fetched** you may be at inbox zero. Try
   `FOLO_TUI_UNREAD_ONLY=false` to view all articles.
 - **Expanded text is sparse or empty** some feeds carry only a summary; press
-  `o` to read the full article in the browser.
+  `o` to read the full article in carbonyl (or `b` in the browser).
 - **Listing/reading stops working** Folo likely changed their API; the client in
-  `internal/folo/client.go` needs updating. Press `o` to read in the browser
-  meanwhile.
+  `internal/folo/client.go` needs updating. Press `o` (carbonyl) or `b`
+  (browser) to read meanwhile.
 
 ## Security notes
 

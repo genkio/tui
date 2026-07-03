@@ -168,8 +168,9 @@ make run                     # launch the TUI
 | `enter` / `l` | Open conversation (in detail: expand/collapse the thread at the cursor) |
 | `space` | Expand/collapse the full text of the selected message (detail view) |
 | `esc` / `h` / `backspace` | Back to the list |
-| `o` | Open the selected message/thread in your browser (detail view) |
-| `O` | Render the message link in [carbonyl](https://github.com/genkio/carbonyl) inside the terminal; `q` quits back (detail view) |
+| `o` | Render the message link in [carbonyl](https://github.com/genkio/carbonyl) inside the terminal; `q` quits back (detail view) |
+| `O` | Same as `o` but rendered with `--graphics` (kitty graphics protocol) |
+| `b` | Open the selected message/thread in your browser (detail view) |
 | `e` | React to the selected message: fuzzy-search custom emoji, enter toggles it (detail view) |
 | `r` | Mark read (list: highlighted conversation; detail: up to the latest message) |
 | `R` | Refresh unreads |
@@ -225,7 +226,7 @@ working copy; it is not required.
 | `SLACK_TUI_MAX_MESSAGES` | `10` | Max messages per conversation in the summary |
 | `SLACK_TUI_MENTIONS_ONLY` | `false` | Only conversations that mention you (xoxc/xoxd only) |
 | `SLACK_TUI_THEME` | `auto` | `auto` (match the terminal background), `light`, or `dark` |
-| `SLACK_TUI_SLACK_DOMAIN` | (unset) | Workspace subdomain (e.g. `acme`), used to build message links for `o` |
+| `SLACK_TUI_SLACK_DOMAIN` | (unset) | Workspace subdomain (e.g. `acme`), used to build message links for `o`/`b` |
 | `SLACK_TUI_REFRESH` | (off) | Auto-refresh interval, e.g. `30s`/`2m`. The `--refresh` flag overrides it. |
 | `XDG_CONFIG_HOME` | `~/.config` | Where the config file lives |
 
@@ -257,7 +258,7 @@ args = ["run", "-i", "--rm",
 - **"Slack rejected the token"** the token is wrong or expired. Re-check your
   `SLACK_MCP_*` env vars; re-extract `xoxc`/`xoxd` if you use browser tokens.
 - **`r` says mark-as-read is off** set `SLACK_MCP_MARK_TOOL=true` and restart.
-- **`o` says no link available** Slack omits permalinks from message history, so
+- **`o`/`b` says no link available** Slack omits permalinks from message history, so
   slack-tui builds them from your workspace. Set `SLACK_TUI_SLACK_DOMAIN` to your
   subdomain (the `acme` in `acme.slack.com`).
 - **First launch hangs for a while** `npx` is downloading the server. It is

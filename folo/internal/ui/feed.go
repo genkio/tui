@@ -308,7 +308,7 @@ func (f feedModel) bodyLines(a folo.Article, width int) []string {
 	case f.contentErr[a.ID] != "":
 		return []string{
 			"    " + statusErrStyle.Render(f.contentErr[a.ID]),
-			"    " + emptyStyle.Render("(press o to open in browser)"),
+			"    " + emptyStyle.Render("(press o to read in carbonyl, b for browser)"),
 		}
 	}
 	body := f.content[a.ID]
@@ -316,7 +316,7 @@ func (f feedModel) bodyLines(a folo.Article, width int) []string {
 		body = a.Summary
 	}
 	if body == "" {
-		return []string{"    " + emptyStyle.Render("(no content; press o to open in browser)")}
+		return []string{"    " + emptyStyle.Render("(no content; press o to read in carbonyl, b for browser)")}
 	}
 	var out []string
 	for _, ln := range wrapText(body, textWidth) {

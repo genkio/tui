@@ -206,7 +206,7 @@ func (f feedModel) renderTweet(t x.Tweet, selected, expanded bool, width int) []
 		}
 		lines = append(lines, "", "    "+byline, "")
 		if strings.TrimSpace(t.Text) == "" {
-			lines = append(lines, "    "+emptyStyle.Render("(no text; press o to open in browser)"))
+			lines = append(lines, "    "+emptyStyle.Render("(no text; press o to read in carbonyl, b for browser)"))
 		} else {
 			for _, ln := range wrapText(t.Text, textWidth) {
 				lines = append(lines, "    "+textStyle.Render(ln))

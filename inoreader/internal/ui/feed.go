@@ -239,7 +239,7 @@ func (f feedModel) renderArticle(a inoreader.Article, selected, expanded, read b
 			lines = append(lines, "    "+timeStyle.Render("by "+a.Author))
 		}
 		if body == "" {
-			lines = append(lines, "    "+emptyStyle.Render("(no content; press o to open in browser)"))
+			lines = append(lines, "    "+emptyStyle.Render("(no content; press o to read in carbonyl, b for browser)"))
 		}
 		for _, ln := range wrapText(body, textWidth) {
 			lines = append(lines, "    "+textStyle.Render(ln))

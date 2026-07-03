@@ -337,13 +337,13 @@ func (m Model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, openURL(url)
 
-	case key.Matches(msg, m.keys.Carbonyl):
+	case key.Matches(msg, m.keys.Carbonyl), key.Matches(msg, m.keys.CarbonylGfx):
 		url := m.detail.selectedMessageURL(m.cfg.SlackBaseURL())
 		if url == "" {
 			m.setStatus(noLinkMsg, true)
 			return m, nil
 		}
-		return m, openCarbonyl(url)
+		return m, openCarbonyl(url, key.Matches(msg, m.keys.CarbonylGfx))
 
 	case key.Matches(msg, m.keys.CopyURL):
 		url := m.detail.selectedMessageURL(m.cfg.SlackBaseURL())

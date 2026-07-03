@@ -251,7 +251,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, openURL(a.URL)
 
-	case key.Matches(msg, m.keys.Carbonyl):
+	case key.Matches(msg, m.keys.Carbonyl), key.Matches(msg, m.keys.CarbonylGfx):
 		a, ok := m.feed.selectedArticle()
 		if !ok {
 			return m, nil
@@ -260,7 +260,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("No URL for this item.", true)
 			return m, nil
 		}
-		return m, openCarbonyl(a.URL)
+		return m, openCarbonyl(a.URL, key.Matches(msg, m.keys.CarbonylGfx))
 
 	case key.Matches(msg, m.keys.CopyURL):
 		a, ok := m.feed.selectedArticle()

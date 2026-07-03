@@ -19,8 +19,8 @@ import (
 
 // openCarbonyl renders the URL in carbonyl full screen, suspending the TUI
 // until it exits.
-func openCarbonyl(url string) tea.Cmd {
-	return tea.Exec(&carbonylCmd{url: url}, func(err error) tea.Msg {
+func openCarbonyl(url string, graphics bool) tea.Cmd {
+	return tea.Exec(&carbonylCmd{url: url, graphics: graphics}, func(err error) tea.Msg {
 		if err != nil {
 			return errMsg{err}
 		}
@@ -31,9 +31,10 @@ func openCarbonyl(url string) tea.Cmd {
 // carbonylCmd runs carbonyl on a pty so a bare q quits it back to the list;
 // carbonyl itself only exits on ctrl+c and would otherwise send q to the page.
 type carbonylCmd struct {
-	url    string
-	stdin  io.Reader
-	stdout io.Writer
+	url      string
+	graphics bool
+	stdin    io.Reader
+	stdout   io.Writer
 }
 
 func (c *carbonylCmd) SetStdin(r io.Reader)  { c.stdin = r }
@@ -46,7 +47,11 @@ func (c *carbonylCmd) Run() error {
 		return errors.New("carbonyl not found; brew install genkio/tap/carbonyl")
 	}
 
-	cmd := exec.Command(bin, "--adblock", "--vim", c.url)
+	args := []string{"--adblock", "--vim"}
+	if c.graphics {
+		args = append(args, "--graphics")
+	}
+	cmd := exec.Command(bin, append(args, c.url)...)
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return err

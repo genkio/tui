@@ -257,7 +257,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, openURL(t.URL)
 
-	case key.Matches(msg, m.keys.Carbonyl):
+	case key.Matches(msg, m.keys.Carbonyl), key.Matches(msg, m.keys.CarbonylGfx):
 		t, ok := m.feed.selectedTweet()
 		if !ok {
 			return m, nil
@@ -266,7 +266,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("No URL for this post.", true)
 			return m, nil
 		}
-		return m, openCarbonyl(t.URL)
+		return m, openCarbonyl(t.URL, key.Matches(msg, m.keys.CarbonylGfx))
 
 	case key.Matches(msg, m.keys.CopyURL):
 		t, ok := m.feed.selectedTweet()

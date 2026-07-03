@@ -2,7 +2,8 @@
 
 A terminal UI for reading your x.com (Twitter) home timelines. It lists the
 **For You** and **Following** feeds, `tab` switches between them, posts expand
-inline, and `o` opens one in the browser. It talks straight to the same web
+inline, and `o` renders one in carbonyl (`b` opens the browser). It talks
+straight to the same web
 GraphQL API the site uses, authenticated with your logged-in browser session,
 so there is no app to register and no API plan to pay for.
 
@@ -50,8 +51,9 @@ for confirming the session works before opening the UI.
 | `space`    | expand / collapse the post      |
 | `←` / `→`  | switch For You / Following      |
 | `tab`      | toggle the left `@handle` column |
-| `o`        | open the post in the browser    |
-| `O`        | render the post in [carbonyl](https://github.com/genkio/carbonyl) in the terminal; `q` quits back |
+| `o`        | render the post in [carbonyl](https://github.com/genkio/carbonyl) in the terminal; `q` quits back |
+| `O`        | same as `o` but with `--graphics` (kitty graphics protocol) |
+| `b`        | open the post in the browser    |
 | `R`        | refresh the current timeline    |
 | `?`        | toggle help                     |
 | `q` / esc  | collapse an expanded post, else quit |
@@ -115,8 +117,8 @@ panel and update the constants at the top of `internal/x/client.go`.
   off, and avoid bursts of `R`.
 - **No mark-as-read.** A home timeline has no unread state, so the list is just
   a snapshot you scroll; `R` pulls a fresh one.
-- Media-only posts (just an image or video) show as `[media]`; press `o` to
-  open them.
+- Media-only posts (just an image or video) show as `[media]`; press `O` to
+  view them in carbonyl with kitty graphics, or `b` in the browser.
 
 ## Development
 
