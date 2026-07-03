@@ -16,8 +16,13 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/genkio/x-tui/internal/config"
+	"github.com/genkio/x-tui/internal/readstore"
 	"github.com/genkio/x-tui/internal/x"
 )
+
+// saveDebounce coalesces a burst of read marks (e.g. holding j) into one disk
+// write instead of one per keystroke.
+const saveDebounce = 1500 * time.Millisecond
 
 // Run starts the TUI and blocks until the user quits. A positive refresh makes
 // the current timeline re-fetch itself on that interval.
@@ -34,6 +39,8 @@ type Model struct {
 	tab   x.Tab
 	cache map[x.Tab][]x.Tweet // last fetched posts per tab, so switching back is instant
 
+	read *readstore.Store // persistent set of read tweet ids; shared with feed
+
 	feed    feedModel
 	spinner spinner.Model
 	help    help.Model
@@ -44,6 +51,7 @@ type Model struct {
 	loadingNote     string
 	status          string
 	statusErr       bool
+	savePending     bool
 	lastRefresh     time.Time
 	themeAuto       bool
 	refreshInterval time.Duration
@@ -57,13 +65,15 @@ func newModel(ctx context.Context, client *x.Client, cfg config.Config, refresh 
 	sp.Style = spinnerStyle
 
 	tab := tabFromString(cfg.DefaultTab)
+	read := readstore.Load("")
 	return Model{
 		ctx:             ctx,
 		client:          client,
 		cfg:             cfg,
 		tab:             tab,
 		cache:           map[x.Tab][]x.Tweet{},
-		feed:            newFeed(),
+		read:            read,
+		feed:            newFeed(read, cfg.UnreadOnly),
 		spinner:         sp,
 		help:            help.New(),
 		keys:            defaultKeys(),
@@ -164,6 +174,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Copied URL to clipboard.", false)
 		return m, nil
 
+	case flushReadMsg:
+		// The debounce window elapsed; persist the accumulated marks in the
+		// background and let the next mark schedule a fresh window.
+		m.savePending = false
+		return m, saveRead(m.read)
+
+	case readSavedMsg:
+		if msg.err != nil {
+			m.setStatus(friendlyError(msg.err), true)
+		}
+		return m, nil
+
 	case errMsg:
 		m.loading = false
 		m.setStatus(friendlyError(msg.err), true)
@@ -182,7 +204,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.feed.collapseCursor() {
 			return m, nil
 		}
-		return m, tea.Quit
+		return m.quit()
 	case "esc":
 		m.feed.collapseCursor()
 		return m, nil
@@ -190,7 +212,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, m.keys.Quit):
-		return m, tea.Quit
+		return m.quit()
 
 	case key.Matches(msg, m.keys.Help):
 		m.help.ShowAll = !m.help.ShowAll
@@ -221,8 +243,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.feed.scrollExpanded(-1) {
 			return m, nil
 		}
-		m.feed.moveCursor(-1)
-		return m, nil
+		return m, m.moveMarkingRead(-1)
 
 	case key.Matches(msg, m.keys.Down):
 		// Inside an expanded post that overflows the viewport, j scrolls the body
@@ -231,8 +252,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.feed.scrollExpanded(1) {
 			return m, nil
 		}
-		m.feed.moveCursor(1)
-		return m, nil
+		return m, m.moveMarkingRead(1)
 
 	case key.Matches(msg, m.keys.Top):
 		m.feed.toTop()
@@ -243,8 +263,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Expand):
-		m.feed.toggleCursor()
-		return m, nil
+		opened := m.feed.toggleCursor()
+		t, ok := m.feed.selectedTweet()
+		if !opened || !ok || m.feed.isRead(t.ID) || m.feed.isKept(t.ID) {
+			return m, nil
+		}
+		m.feed.markReadLocal(t.ID)
+		return m, m.scheduleSave()
 
 	case key.Matches(msg, m.keys.OpenURL):
 		t, ok := m.feed.selectedTweet()
@@ -278,11 +303,76 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, copyToClipboard(t.URL)
+
+	case key.Matches(msg, m.keys.Mark):
+		t, ok := m.feed.selectedTweet()
+		if !ok || m.feed.isRead(t.ID) {
+			return m, nil
+		}
+		if m.feed.isKept(t.ID) {
+			m.setStatus("Kept unread; press K to unlock first.", true)
+			return m, nil
+		}
+		m.clearStatus()
+		m.feed.markReadLocal(t.ID)
+		return m, m.scheduleSave()
+
+	case key.Matches(msg, m.keys.Keep):
+		// Kept posts render normally (never grey); the status line is the only
+		// toggle feedback. Un-keeping leaves the post unread, not read.
+		if _, sel := m.feed.selectedTweet(); !sel {
+			return m, nil
+		}
+		if kept, _ := m.feed.toggleKeep(); kept {
+			m.setStatus("Kept unread; scrolling won't mark it read. K again to unlock.", false)
+		} else {
+			m.setStatus("Keep removed.", false)
+		}
+		return m, m.scheduleSave() // keep un-marks read; persist that
+
+	case key.Matches(msg, m.keys.UnreadOnly):
+		if m.feed.toggleUnreadOnly() {
+			m.setStatus("Showing unread only.", false)
+		} else {
+			m.setStatus("Showing all posts (read ones greyed).", false)
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
 	m.feed.vp, cmd = m.feed.vp.Update(msg)
 	return m, cmd
+}
+
+// quit persists any pending read marks before exiting so marks made inside the
+// debounce window aren't lost. The save is synchronous and cheap.
+func (m Model) quit() (tea.Model, tea.Cmd) {
+	_ = m.read.Save()
+	return m, tea.Quit
+}
+
+// moveMarkingRead moves the cursor and marks the post it left read (greyed, not
+// removed mid-scroll), so you triage in either direction. Kept and already-read
+// posts are left alone. Returns the save-scheduling command, if any.
+func (m *Model) moveMarkingRead(delta int) tea.Cmd {
+	before := m.feed.cursor
+	leaving, ok := m.feed.selectedTweet()
+	m.feed.moveCursor(delta)
+	if !ok || m.feed.cursor == before || m.feed.isRead(leaving.ID) || m.feed.isKept(leaving.ID) {
+		return nil
+	}
+	m.feed.markReadLocal(leaving.ID)
+	return m.scheduleSave()
+}
+
+// scheduleSave arms a single debounced flush of the read store. Rapid marks
+// (holding j) collapse into one write; the timer re-arms only after it fires.
+func (m *Model) scheduleSave() tea.Cmd {
+	if m.savePending {
+		return nil
+	}
+	m.savePending = true
+	return tea.Tick(saveDebounce, func(time.Time) tea.Msg { return flushReadMsg{} })
 }
 
 // switchTab moves to the given tab, showing its cached posts instantly when we
@@ -324,7 +414,11 @@ func (m Model) headerView() string {
 		foryou, following = headerMeta.Render(foryou), titleSelStyle.Render(following)
 	}
 	left += "  " + foryou + headerMeta.Render(" · ") + following
-	left += headerMeta.Render(fmt.Sprintf("  (%d)", len(m.feed.tweets)))
+	mode := "all"
+	if m.feed.unreadOnly {
+		mode = "unread"
+	}
+	left += headerMeta.Render(fmt.Sprintf("  %s · %d", mode, len(m.feed.tweets)))
 
 	var meta []string
 	if m.refreshInterval > 0 {

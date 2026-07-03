@@ -8,7 +8,7 @@ var (
 	headerStyle, headerMeta                                              lipgloss.Style
 	statusInfoStyle, statusErrStyle, helpStyle, emptyStyle, spinnerStyle lipgloss.Style
 	selGutterStyle, handleStyle, titleStyle, titleSelStyle               lipgloss.Style
-	timeStyle, textStyle, linkStyle, quoteStyle                          lipgloss.Style
+	timeStyle, textStyle, linkStyle, quoteStyle, readStyle               lipgloss.Style
 )
 
 // Default to a dark palette until the terminal answers the background query;
@@ -42,4 +42,5 @@ func setTheme(isDark bool) {
 	textStyle = lipgloss.NewStyle()
 	linkStyle = lipgloss.NewStyle().Foreground(accent).Underline(true)
 	quoteStyle = lipgloss.NewStyle().Foreground(subtle)
+	readStyle = lipgloss.NewStyle().Foreground(faint)
 }

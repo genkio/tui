@@ -7,15 +7,24 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 
+	"github.com/genkio/x-tui/internal/readstore"
 	"github.com/genkio/x-tui/internal/x"
 )
 
 // feedModel renders one home timeline as a single scrolling list (newest at the
 // top). A cursor selects one post; expanding it shows the full text, counts, and
 // link inline, accordion-style. The viewport keeps the cursor visible.
+//
+// x.com has no server-side read state, so it lives in a local read store: posts
+// you scroll past, expand, or mark grey out and, in unread-only mode, drop from
+// the list on the next fetch. kept pins a post unread for the session.
 type feedModel struct {
-	tweets     []x.Tweet
+	raw        []x.Tweet       // full fetched list, before the unread-only filter
+	tweets     []x.Tweet       // visible slice actually rendered
 	expanded   map[string]bool // tweet id -> body shown
+	read       *readstore.Store
+	kept       map[string]bool // tweet id -> pinned unread this session
+	unreadOnly bool
 	showHandle bool
 	cursor     int
 	yoff       int
@@ -28,24 +37,89 @@ type feedModel struct {
 	height int
 }
 
-func newFeed() feedModel {
-	return feedModel{expanded: map[string]bool{}, showHandle: true, vp: viewport.New()}
+func newFeed(read *readstore.Store, unreadOnly bool) feedModel {
+	return feedModel{
+		expanded:   map[string]bool{},
+		read:       read,
+		kept:       map[string]bool{},
+		unreadOnly: unreadOnly,
+		showHandle: true,
+		vp:         viewport.New(),
+	}
 }
 
 func (f *feedModel) toggleHandle() { f.showHandle = !f.showHandle; f.render() }
 
-// setTweets replaces the list. resetCursor jumps back to the newest post and
-// collapses everything, which a tab switch or manual refresh wants but a
-// background auto-refresh does not.
+// setTweets replaces the list. resetCursor jumps back to the newest post,
+// collapses everything, and drops the session keep pins, which a tab switch or
+// manual refresh wants but a background auto-refresh does not.
 func (f *feedModel) setTweets(t []x.Tweet, resetCursor bool) {
-	f.tweets = t
+	f.raw = t
 	if resetCursor {
 		f.expanded = map[string]bool{}
+		f.kept = map[string]bool{}
 		f.cursor = 0
 		f.yoff = 0
 	}
+	f.applyFilter()
+}
+
+// applyFilter recomputes the visible slice from raw. In unread-only mode a post
+// is hidden once it is read, unless pinned unread this session. Marking read
+// mid-session only greys a post in place (see markReadLocal); the filter runs on
+// the next fetch or an explicit view toggle, so the list never shifts under the
+// cursor as you scroll.
+func (f *feedModel) applyFilter() {
+	if !f.unreadOnly {
+		f.tweets = f.raw
+	} else {
+		vis := make([]x.Tweet, 0, len(f.raw))
+		for _, t := range f.raw {
+			if f.read.Has(t.ID) && !f.kept[t.ID] {
+				continue
+			}
+			vis = append(vis, t)
+		}
+		f.tweets = vis
+	}
 	f.clampCursor()
 	f.render()
+}
+
+// toggleUnreadOnly flips between hiding read posts and greying them in place,
+// re-filtering the current list. Reports the new state.
+func (f *feedModel) toggleUnreadOnly() bool {
+	f.unreadOnly = !f.unreadOnly
+	f.applyFilter()
+	return f.unreadOnly
+}
+
+// markReadLocal records the post read and re-renders it greyed. It deliberately
+// does not re-filter, so a post marked while you read stays put until the next
+// fetch or view toggle.
+func (f *feedModel) markReadLocal(id string) { f.read.Mark(id); f.render() }
+
+// isRead reports whether a post displays as read: marked and not pinned unread.
+func (f feedModel) isRead(id string) bool { return f.read.Has(id) && !f.kept[id] }
+
+func (f feedModel) isKept(id string) bool { return f.kept[id] }
+
+// toggleKeep pins the cursored post unread (and back). Pinning a greyed post
+// restores it to unread, in the store too, so a refresh keeps it. Reports the
+// new state, and false ok when nothing is selected.
+func (f *feedModel) toggleKeep() (kept, ok bool) {
+	t, sel := f.selectedTweet()
+	if !sel {
+		return false, false
+	}
+	if f.kept[t.ID] {
+		delete(f.kept, t.ID)
+	} else {
+		f.kept[t.ID] = true
+		f.read.Unmark(t.ID)
+	}
+	f.render()
+	return f.kept[t.ID], true
 }
 
 func (f *feedModel) setSize(w, h int) {
@@ -107,13 +181,16 @@ func (f feedModel) selectedTweet() (x.Tweet, bool) {
 	return f.tweets[f.cursor], true
 }
 
-func (f *feedModel) toggleCursor() {
+// toggleCursor expands or collapses the cursored post, reporting whether it
+// ended up expanded (false also when nothing is selected).
+func (f *feedModel) toggleCursor() bool {
 	t, ok := f.selectedTweet()
 	if !ok {
-		return
+		return false
 	}
 	f.expanded[t.ID] = !f.expanded[t.ID]
 	f.render()
+	return f.expanded[t.ID]
 }
 
 // collapseCursor collapses the cursored post if expanded, reporting whether it
@@ -139,7 +216,7 @@ func (f *feedModel) render() {
 	for i, t := range f.tweets {
 		f.starts[i] = len(lines)
 		expanded := f.expanded[t.ID]
-		lines = append(lines, f.renderTweet(t, i == f.cursor, expanded, f.width)...)
+		lines = append(lines, f.renderTweet(t, i == f.cursor, expanded, f.isRead(t.ID), f.width)...)
 		if expanded { // breathing room so an expanded body doesn't run into the next post
 			lines = append(lines, "")
 		}
@@ -149,13 +226,16 @@ func (f *feedModel) render() {
 	f.scrollToCursor()
 }
 
-func (f feedModel) renderTweet(t x.Tweet, selected, expanded bool, width int) []string {
+func (f feedModel) renderTweet(t x.Tweet, selected, expanded, read bool, width int) []string {
 	gutter := "  "
 	if selected {
-		gutter = selGutterStyle.Render("▌ ")
+		gutter = selGutterStyle.Render("▌ ") // keep the cursor visible even on a greyed (read) row
 	}
-	textSt := titleStyle
-	if selected {
+	handleSt, textSt := handleStyle, titleStyle
+	switch {
+	case read:
+		handleSt, textSt = readStyle, readStyle
+	case selected:
 		textSt = titleSelStyle
 	}
 	age := timeStyle.Render(t.Age)
@@ -166,7 +246,7 @@ func (f feedModel) renderTweet(t x.Tweet, selected, expanded bool, width int) []
 		if t.RepostBy != "" {
 			tag = "🔁 @" + t.Handle
 		}
-		seg := handleStyle.Render(truncate(tag, 24))
+		seg := handleSt.Render(truncate(tag, 24))
 		handleSeg = seg + "  "
 		handleSegW = lipgloss.Width(seg) + 2
 	}

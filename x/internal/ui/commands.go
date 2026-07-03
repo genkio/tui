@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/genkio/x-tui/internal/readstore"
 	"github.com/genkio/x-tui/internal/x"
 )
 
@@ -24,6 +25,8 @@ type (
 	carbonylDoneMsg struct{}
 	copiedMsg       struct{}
 	autoRefreshMsg  struct{}
+	flushReadMsg    struct{} // debounce window elapsed; time to persist read marks
+	readSavedMsg    struct{ err error }
 	errMsg          struct{ err error }
 )
 
@@ -41,6 +44,13 @@ func fetchTimeline(ctx context.Context, c *x.Client, tab x.Tab, max int, reset b
 // it to form a recurring timer.
 func scheduleRefresh(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return autoRefreshMsg{} })
+}
+
+// saveRead persists the read store off the update loop.
+func saveRead(s *readstore.Store) tea.Cmd {
+	return func() tea.Msg {
+		return readSavedMsg{err: s.Save()}
+	}
 }
 
 func openURL(url string) tea.Cmd {

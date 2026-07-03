@@ -22,6 +22,7 @@ type Config struct {
 	MaxTweets  int    `toml:"max_tweets"`  // posts to fetch per tab
 	DefaultTab string `toml:"default_tab"` // foryou | following
 	Lang       string `toml:"lang"`        // x-twitter-client-language
+	UnreadOnly bool   `toml:"unread_only"` // hide posts already marked read (vs grey them in place)
 	Bearer     string `toml:"-"`           // optional override; secret-ish, env only
 }
 
@@ -33,6 +34,7 @@ func Default() Config {
 		MaxTweets:  50,
 		DefaultTab: "following",
 		Lang:       "en",
+		UnreadOnly: true,
 	}
 }
 
@@ -97,8 +99,20 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("XTUI_LANG"); v != "" {
 		cfg.Lang = v
 	}
+	if v := os.Getenv("XTUI_UNREAD_ONLY"); v != "" {
+		cfg.UnreadOnly = truthy(v)
+	}
 	if v := os.Getenv("XTUI_BEARER"); v != "" {
 		cfg.Bearer = v
+	}
+}
+
+func truthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
 	}
 }
 
