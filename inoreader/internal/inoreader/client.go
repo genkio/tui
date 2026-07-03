@@ -46,44 +46,63 @@ func sanitizeCookie(c string) string {
 
 // Unreads fetches up to max articles oldest-first. With unreadOnly it asks for
 // only unread items; otherwise it returns the "All articles" view.
+//
+// print_articles serves only a single page (~20), so we page through it like
+// the site's infinite scroll: re-request with the offset set to the count seen
+// so far. Dedup across pages doubles as the termination guard: a server that
+// ignores the offset adds nothing new, ending the loop instead of looping
+// forever or returning duplicates.
 func (c *Client) Unreads(ctx context.Context, unreadOnly bool, max int) ([]Article, error) {
 	if max <= 0 {
 		max = 50
 	}
+
+	seen := map[string]bool{}
+	var out []Article
+	for len(out) < max {
+		env, err := c.printArticles(ctx, unreadOnly, len(out))
+		if err != nil {
+			return nil, err
+		}
+
+		loaded := env.articlesLoaded()
+		before := len(out)
+		add := func(id string) {
+			if id == "" || seen[id] || len(out) >= max {
+				return
+			}
+			frag, ok := loaded[id]
+			if !ok {
+				return
+			}
+			seen[id] = true
+			out = append(out, scrapeArticle(id, frag))
+		}
+		for _, id := range env.seenIDs() { // display order (oldest first)
+			add(id)
+		}
+		for id := range loaded { // any loaded item not listed in seen_ids
+			add(id)
+		}
+
+		if len(out) == before { // no new articles: exhausted or offset ignored
+			break
+		}
+	}
+	return out, nil
+}
+
+// printArticles fetches one page starting at offset (the count of articles
+// already shown), mirroring the web app's print_articles xajax call.
+func (c *Client) printArticles(ctx context.Context, unreadOnly bool, offset int) (*xjxEnvelope, error) {
 	view := 0
 	if unreadOnly {
 		view = 1
 	}
 	// articles_order:1 = oldest first; filter all_articles = every feed.
 	args := fmt.Sprintf(`{"view_unread":%d,"articles_order":1,"view_style":0,"filter_type":"all_articles","filter_id":0}`, view)
-	body := "xjxfun=print_articles&xjxr=1&xjxargs[]=Bfalse&xjxargs[]=N0&xjxargs[]=" + url.QueryEscape(args)
-
-	env, err := c.postXajax(ctx, "print_articles", body)
-	if err != nil {
-		return nil, err
-	}
-
-	loaded := env.articlesLoaded()
-	seen := map[string]bool{}
-	var out []Article
-	add := func(id string) {
-		if id == "" || seen[id] || len(out) >= max {
-			return
-		}
-		frag, ok := loaded[id]
-		if !ok {
-			return
-		}
-		seen[id] = true
-		out = append(out, scrapeArticle(id, frag))
-	}
-	for _, id := range env.seenIDs() { // display order (oldest first)
-		add(id)
-	}
-	for id := range loaded { // any loaded item not listed in seen_ids
-		add(id)
-	}
-	return out, nil
+	body := fmt.Sprintf("xjxfun=print_articles&xjxr=1&xjxargs[]=Bfalse&xjxargs[]=N%d&xjxargs[]=%s", offset, url.QueryEscape(args))
+	return c.postXajax(ctx, "print_articles", body)
 }
 
 // MarkRead marks one article read.

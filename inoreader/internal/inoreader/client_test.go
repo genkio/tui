@@ -85,6 +85,81 @@ func TestUnreadsScrapesAndOrders(t *testing.T) {
 	}
 }
 
+func TestUnreadsPagesUntilExhausted(t *testing.T) {
+	// print_articles serves one page; Unreads must walk it by advancing the
+	// offset argument (N0, then N2) until a page adds nothing new.
+	frag := func(id string) string {
+		return `"` + id + `":"<a class=\"article_title_link\" id=\"article_title_link_` + id +
+			`\" href=\"https://ex.com/` + id + `\">T` + id + `</a>"`
+	}
+	page := func(ids, frags string) string {
+		return `{"xjxobj":[
+			{"cmd":"jc","func":"set_seen_ids","data":[[` + ids + `]]},
+			{"cmd":"jc","func":"articles_loaded","data":[{` + frags + `}]}
+		]}`
+	}
+	const empty = `{"xjxobj":[{"cmd":"jc","func":"set_seen_ids","data":[[]]},{"cmd":"jc","func":"articles_loaded","data":[{}]}]}`
+
+	var offsets []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body := string(b)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(body, "xjxargs[]=N0&"):
+			offsets = append(offsets, "0")
+			w.Write([]byte(page("1002,1001", frag("1001")+","+frag("1002"))))
+		case strings.Contains(body, "xjxargs[]=N2&"):
+			offsets = append(offsets, "2")
+			w.Write([]byte(page("2004,2003", frag("2003")+","+frag("2004"))))
+		default:
+			offsets = append(offsets, "end")
+			w.Write([]byte(empty))
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "cookie=1", "test-agent")
+	arts, err := c.Unreads(context.Background(), true, 50)
+	if err != nil {
+		t.Fatalf("Unreads: %v", err)
+	}
+	var got []string
+	for _, a := range arts {
+		got = append(got, a.ID)
+	}
+	if want := "1002,1001,2004,2003"; strings.Join(got, ",") != want {
+		t.Fatalf("ids across pages = %v, want %s", got, want)
+	}
+	if len(offsets) < 3 || offsets[0] != "0" || offsets[1] != "2" || offsets[2] != "end" {
+		t.Fatalf("offset progression = %v, want [0 2 end]", offsets)
+	}
+}
+
+func TestUnreadsStopsWhenOffsetIgnored(t *testing.T) {
+	// A server that returns the same page regardless of offset must not loop or
+	// duplicate: dedup yields no new items on the second page, ending the walk.
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(printArticlesJSON()))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "cookie=1", "test-agent")
+	arts, err := c.Unreads(context.Background(), true, 50)
+	if err != nil {
+		t.Fatalf("Unreads: %v", err)
+	}
+	if len(arts) != 2 {
+		t.Fatalf("want 2 unique articles, got %d", len(arts))
+	}
+	if calls != 2 { // first page fills, second adds nothing and breaks
+		t.Fatalf("want 2 requests (fetch + confirm-exhausted), got %d", calls)
+	}
+}
+
 func TestMarkReadPostsReadArticle(t *testing.T) {
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
