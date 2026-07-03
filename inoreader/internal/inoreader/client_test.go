@@ -85,64 +85,17 @@ func TestUnreadsScrapesAndOrders(t *testing.T) {
 	}
 }
 
-func TestUnreadsPagesUntilExhausted(t *testing.T) {
-	// print_articles serves one page; Unreads must walk it by advancing the
-	// offset argument (N0, then N2) until a page adds nothing new.
-	frag := func(id string) string {
-		return `"` + id + `":"<a class=\"article_title_link\" id=\"article_title_link_` + id +
-			`\" href=\"https://ex.com/` + id + `\">T` + id + `</a>"`
-	}
-	page := func(ids, frags string) string {
-		return `{"xjxobj":[
-			{"cmd":"jc","func":"set_seen_ids","data":[[` + ids + `]]},
-			{"cmd":"jc","func":"articles_loaded","data":[{` + frags + `}]}
-		]}`
-	}
-	const empty = `{"xjxobj":[{"cmd":"jc","func":"set_seen_ids","data":[[]]},{"cmd":"jc","func":"articles_loaded","data":[{}]}]}`
-
-	var offsets []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		body := string(b)
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(body, "xjxargs[]=N0&"):
-			offsets = append(offsets, "0")
-			w.Write([]byte(page("1002,1001", frag("1001")+","+frag("1002"))))
-		case strings.Contains(body, "xjxargs[]=N2&"):
-			offsets = append(offsets, "2")
-			w.Write([]byte(page("2004,2003", frag("2003")+","+frag("2004"))))
-		default:
-			offsets = append(offsets, "end")
-			w.Write([]byte(empty))
-		}
-	}))
-	defer srv.Close()
-
-	c := New(srv.URL, "cookie=1", "test-agent")
-	arts, err := c.Unreads(context.Background(), true, 50)
-	if err != nil {
-		t.Fatalf("Unreads: %v", err)
-	}
-	var got []string
-	for _, a := range arts {
-		got = append(got, a.ID)
-	}
-	if want := "1002,1001,2004,2003"; strings.Join(got, ",") != want {
-		t.Fatalf("ids across pages = %v, want %s", got, want)
-	}
-	if len(offsets) < 3 || offsets[0] != "0" || offsets[1] != "2" || offsets[2] != "end" {
-		t.Fatalf("offset progression = %v, want [0 2 end]", offsets)
-	}
-}
-
-func TestUnreadsStopsWhenOffsetIgnored(t *testing.T) {
-	// A server that returns the same page regardless of offset must not loop or
-	// duplicate: dedup yields no new items on the second page, ending the walk.
+func TestUnreadsRetriesEmptyFirstRender(t *testing.T) {
+	// The first offset-0 render can come back init-only (no articles); Unreads
+	// must retry once rather than give up and return empty.
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.Write([]byte(`{"xjxobj":[{"cmd":"jc","func":"clear_article_divs","data":[]},{"cmd":"jc","func":"set_seen_ids","data":[[]]}]}`))
+			return
+		}
 		w.Write([]byte(printArticlesJSON()))
 	}))
 	defer srv.Close()
@@ -153,10 +106,43 @@ func TestUnreadsStopsWhenOffsetIgnored(t *testing.T) {
 		t.Fatalf("Unreads: %v", err)
 	}
 	if len(arts) != 2 {
-		t.Fatalf("want 2 unique articles, got %d", len(arts))
+		t.Fatalf("want 2 after retry, got %d", len(arts))
 	}
-	if calls != 2 { // first page fills, second adds nothing and breaks
-		t.Fatalf("want 2 requests (fetch + confirm-exhausted), got %d", calls)
+	if calls != 2 {
+		t.Fatalf("want 2 calls (empty render + retry), got %d", calls)
+	}
+}
+
+func TestUnreadsListsOnlySeenIDs(t *testing.T) {
+	// The page carries an extra article in articles_loaded that is not in
+	// set_seen_ids (a stray read item riding along). Unreads must show only the
+	// seen_ids, not the stray one.
+	page := `{"xjxobj":[
+		{"cmd":"jc","func":"set_seen_ids","data":[[1002,1001]]},
+		{"cmd":"jc","func":"articles_loaded","data":[{
+			"1001":"<a class=\"article_title_link\" id=\"article_title_link_1001\" href=\"https://ex.com/1\">One</a>",
+			"1002":"<a class=\"article_title_link\" id=\"article_title_link_1002\" href=\"https://ex.com/2\">Two</a>",
+			"9999":"<a class=\"article_title_link\" id=\"article_title_link_9999\" href=\"https://ex.com/9\">Stray read</a>"
+		}]}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "cookie=1", "test-agent")
+	arts, err := c.Unreads(context.Background(), true, 50)
+	if err != nil {
+		t.Fatalf("Unreads: %v", err)
+	}
+	if len(arts) != 2 {
+		t.Fatalf("want 2 (seen_ids only), got %d", len(arts))
+	}
+	for _, a := range arts {
+		if a.ID == "9999" {
+			t.Fatalf("stray loaded article 9999 leaked into the list")
+		}
 	}
 }
 

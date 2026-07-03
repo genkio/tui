@@ -44,50 +44,52 @@ func sanitizeCookie(c string) string {
 	return c
 }
 
-// Unreads fetches up to max articles oldest-first. With unreadOnly it asks for
-// only unread items; otherwise it returns the "All articles" view.
+// Unreads fetches the current unread page oldest-first. With unreadOnly it asks
+// for only unread items; otherwise the "All articles" view.
 //
-// print_articles serves only a single page (~20), so we page through it like
-// the site's infinite scroll: re-request with the offset set to the count seen
-// so far. Dedup across pages doubles as the termination guard: a server that
-// ignores the offset adds nothing new, ending the loop instead of looping
-// forever or returning duplicates.
+// It uses a single offset-0 print_articles call. That renders the stream fresh
+// and reflects the server's read state: articles you mark read drop out on the
+// next fetch. The offset>0 "load more" call is deliberately avoided: it returns
+// a stale cached page that still lists already-read articles (the bug behind
+// read items reappearing after a refresh), and the offset does not paginate
+// anyway, so a single fresh render is all this endpoint reliably gives.
 func (c *Client) Unreads(ctx context.Context, unreadOnly bool, max int) ([]Article, error) {
 	if max <= 0 {
 		max = 50
 	}
+	out, err := c.freshPage(ctx, unreadOnly, max)
+	if err != nil {
+		return nil, err
+	}
+	// A cold stream's first render occasionally comes back as init-only (no
+	// articles); a second call then returns the page.
+	if len(out) == 0 {
+		return c.freshPage(ctx, unreadOnly, max)
+	}
+	return out, nil
+}
 
+// freshPage does one offset-0 print_articles call and scrapes the articles it
+// lists in set_seen_ids (the stream's display order). It reads only seen_ids,
+// not the loaded map, so nothing the server didn't list for this view leaks in.
+func (c *Client) freshPage(ctx context.Context, unreadOnly bool, max int) ([]Article, error) {
+	env, err := c.printArticles(ctx, unreadOnly, 0)
+	if err != nil {
+		return nil, err
+	}
+	loaded := env.articlesLoaded()
 	seen := map[string]bool{}
 	var out []Article
-	for len(out) < max {
-		env, err := c.printArticles(ctx, unreadOnly, len(out))
-		if err != nil {
-			return nil, err
+	for _, id := range env.seenIDs() {
+		if id == "" || seen[id] || len(out) >= max {
+			continue
 		}
-
-		loaded := env.articlesLoaded()
-		before := len(out)
-		add := func(id string) {
-			if id == "" || seen[id] || len(out) >= max {
-				return
-			}
-			frag, ok := loaded[id]
-			if !ok {
-				return
-			}
-			seen[id] = true
-			out = append(out, scrapeArticle(id, frag))
+		frag, ok := loaded[id]
+		if !ok {
+			continue
 		}
-		for _, id := range env.seenIDs() { // display order (oldest first)
-			add(id)
-		}
-		for id := range loaded { // any loaded item not listed in seen_ids
-			add(id)
-		}
-
-		if len(out) == before { // no new articles: exhausted or offset ignored
-			break
-		}
+		seen[id] = true
+		out = append(out, scrapeArticle(id, frag))
 	}
 	return out, nil
 }
