@@ -51,6 +51,9 @@ func (c *carbonylCmd) Run() error {
 	args := []string{"--adblock", "--vim"}
 	if c.graphics {
 		args = append(args, "--graphics")
+	} else {
+		// no kitty protocol to render them, so skip the download entirely
+		args = append(args, "--no-images")
 	}
 	cmd := exec.Command(bin, append(args, c.url)...)
 	ptmx, err := pty.Start(cmd)
