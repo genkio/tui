@@ -5,12 +5,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 
 	"github.com/genkio/inoreader-tui/internal/config"
 	"github.com/genkio/inoreader-tui/internal/inoreader"
@@ -32,6 +35,8 @@ func run() error {
 		showVersion = flag.Bool("version", false, "print version and exit")
 		check       = flag.Bool("check", false, "verify the connection to Inoreader and exit")
 		count       = flag.Bool("count", false, "print the unread article count and exit")
+		dumpJSON    = flag.Bool("json", false, "print unread articles as JSON and exit (for the 'all' timeline)")
+		markRead    = flag.Bool("mark-read", false, "mark read the article ids read from stdin (one per line) and exit")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/inoreader-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the unread list at this interval (e.g. 5m); off if unset")
 	)
@@ -60,6 +65,12 @@ func run() error {
 	}
 	if *count {
 		return printCount(ctx, client, cfg)
+	}
+	if *dumpJSON {
+		return printJSON(ctx, client, cfg)
+	}
+	if *markRead {
+		return markReadFromStdin(ctx, client)
 	}
 
 	interval := cfg.RefreshInterval()
@@ -109,6 +120,66 @@ func printCount(ctx context.Context, client *inoreader.Client, cfg config.Config
 	}
 	fmt.Printf("%d%s\n", len(arts), suffix)
 	return nil
+}
+
+// dumpItem is the normalized shape the launcher's "all" timeline consumes from
+// every app's --json output.
+type dumpItem struct {
+	App    string `json:"app"`
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Body   string `json:"body,omitempty"`
+	Source string `json:"source,omitempty"`
+	Author string `json:"author,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Age    string `json:"age,omitempty"`
+	TS     string `json:"ts,omitempty"`
+}
+
+// printJSON dumps the unread articles as a JSON array for the launcher's "all"
+// view. Inoreader gives no absolute publish time (only a relative age string),
+// so ts is left empty and the launcher derives a sort key from age.
+func printJSON(ctx context.Context, client *inoreader.Client, cfg config.Config) error {
+	arts, err := client.Unreads(ctx, true, cfg.MaxArticles)
+	if err != nil {
+		return err
+	}
+	items := make([]dumpItem, 0, len(arts))
+	for _, a := range arts {
+		items = append(items, dumpItem{
+			App:    "inoreader",
+			ID:     a.ID,
+			Title:  a.Title,
+			Body:   a.Content,
+			Source: a.Feed,
+			Author: a.Author,
+			URL:    a.URL,
+			Age:    a.Age,
+		})
+	}
+	return json.NewEncoder(os.Stdout).Encode(items)
+}
+
+// markReadFromStdin marks read every article id on stdin (one per line) via the
+// same session the standalone app uses, so posts triaged in the "all" view drop
+// out of Inoreader's unread stream everywhere.
+func markReadFromStdin(ctx context.Context, client *inoreader.Client) error {
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	var firstErr error
+	for sc.Scan() {
+		id := strings.TrimSpace(sc.Text())
+		if id == "" {
+			continue
+		}
+		if err := client.MarkRead(ctx, id); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return firstErr
 }
 
 func versionString() string {

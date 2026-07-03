@@ -4,7 +4,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .DEFAULT_GOAL := build
-.PHONY: build run check count auth test fmt vet tidy lint install clean help
+.PHONY: build run check count json mark-read auth test fmt vet tidy lint install clean help
 
 build: ## Build the binary into ./x-tui
 	go build $(LDFLAGS) -o $(BINARY) $(PKG)
@@ -17,6 +17,12 @@ check: ## Fetch one page from each timeline and exit (sources .env if present)
 
 count: ## Print the unread count (for the launcher; sources .env if present)
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --count
+
+json: ## Print unread posts as JSON (for the 'all' timeline; sources .env if present)
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --json
+
+mark-read: ## Mark read the post ids on stdin, one per line (sources .env if present)
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --mark-read
 
 auth: ## Capture x.com session (auth_token + ct0) into .env (opens a browser to log in)
 	./tools/auth.sh x .env

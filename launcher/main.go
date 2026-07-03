@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,18 +27,23 @@ type app struct {
 	// authGroups lists sets of env vars; the app counts as logged in when any
 	// one group is fully present (slack accepts xoxp OR xoxc+xoxd).
 	authGroups [][]string
+	// feed marks an app the "all" timeline aggregates: one that implements the
+	// `make json` / `make mark-read` contract. Flip this on for a new reader app
+	// and it joins the merged feed automatically once logged in. Slack is off:
+	// it's a chat model, not an article stream.
+	feed bool
 }
 
 func appsIn(root string) []app {
 	return []app{
 		{"x", "x.com home timelines (For You / Following)", filepath.Join(root, "x"),
-			[][]string{{"XTUI_AUTH_TOKEN", "XTUI_CT0"}}},
+			[][]string{{"XTUI_AUTH_TOKEN", "XTUI_CT0"}}, true},
 		{"inoreader", "Inoreader unread article triage", filepath.Join(root, "inoreader"),
-			[][]string{{"INOREADER_COOKIE"}}},
+			[][]string{{"INOREADER_COOKIE"}}, true},
 		{"slack", "Slack unread messages and threads", filepath.Join(root, "slack"),
-			[][]string{{"SLACK_MCP_XOXP_TOKEN"}, {"SLACK_MCP_XOXC_TOKEN", "SLACK_MCP_XOXD_TOKEN"}}},
+			[][]string{{"SLACK_MCP_XOXP_TOKEN"}, {"SLACK_MCP_XOXC_TOKEN", "SLACK_MCP_XOXD_TOKEN"}}, false},
 		{"folo", "Folo pending articles (Follow reader)", filepath.Join(root, "folo"),
-			[][]string{{"FOLO_COOKIE"}}},
+			[][]string{{"FOLO_COOKIE"}}, true},
 	}
 }
 
@@ -178,6 +184,15 @@ func parseCountToken(s string) string {
 	return tok
 }
 
+// screen is the launcher's active view: the app picker, or the merged "all"
+// timeline that reads across every logged-in app.
+type screen int
+
+const (
+	screenHome screen = iota
+	screenAll
+)
+
 type model struct {
 	apps          []app
 	authed        []bool
@@ -187,6 +202,9 @@ type model struct {
 	statusErr     bool
 	pendingRun    string   // app to run once its auth flow finishes
 	missing       []string // login tools not on PATH (warned before an auth attempt)
+
+	screen screen
+	all    allModel // the "all" timeline screen; active when screen == screenAll
 
 	pollEvery time.Duration     // unread-count poll interval; 0 disables polling
 	counts    map[string]string // app name -> last count token
@@ -201,11 +219,31 @@ func newModel(root string, pollEvery time.Duration) model {
 		pollEvery: pollEvery,
 		counts:    map[string]string{},
 		countErr:  map[string]bool{},
+		all:       newAllModel(root),
 	}
 	m.authed = make([]bool, len(m.apps))
 	m.refreshAuth()
 	m.missing = missingAuthTools()
 	return m
+}
+
+// The picker shows the "all" timeline as a synthetic first row above the real
+// apps, so the cursor spans one extra position.
+func (m model) numRows() int         { return len(m.apps) + 1 }
+func (m model) isAllRow(i int) bool  { return i == 0 }
+func (m model) appIndex(row int) int { return row - 1 } // row>0 maps to m.apps
+
+// authedFeedApps is the logged-in subset of the apps the "all" timeline merges,
+// in registry order. It's derived from the registry's feed flag, so a newly
+// registered reader app is picked up automatically once it's authed.
+func (m model) authedFeedApps() []string {
+	var out []string
+	for i, a := range m.apps {
+		if a.feed && m.authed[i] {
+			out = append(out, a.name)
+		}
+	}
+	return out
 }
 
 // saturated reports whether an app's last count was capped ("N+"). Re-polling a
@@ -278,11 +316,21 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+	// Window size feeds both screens; track it even while the all timeline owns
+	// the view so returning to the picker is laid out correctly.
+	if ws, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = ws.Width, ws.Height
+		if m.screen == screenAll {
+			m.all.width, m.all.height = m.width, m.height
+			m.all.layout()
+		}
 		return m, nil
+	}
+	if m.screen == screenAll {
+		return m.updateAll(msg)
+	}
 
+	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
@@ -293,7 +341,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "down", "j":
-			if m.cursor < len(m.apps)-1 {
+			if m.cursor < m.numRows()-1 {
 				m.cursor++
 			}
 			return m, nil
@@ -305,9 +353,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Checking unread counts…", false)
 			return m, m.countAuthed(false)
 		case "enter", " ":
-			a := m.apps[m.cursor]
 			m.setStatus("", false)
-			if m.authed[m.cursor] {
+			if m.isAllRow(m.cursor) {
+				apps := m.authedFeedApps()
+				if len(apps) == 0 {
+					m.setStatus("Log into x, inoreader, or folo to open the all timeline.", true)
+					return m, nil
+				}
+				m.screen = screenAll
+				var cmd tea.Cmd
+				m.all, cmd = m.all.enter(apps, m.width, m.height)
+				return m, cmd
+			}
+			a := m.apps[m.appIndex(m.cursor)]
+			if m.authed[m.appIndex(m.cursor)] {
 				m.running = true // pause polling while the child owns the terminal
 				return m, runApp(a)
 			}
@@ -350,7 +409,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pollTickMsg:
 		cmds := []tea.Cmd{schedulePoll(m.pollEvery)}
-		if !m.running { // don't poll a service the child TUI is already hitting
+		// Don't poll a service a child TUI or the all timeline is already hitting.
+		if !m.running && m.screen == screenHome {
 			cmds = append(cmds, m.pollAuthed())
 		}
 		return m, tea.Batch(cmds...)
@@ -374,9 +434,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateAll drives the all-timeline screen, intercepting only the keys that
+// change screen (ctrl+c quits the launcher; q/esc collapse an expanded row or
+// else back out to the picker) and delegating everything else to allModel.
+func (m model) updateAll(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
+		switch k.String() {
+		case "ctrl+c":
+			m.all.flushNow()
+			return m, tea.Quit
+		case "q", "esc":
+			if m.all.feed.collapseCursor() {
+				return m, nil
+			}
+			return m.leaveAll()
+		}
+	}
+	var cmd tea.Cmd
+	m.all, cmd = m.all.Update(msg)
+	return m, cmd
+}
+
+// leaveAll returns to the picker, flushing any pending read marks first so
+// nothing triaged is lost, then re-checking counts since triage likely changed
+// them (mirroring the recount on returning from a child app).
+func (m model) leaveAll() (tea.Model, tea.Cmd) {
+	if m.all.hasPending() {
+		m.setStatus("Saving reads…", false)
+	}
+	m.all.flushNow()
+	m.screen = screenHome
+	return m, m.countAuthed(false)
+}
+
 func (m *model) setStatus(s string, isErr bool) { m.status = s; m.statusErr = isErr }
 
 func (m model) View() tea.View {
+	if m.screen == screenAll {
+		v := tea.NewView(m.all.View())
+		v.AltScreen = true
+		return v
+	}
+
 	var b strings.Builder
 	left := titleStyle.Render("tui") + "  " + dimStyle.Render("pick an app · enter to open")
 
@@ -401,13 +500,21 @@ func (m model) View() tea.View {
 		b.WriteString(warnStyle.Render("⚠ login needs "+strings.Join(m.missing, ", ")+" on PATH") + "\n\n")
 	}
 
-	for i, a := range m.apps {
+	renderRow := func(rowIdx int, name, desc, badge string) {
 		cursor, nameSt := "  ", itemStyle
-		if i == m.cursor {
+		if rowIdx == m.cursor {
 			cursor, nameSt = accentStyle.Render("▌ "), selStyle
 		}
-		b.WriteString(cursor + nameSt.Render(fmt.Sprintf("%-11s", a.name)) + dimStyle.Render(a.desc) + "  " + m.badge(i) + "\n")
+		b.WriteString(cursor + nameSt.Render(fmt.Sprintf("%-11s", name)) + dimStyle.Render(desc) + "  " + badge + "\n")
 	}
+
+	// The all timeline leads the list as a synthetic first row, above the apps
+	// it aggregates.
+	renderRow(0, "all", "Merged unread across x · inoreader · folo", m.allBadge())
+	for i, a := range m.apps {
+		renderRow(i+1, a.name, a.desc, m.badge(i))
+	}
+
 	if m.status != "" {
 		st := statusInfoStyle
 		if m.statusErr {
@@ -416,7 +523,7 @@ func (m model) View() tea.View {
 		b.WriteString("\n" + st.Render(m.status))
 	}
 	enterHelp := "enter open"
-	if !m.authed[m.cursor] {
+	if !m.isAllRow(m.cursor) && !m.authed[m.appIndex(m.cursor)] {
 		enterHelp = "enter log in & open"
 	}
 	help := "↑/↓ or j/k move · " + enterHelp + " · r refresh counts · q quit"
@@ -444,6 +551,41 @@ func (m model) badge(i int) string {
 		return dimStyle.Render("● checking…")
 	default:
 		return okStyle.Render("● ready")
+	}
+}
+
+// allBadge sums the unread counts of the logged-in feed apps for the all row.
+// A saturated ("N+") component makes the whole sum saturated, since the true
+// total is at least that much.
+func (m model) allBadge() string {
+	apps := m.authedFeedApps()
+	if len(apps) == 0 {
+		return dimStyle.Render("○ needs a login")
+	}
+	total, saturated, haveAny := 0, false, false
+	for _, name := range apps {
+		tok, ok := m.counts[name]
+		if !ok {
+			continue
+		}
+		haveAny = true
+		if strings.HasSuffix(tok, "+") {
+			saturated = true
+		}
+		n, _ := strconv.Atoi(strings.TrimSuffix(tok, "+"))
+		total += n
+	}
+	switch {
+	case !haveAny:
+		return dimStyle.Render("● checking…")
+	case total == 0 && !saturated:
+		return dimStyle.Render("● all read")
+	default:
+		label := strconv.Itoa(total)
+		if saturated {
+			label += "+"
+		}
+		return okStyle.Render("● ") + countStyle.Render(label) + dimStyle.Render(" unread")
 	}
 }
 

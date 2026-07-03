@@ -4,7 +4,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .DEFAULT_GOAL := build
-.PHONY: build run check count auth test fmt vet tidy lint install clean help
+.PHONY: build run check count json mark-read auth test fmt vet tidy lint install clean help
 
 build: ## Build the binary into ./folo-tui
 	go build $(LDFLAGS) -o $(BINARY) $(PKG)
@@ -20,6 +20,12 @@ check: ## Verify the connection to Folo and exit (sources .env if present)
 
 count: ## Print the unread count (for the launcher; sources .env if present)
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --count
+
+json: ## Print pending articles as JSON (for the 'all' timeline; sources .env if present)
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --json
+
+mark-read: ## Mark read the entry ids on stdin, one per line (sources .env if present)
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --mark-read
 
 test: ## Run tests
 	go test ./...
