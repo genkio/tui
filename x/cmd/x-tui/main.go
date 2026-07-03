@@ -11,8 +11,10 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 
 	"github.com/genkio/x-tui/internal/config"
+	"github.com/genkio/x-tui/internal/readstore"
 	"github.com/genkio/x-tui/internal/ui"
 	"github.com/genkio/x-tui/internal/x"
 )
@@ -31,6 +33,7 @@ func run() error {
 	var (
 		showVersion = flag.Bool("version", false, "print version and exit")
 		check       = flag.Bool("check", false, "fetch one page from each timeline and exit")
+		count       = flag.Bool("count", false, "print the unread post count and exit")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/x-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the timeline at this interval (e.g. 2m); off if unset")
 	)
@@ -57,6 +60,9 @@ func run() error {
 	if *check {
 		return printCheck(ctx, client)
 	}
+	if *count {
+		return printCount(ctx, client, cfg)
+	}
 
 	interval := cfg.RefreshInterval()
 	if *refresh > 0 { // an explicit flag wins over the config/env value
@@ -80,6 +86,37 @@ func printCheck(ctx context.Context, client *x.Client) error {
 			fmt.Printf("       top: @%s: %s\n", tweets[0].Handle, firstLine(tweets[0].Text, 60))
 		}
 	}
+	return nil
+}
+
+// printCount prints how many posts in the default timeline's newest page are
+// still unread (not in the local read store), for the launcher's badge. When
+// every fetched post is unread there are almost certainly more beyond the page,
+// so it's reported as "N+"; the launcher treats that as saturated and stops
+// polling. A read post in the window marks where you left off, so a partial
+// count is treated as complete.
+func printCount(ctx context.Context, client *x.Client, cfg config.Config) error {
+	tab := x.Following
+	switch strings.ToLower(strings.TrimSpace(cfg.DefaultTab)) {
+	case "foryou", "for you", "for-you":
+		tab = x.ForYou
+	}
+	tweets, err := client.Timeline(ctx, tab, cfg.MaxTweets)
+	if err != nil {
+		return err
+	}
+	read := readstore.Load("")
+	unread := 0
+	for _, t := range tweets {
+		if !read.Has(t.ID) {
+			unread++
+		}
+	}
+	suffix := ""
+	if len(tweets) > 0 && unread >= len(tweets) {
+		suffix = "+"
+	}
+	fmt.Printf("%d%s\n", unread, suffix)
 	return nil
 }
 

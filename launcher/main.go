@@ -5,11 +5,15 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -117,6 +121,63 @@ func authApp(a app) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{a.name, "auth", err} })
 }
 
+type (
+	pollTickMsg  struct{}
+	clockTickMsg struct{}
+	countMsg     struct {
+		name  string
+		token string // "12", "75+", "0"; empty when the count failed
+		err   bool
+	}
+)
+
+func schedulePoll(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return pollTickMsg{} })
+}
+
+// clockInterval re-renders often enough to keep the "updated Nm ago" label from
+// lagging its minute granularity, without a busy loop.
+const clockInterval = 30 * time.Second
+
+func scheduleClock() tea.Cmd {
+	return tea.Tick(clockInterval, func(time.Time) tea.Msg { return clockTickMsg{} })
+}
+
+// fetchCount runs the app's `make count` (which sources its .env and prints one
+// unread-count token) and reports the parsed token. It shells out per poll
+// rather than importing each app, keeping the launcher decoupled from their
+// clients and honoring whatever session each app already has.
+func fetchCount(a app) tea.Cmd {
+	name, dir := a.name, a.dir
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "make", "-C", dir, "count").Output()
+		if err != nil {
+			return countMsg{name: name, err: true}
+		}
+		tok := parseCountToken(string(out))
+		if tok == "" {
+			return countMsg{name: name, err: true}
+		}
+		return countMsg{name: name, token: tok}
+	}
+}
+
+var reCountToken = regexp.MustCompile(`^\d+\+?$`)
+
+// parseCountToken pulls the last count-shaped word out of the subprocess output,
+// tolerating any stray build chatter the toolchain might emit.
+func parseCountToken(s string) string {
+	tok := ""
+	for _, f := range strings.Fields(s) {
+		if reCountToken.MatchString(f) {
+			tok = f
+		}
+	}
+	return tok
+}
+
 type model struct {
 	apps          []app
 	authed        []bool
@@ -126,14 +187,62 @@ type model struct {
 	statusErr     bool
 	pendingRun    string   // app to run once its auth flow finishes
 	missing       []string // login tools not on PATH (warned before an auth attempt)
+
+	pollEvery time.Duration     // unread-count poll interval; 0 disables polling
+	counts    map[string]string // app name -> last count token
+	countErr  map[string]bool   // app name -> last poll failed
+	running   bool              // a child TUI/auth flow is active; pause polling
+	lastFetch time.Time         // when the most recent count landed, for the freshness label
 }
 
-func newModel(root string) model {
-	m := model{apps: appsIn(root)}
+func newModel(root string, pollEvery time.Duration) model {
+	m := model{
+		apps:      appsIn(root),
+		pollEvery: pollEvery,
+		counts:    map[string]string{},
+		countErr:  map[string]bool{},
+	}
 	m.authed = make([]bool, len(m.apps))
 	m.refreshAuth()
 	m.missing = missingAuthTools()
 	return m
+}
+
+// saturated reports whether an app's last count was capped ("N+"). Re-polling a
+// saturated service can't move the badge off the ceiling, so the periodic poll
+// skips it until a manual refresh or a return from the app re-checks it.
+func (m model) saturated(name string) bool {
+	return strings.HasSuffix(m.counts[name], "+")
+}
+
+// countAuthed fetches counts for logged-in apps at once, or nil when none apply.
+// With skipSaturated it leaves capped services alone (used by the periodic poll);
+// manual refresh and post-run refresh pass false to re-check everything, so a
+// service you've read down loses its "N+" and resumes normal polling.
+func (m model) countAuthed(skipSaturated bool) tea.Cmd {
+	var cmds []tea.Cmd
+	for i, a := range m.apps {
+		if !m.authed[i] {
+			continue
+		}
+		if skipSaturated && m.saturated(a.name) {
+			continue
+		}
+		cmds = append(cmds, fetchCount(a))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+// pollAuthed is the periodic poll: gated on polling being enabled, and skips
+// saturated services.
+func (m model) pollAuthed() tea.Cmd {
+	if m.pollEvery <= 0 {
+		return nil
+	}
+	return m.countAuthed(true)
 }
 
 func (m *model) refreshAuth() {
@@ -160,7 +269,13 @@ func (m model) anyNeedsLogin() bool {
 	return false
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func (m model) Init() tea.Cmd {
+	cmds := []tea.Cmd{scheduleClock()} // keep the freshness label ticking even with polling off
+	if m.pollEvery > 0 {
+		cmds = append(cmds, m.pollAuthed(), schedulePoll(m.pollEvery))
+	}
+	return tea.Batch(cmds...)
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -182,10 +297,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 			return m, nil
+		case "r":
+			// Manual count refresh, available even when periodic polling is off.
+			if m.running {
+				return m, nil
+			}
+			m.setStatus("Checking unread counts…", false)
+			return m, m.countAuthed(false)
 		case "enter", " ":
 			a := m.apps[m.cursor]
 			m.setStatus("", false)
 			if m.authed[m.cursor] {
+				m.running = true // pause polling while the child owns the terminal
 				return m, runApp(a)
 			}
 			// Login drives a browser via playwright; bail with a clear message
@@ -196,11 +319,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Not logged in: run the project's auth flow, then open it on success.
 			m.pendingRun = a.name
+			m.running = true
 			return m, authApp(a)
 		}
 		return m, nil
 
 	case execDoneMsg:
+		m.running = false
 		m.refreshAuth()
 		if msg.err != nil {
 			m.setStatus("✗ "+msg.name+": "+msg.err.Error(), true)
@@ -210,9 +335,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.phase == "auth" && m.pendingRun == msg.name {
 			m.pendingRun = ""
 			if i, a, ok := m.appByName(msg.name); ok && m.authed[i] {
+				m.running = true
 				return m, runApp(a)
 			}
 			m.setStatus("Login didn't complete for "+msg.name+". Try again.", true)
+			return m, nil
+		}
+		// Back from a run: counts likely changed while you triaged, so re-check
+		// everything (even saturated services, which you may have read down).
+		if m.pollEvery > 0 {
+			return m, m.countAuthed(false)
+		}
+		return m, nil
+
+	case pollTickMsg:
+		cmds := []tea.Cmd{schedulePoll(m.pollEvery)}
+		if !m.running { // don't poll a service the child TUI is already hitting
+			cmds = append(cmds, m.pollAuthed())
+		}
+		return m, tea.Batch(cmds...)
+
+	case clockTickMsg:
+		return m, scheduleClock() // re-render so the "updated Nm ago" label stays current
+
+	case countMsg:
+		if m.status == "Checking unread counts…" {
+			m.setStatus("", false)
+		}
+		if msg.err {
+			m.countErr[msg.name] = true
+		} else {
+			m.counts[msg.name] = msg.token
+			m.countErr[msg.name] = false
+			m.lastFetch = time.Now()
 		}
 		return m, nil
 	}
@@ -223,7 +378,24 @@ func (m *model) setStatus(s string, isErr bool) { m.status = s; m.statusErr = is
 
 func (m model) View() tea.View {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("tui") + "  " + dimStyle.Render("pick an app · enter to open") + "\n\n")
+	left := titleStyle.Render("tui") + "  " + dimStyle.Render("pick an app · enter to open")
+
+	var meta []string
+	if m.pollEvery > 0 {
+		meta = append(meta, "every "+m.pollEvery.String())
+	}
+	if !m.lastFetch.IsZero() {
+		meta = append(meta, "updated "+humanAgo(m.lastFetch))
+	}
+	right := ""
+	if len(meta) > 0 {
+		right = dimStyle.Render(strings.Join(meta, " · "))
+	}
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	b.WriteString(left + strings.Repeat(" ", gap) + right + "\n\n")
 
 	if len(m.missing) > 0 && m.anyNeedsLogin() {
 		b.WriteString(warnStyle.Render("⚠ login needs "+strings.Join(m.missing, ", ")+" on PATH") + "\n\n")
@@ -234,11 +406,7 @@ func (m model) View() tea.View {
 		if i == m.cursor {
 			cursor, nameSt = accentStyle.Render("▌ "), selStyle
 		}
-		badge := dimStyle.Render("○ needs login")
-		if m.authed[i] {
-			badge = okStyle.Render("● ready")
-		}
-		b.WriteString(cursor + nameSt.Render(fmt.Sprintf("%-11s", a.name)) + dimStyle.Render(a.desc) + "  " + badge + "\n")
+		b.WriteString(cursor + nameSt.Render(fmt.Sprintf("%-11s", a.name)) + dimStyle.Render(a.desc) + "  " + m.badge(i) + "\n")
 	}
 	if m.status != "" {
 		st := statusInfoStyle
@@ -251,11 +419,47 @@ func (m model) View() tea.View {
 	if !m.authed[m.cursor] {
 		enterHelp = "enter log in & open"
 	}
-	b.WriteString("\n\n" + dimStyle.Render("↑/↓ or j/k move · "+enterHelp+" · q quit"))
+	help := "↑/↓ or j/k move · " + enterHelp + " · r refresh counts · q quit"
+	b.WriteString("\n\n" + dimStyle.Render(help))
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
+}
+
+// badge renders the right-hand status for app i: login state, or its unread
+// count once a poll has landed.
+func (m model) badge(i int) string {
+	if !m.authed[i] {
+		return dimStyle.Render("○ needs login")
+	}
+	name := m.apps[i].name
+	tok, ok := m.counts[name]
+	switch {
+	case ok && tok == "0":
+		return dimStyle.Render("● all read")
+	case ok:
+		return okStyle.Render("● ") + countStyle.Render(tok) + dimStyle.Render(" unread")
+	case m.pollEvery > 0 && !m.countErr[name]:
+		return dimStyle.Render("● checking…")
+	default:
+		return okStyle.Render("● ready")
+	}
+}
+
+// humanAgo renders how long ago t was at minute granularity, for the freshness
+// label.
+func humanAgo(t time.Time) string {
+	switch d := time.Since(t); {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
 
 var (
@@ -265,12 +469,23 @@ var (
 	itemStyle       = lipgloss.NewStyle()
 	dimStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	okStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	countStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	statusInfoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	statusErrStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	warnStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 )
 
 func main() {
+	// Default 5m, overridable by TUI_POLL (env) then --poll (flag). 0 disables.
+	interval := 5 * time.Minute
+	if v := os.Getenv("TUI_POLL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			interval = d
+		}
+	}
+	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
+	flag.Parse()
+
 	root, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())
@@ -280,7 +495,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "tui: run from the repo root (no ./x here): "+err.Error())
 		os.Exit(1)
 	}
-	if _, err := tea.NewProgram(newModel(root)).Run(); err != nil {
+	if _, err := tea.NewProgram(newModel(root, *poll)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())
 		os.Exit(1)
 	}

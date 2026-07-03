@@ -30,6 +30,7 @@ func run() error {
 	var (
 		showVersion = flag.Bool("version", false, "print version and exit")
 		check       = flag.Bool("check", false, "connect to the server, list its tools, and exit")
+		count       = flag.Bool("count", false, "print the unread message count and exit")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/slack-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the unread list at this interval (e.g. 30s, 2m); off if unset")
 	)
@@ -61,6 +62,9 @@ func run() error {
 	if *check {
 		printCheck(client)
 		return nil
+	}
+	if *count {
+		return printCount(ctx, client, cfg)
 	}
 
 	interval := cfg.RefreshInterval()
@@ -107,6 +111,26 @@ func yesNo(ok bool) string {
 		return "[ok]"
 	}
 	return "[--]"
+}
+
+// printCount prints the total unread messages across unread conversations for
+// the launcher's badge. The conversation list is bounded by max_channels, so a
+// full list is reported as "N+".
+func printCount(ctx context.Context, client *mcp.Client, cfg config.Config) error {
+	convs, err := client.Unreads(ctx, cfg.Unreads)
+	if err != nil {
+		return err
+	}
+	total := 0
+	for _, c := range convs {
+		total += c.UnreadCount
+	}
+	suffix := ""
+	if cfg.Unreads.MaxChannels > 0 && len(convs) >= cfg.Unreads.MaxChannels {
+		suffix = "+"
+	}
+	fmt.Printf("%d%s\n", total, suffix)
+	return nil
 }
 
 func versionString() string {

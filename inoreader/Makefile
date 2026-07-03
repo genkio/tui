@@ -4,7 +4,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 .DEFAULT_GOAL := build
-.PHONY: build run check auth test fmt vet tidy lint install clean help
+.PHONY: build run check count auth test fmt vet tidy lint install clean help
 
 build: ## Build the binary into ./inoreader-tui
 	go build $(LDFLAGS) -o $(BINARY) $(PKG)
@@ -17,6 +17,9 @@ run: ## Build and run the TUI (sources .env if present)
 
 check: ## Verify the connection to Inoreader and exit (sources .env if present)
 	@if [ -f .env ]; then . ./.env; fi; go run $(PKG) --check
+
+count: ## Print the unread count (for the launcher; sources .env if present)
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --count
 
 test: ## Run tests
 	go test ./...

@@ -31,6 +31,7 @@ func run() error {
 	var (
 		showVersion = flag.Bool("version", false, "print version and exit")
 		check       = flag.Bool("check", false, "verify the connection to Inoreader and exit")
+		count       = flag.Bool("count", false, "print the unread article count and exit")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/inoreader-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the unread list at this interval (e.g. 5m); off if unset")
 	)
@@ -56,6 +57,9 @@ func run() error {
 
 	if *check {
 		return printCheck(ctx, client, cfg)
+	}
+	if *count {
+		return printCount(ctx, client)
 	}
 
 	interval := cfg.RefreshInterval()
@@ -88,6 +92,24 @@ func printCheck(ctx context.Context, client *inoreader.Client, cfg config.Config
 		fmt.Println("       nothing to show right now")
 	}
 	fmt.Println("  [ok] mark as read uses the same session (press r in the TUI)")
+	return nil
+}
+
+// countMax bounds how many unread items printCount pages through, so the
+// launcher badge stays cheap; a full result is reported as "N+".
+const countMax = 100
+
+// printCount prints the number of unread articles for the launcher's badge.
+func printCount(ctx context.Context, client *inoreader.Client) error {
+	arts, err := client.Unreads(ctx, true, countMax)
+	if err != nil {
+		return err
+	}
+	suffix := ""
+	if len(arts) >= countMax {
+		suffix = "+"
+	}
+	fmt.Printf("%d%s\n", len(arts), suffix)
 	return nil
 }
 
