@@ -59,7 +59,7 @@ func run() error {
 		return printCheck(ctx, client, cfg)
 	}
 	if *count {
-		return printCount(ctx, client)
+		return printCount(ctx, client, cfg)
 	}
 
 	interval := cfg.RefreshInterval()
@@ -95,19 +95,16 @@ func printCheck(ctx context.Context, client *folo.Client, cfg config.Config) err
 	return nil
 }
 
-// countMax bounds how many pending items printCount pages through, so the
-// launcher badge stays cheap; a full result is reported as "N+".
-const countMax = 100
-
-// printCount prints the number of pending (unread) articles for the launcher's
-// badge.
-func printCount(ctx context.Context, client *folo.Client) error {
-	arts, err := client.Unreads(ctx, true, countMax)
+// printCount prints the pending (unread) article count for the launcher's badge.
+// It uses the same fetch cap as the TUI (MaxArticles) so the badge matches what
+// you see inside; a capped result is reported as "N+".
+func printCount(ctx context.Context, client *folo.Client, cfg config.Config) error {
+	arts, err := client.Unreads(ctx, true, cfg.MaxArticles)
 	if err != nil {
 		return err
 	}
 	suffix := ""
-	if len(arts) >= countMax {
+	if len(arts) >= cfg.MaxArticles {
 		suffix = "+"
 	}
 	fmt.Printf("%d%s\n", len(arts), suffix)
