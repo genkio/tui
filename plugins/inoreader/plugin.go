@@ -15,6 +15,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/inoreader/internal/config"
 	"github.com/genkio/tui/plugins/inoreader/internal/inoreader"
 	"github.com/genkio/tui/plugins/inoreader/internal/ui"
@@ -24,6 +25,7 @@ import (
 var version = "dev"
 
 func Main() int {
+	core.LoadUserEnv()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "inoreader-tui: "+err.Error())
 		return 1

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/slack/internal/config"
 	"github.com/genkio/tui/plugins/slack/internal/mcp"
 	"github.com/genkio/tui/plugins/slack/internal/ui"
@@ -21,6 +22,7 @@ import (
 var version = "dev"
 
 func Main() int {
+	core.LoadUserEnv()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "slack-tui: "+err.Error())
 		return 1

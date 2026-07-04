@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/folo/internal/config"
 	"github.com/genkio/tui/plugins/folo/internal/folo"
 	"github.com/genkio/tui/plugins/folo/internal/ui"
@@ -25,6 +26,7 @@ import (
 var version = "dev"
 
 func Main() int {
+	core.LoadUserEnv()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "folo-tui: "+err.Error())
 		return 1

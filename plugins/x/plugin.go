@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/x/internal/config"
 	"github.com/genkio/tui/plugins/x/internal/readstore"
 	"github.com/genkio/tui/plugins/x/internal/ui"
@@ -26,6 +27,7 @@ import (
 var version = "dev"
 
 func Main() int {
+	core.LoadUserEnv()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "x-tui: "+err.Error())
 		return 1

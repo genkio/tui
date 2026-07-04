@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/folo"
 	"github.com/genkio/tui/plugins/inoreader"
 	"github.com/genkio/tui/plugins/slack"
@@ -45,58 +46,22 @@ func self() string {
 	return os.Args[0]
 }
 
-// appEnv returns the current environment with the app's .env applied on top,
-// the way `make run` sourced it, so a self-exec'd plugin still finds its session
-// vars. This bridges the pre-Homebrew layout where creds live in a per-plugin
-// .env; once creds move to the user config dir it can go.
+// appEnv is the current environment with the app's per-plugin .env applied on
+// top, for the dev/source-tree layout. A Homebrew install has no per-plugin
+// .env; there creds come from core.LoadUserEnv and are already in os.Environ().
 func appEnv(dir string) []string {
-	vars := map[string]string{}
-	var order []string
-	set := func(k, v string) {
-		if _, seen := vars[k]; !seen {
-			order = append(order, k)
-		}
-		vars[k] = v
-	}
+	env := map[string]string{}
 	for _, e := range os.Environ() {
 		if k, v, ok := strings.Cut(e, "="); ok {
-			set(k, v)
+			env[k] = v
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(dir, ".env"))
-	if err != nil {
-		return os.Environ()
+	for k, v := range core.ParseEnvFile(filepath.Join(dir, ".env")) {
+		env[k] = v
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		if k = strings.TrimSpace(k); k != "" {
-			set(k, unquoteEnv(strings.TrimSpace(v)))
-		}
-	}
-	out := make([]string, 0, len(order))
-	for _, k := range order {
-		out = append(out, k+"="+vars[k])
+	out := make([]string, 0, len(env))
+	for k, v := range env {
+		out = append(out, k+"="+v)
 	}
 	return out
-}
-
-// unquoteEnv undoes the shell single-quoting upsert-env.mjs writes
-// (export KEY='value', with an embedded ' escaped as '\''), and plain double
-// quotes, leaving bare values untouched.
-func unquoteEnv(v string) string {
-	if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
-		return strings.ReplaceAll(v[1:len(v)-1], `'\''`, `'`)
-	}
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		return v[1 : len(v)-1]
-	}
-	return v
 }

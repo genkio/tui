@@ -18,6 +18,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/genkio/tui/core"
 )
 
 type app struct {
@@ -61,6 +63,13 @@ func (a app) authed() bool {
 		}
 	}
 	present := sourcedVars(a.dir, cands)
+	// A Homebrew install has no per-plugin .env; creds are in the process env
+	// via core.LoadUserEnv. (In a dev tree, sourcedVars already covers both.)
+	for _, v := range cands {
+		if os.Getenv(v) != "" {
+			present[v] = true
+		}
+	}
 	for _, g := range a.authGroups {
 		ok := true
 		for _, v := range g {
@@ -80,6 +89,9 @@ func sourcedVars(dir string, names []string) map[string]bool {
 	out := map[string]bool{}
 	if len(names) == 0 {
 		return out
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return out // no source tree (installed binary): creds come from the env
 	}
 	var b strings.Builder
 	b.WriteString("set -a; [ -f .env ] && . ./.env; set +a; ")
@@ -634,13 +646,14 @@ func main() {
 	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
 	flag.Parse()
 
+	// Creds/settings load from ~/.config/tui/env so an installed binary needs no
+	// source tree. A dev checkout can still override per-plugin via .env (appEnv).
+	core.LoadUserEnv()
+	// root locates the dev source tree (./plugins) for the make-based auth flow;
+	// running apps and reading counts self-exec this binary and don't need it.
 	root, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())
-		os.Exit(1)
-	}
-	if _, err := os.Stat(filepath.Join(root, "plugins", "x")); err != nil {
-		fmt.Fprintln(os.Stderr, "tui: run from the repo root (no ./plugins/x here): "+err.Error())
 		os.Exit(1)
 	}
 	if _, err := tea.NewProgram(newModel(root, *poll)).Run(); err != nil {
