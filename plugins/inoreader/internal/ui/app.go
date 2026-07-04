@@ -1,5 +1,6 @@
 // Package ui implements the terminal interface: a single scrolling list of
-// unread articles (oldest first) that expand inline, plus mark-as-read.
+// unread articles (oldest first) that expand inline, plus mark-as-read. The
+// list itself is core.Feed, shared with the other apps and the merged view.
 package ui
 
 import (
@@ -14,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/inoreader/internal/config"
 	"github.com/genkio/tui/plugins/inoreader/internal/inoreader"
 )
@@ -30,7 +32,8 @@ type Model struct {
 	client *inoreader.Client
 	cfg    config.Config
 
-	feed    feedModel
+	feed    core.Feed
+	th      core.Theme
 	spinner spinner.Model
 	help    help.Model
 	keys    keyMap
@@ -46,17 +49,18 @@ type Model struct {
 }
 
 func newModel(ctx context.Context, client *inoreader.Client, cfg config.Config, refresh time.Duration) Model {
-	themeAuto := applyConfiguredTheme(cfg.Theme)
+	th, themeAuto := initialTheme(cfg.Theme)
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = spinnerStyle
+	sp.Style = th.Spinner
 
 	return Model{
 		ctx:             ctx,
 		client:          client,
 		cfg:             cfg,
-		feed:            newFeed(),
+		feed:            core.NewFeed(th, false), // single source: no per-app chip
+		th:              th,
 		spinner:         sp,
 		help:            help.New(),
 		keys:            defaultKeys(),
@@ -67,18 +71,17 @@ func newModel(ctx context.Context, client *inoreader.Client, cfg config.Config, 
 	}
 }
 
-// applyConfiguredTheme honors an explicit "light"/"dark" choice and reports
-// whether to instead auto-detect from the terminal background.
-func applyConfiguredTheme(theme string) bool {
-	switch theme {
+// initialTheme honors an explicit "light"/"dark" choice and reports whether to
+// instead auto-detect from the terminal background.
+func initialTheme(pref string) (core.Theme, bool) {
+	switch pref {
 	case "light":
-		setTheme(false)
+		return core.NewTheme(false), false
 	case "dark":
-		setTheme(true)
+		return core.NewTheme(true), false
 	default:
-		return true
+		return core.NewTheme(true), true // dark until the terminal answers
 	}
-	return false
 }
 
 func (m Model) Init() tea.Cmd {
@@ -101,8 +104,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.BackgroundColorMsg:
 		if m.themeAuto {
-			setTheme(msg.IsDark())
-			m.spinner.Style = spinnerStyle
+			m.th = core.NewTheme(msg.IsDark())
+			m.spinner.Style = m.th.Spinner
+			m.feed.SetTheme(m.th)
 		}
 		return m, nil
 
@@ -120,7 +124,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case articlesMsg:
 		m.loading = false
 		m.lastRefresh = time.Now()
-		m.feed.setArticles(msg.articles, msg.reset)
+		// A fresh fetch is the unread baseline, so the local read overlay is
+		// cleared (the server already dropped what we marked).
+		m.feed.SetItems(msg.items, msg.reset)
+		m.feed.ClearRead()
 		return m, nil
 
 	case autoRefreshMsg:
@@ -137,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Success is silent; the greyed row is the feedback. On failure, undo the
 		// optimistic grey-out and surface the error.
 		if msg.err != nil {
-			m.feed.unmarkRead(msg.id)
+			m.feed.Unmark(core.Key("inoreader", msg.id))
 			m.setStatus(friendlyError(msg.err), true)
 		}
 		return m, nil
@@ -147,7 +154,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and drop the pin so the UI doesn't promise an unread that won't survive
 		// a refresh.
 		if msg.err != nil {
-			m.feed.revertKeep(msg.id)
+			m.feed.RevertKeep(core.Key("inoreader", msg.id))
 			m.setStatus(friendlyError(msg.err), true)
 		}
 		return m, nil
@@ -174,9 +181,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.feed.vp, cmd = m.feed.vp.Update(msg)
-	return m, cmd
+	return m, m.feed.Update(msg)
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -184,12 +189,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// quits. ctrl+c always quits (handled via the Quit binding below).
 	switch msg.String() {
 	case "q":
-		if m.feed.collapseCursor() {
+		if m.feed.CollapseCursor() {
 			return m, nil
 		}
 		return m, tea.Quit
 	case "esc":
-		m.feed.collapseCursor()
+		m.feed.CollapseCursor()
 		return m, nil
 	}
 
@@ -209,7 +214,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, fetchUnreads(m.ctx, m.client, m.cfg.UnreadOnly, m.cfg.MaxArticles, true))
 
 	case key.Matches(msg, m.keys.Up):
-		if m.feed.scrollExpanded(-1) {
+		if m.feed.ScrollExpanded(-1) {
 			return m, nil
 		}
 		return m, m.moveMarkingRead(-1)
@@ -218,74 +223,59 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Inside an expanded article that overflows the viewport, j scrolls the
 		// body one line at a time; only once its tail is on screen does the
 		// cursor move on (collapsing the article).
-		if m.feed.scrollExpanded(1) {
+		if m.feed.ScrollExpanded(1) {
 			return m, nil
 		}
 		return m, m.moveMarkingRead(1)
 
 	case key.Matches(msg, m.keys.Top):
-		m.feed.toTop()
+		m.feed.ToTop()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Bottom):
-		m.feed.toBottom()
+		m.feed.ToBottom()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Expand):
-		opened := m.feed.toggleCursor()
-		a, ok := m.feed.selectedArticle()
-		if !opened || !ok || m.feed.isRead(a.ID) || m.feed.isKept(a.ID) {
+		opened := m.feed.ToggleCursor()
+		it, ok := m.feed.Selected()
+		if !opened || !ok || m.feed.IsRead(it.Key()) || m.feed.IsKept(it.Key()) {
 			return m, nil
 		}
-		m.feed.markReadLocal(a.ID)
-		return m, markRead(m.ctx, m.client, a.ID)
+		m.feed.MarkRead(it.Key())
+		return m, markRead(m.ctx, m.client, it.ID)
 
 	case key.Matches(msg, m.keys.ToggleFeed):
-		m.feed.toggleFeed()
+		m.feed.ToggleSource()
 		return m, nil
 
 	case key.Matches(msg, m.keys.OpenURL):
-		a, ok := m.feed.selectedArticle()
-		if !ok {
-			return m, nil
+		if it, ok := m.selectedURL(); ok {
+			return m, openURL(it)
 		}
-		if a.URL == "" {
-			m.setStatus("No URL for this item.", true)
-			return m, nil
-		}
-		return m, openURL(a.URL)
+		return m, nil
 
 	case key.Matches(msg, m.keys.Carbonyl), key.Matches(msg, m.keys.CarbonylGfx):
-		a, ok := m.feed.selectedArticle()
-		if !ok {
-			return m, nil
+		if u, ok := m.selectedURL(); ok {
+			return m, openCarbonyl(u, key.Matches(msg, m.keys.CarbonylGfx))
 		}
-		if a.URL == "" {
-			m.setStatus("No URL for this item.", true)
-			return m, nil
-		}
-		return m, openCarbonyl(a.URL, key.Matches(msg, m.keys.CarbonylGfx))
+		return m, nil
 
 	case key.Matches(msg, m.keys.CopyURL):
-		a, ok := m.feed.selectedArticle()
-		if !ok {
-			return m, nil
+		if u, ok := m.selectedURL(); ok {
+			return m, copyToClipboard(u)
 		}
-		if a.URL == "" {
-			m.setStatus("No URL for this item.", true)
-			return m, nil
-		}
-		return m, copyToClipboard(a.URL)
+		return m, nil
 
 	case key.Matches(msg, m.keys.Keep):
 		// Kept articles render normally (never grey); the status line is the
 		// only toggle feedback.
-		a, sel := m.feed.selectedArticle()
+		it, sel := m.feed.Selected()
 		if !sel {
 			return m, nil
 		}
-		wasRead := m.feed.isRead(a.ID)
-		if kept, _ := m.feed.toggleKeep(); !kept {
+		wasRead := m.feed.IsRead(it.Key())
+		if kept, _ := m.feed.ToggleKeep(); !kept {
 			m.setStatus("Keep removed.", false)
 			return m, nil
 		}
@@ -293,47 +283,58 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if wasRead {
 			// The grey-out already reached the server; undo it there too or the
 			// next refresh would drop the article (the pin alone is local).
-			return m, markUnread(m.ctx, m.client, a.ID)
+			return m, markUnread(m.ctx, m.client, it.ID)
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Mark):
-		a, ok := m.feed.selectedArticle()
-		if !ok || m.feed.isRead(a.ID) {
+		it, ok := m.feed.Selected()
+		if !ok || m.feed.IsRead(it.Key()) {
 			return m, nil
 		}
-		if m.feed.isKept(a.ID) {
+		if m.feed.IsKept(it.Key()) {
 			m.setStatus("Kept unread; press K to unlock first.", true)
 			return m, nil
 		}
 		m.clearStatus()
-		m.feed.markReadLocal(a.ID)
-		return m, markRead(m.ctx, m.client, a.ID)
+		m.feed.MarkRead(it.Key())
+		return m, markRead(m.ctx, m.client, it.ID)
 	}
 
-	var cmd tea.Cmd
-	m.feed.vp, cmd = m.feed.vp.Update(msg)
-	return m, cmd
+	return m, m.feed.Update(msg)
+}
+
+// selectedURL is the cursored item's URL, with a status set when it has none.
+func (m *Model) selectedURL() (string, bool) {
+	it, ok := m.feed.Selected()
+	if !ok {
+		return "", false
+	}
+	if it.URL == "" {
+		m.setStatus("No URL for this item.", true)
+		return "", false
+	}
+	return it.URL, true
 }
 
 // moveMarkingRead moves the cursor and marks the article it left read (greyed,
 // not removed), so you triage in either direction without pressing r. Kept
 // articles stay unread.
 func (m *Model) moveMarkingRead(delta int) tea.Cmd {
-	before := m.feed.cursor
-	leaving, ok := m.feed.selectedArticle()
-	m.feed.moveCursor(delta)
-	if !ok || m.feed.cursor == before || m.feed.isRead(leaving.ID) || m.feed.isKept(leaving.ID) {
+	before := m.feed.Cursor()
+	leaving, ok := m.feed.Selected()
+	m.feed.MoveCursor(delta)
+	if !ok || m.feed.Cursor() == before || m.feed.IsRead(leaving.Key()) || m.feed.IsKept(leaving.Key()) {
 		return nil
 	}
-	m.feed.markReadLocal(leaving.ID)
+	m.feed.MarkRead(leaving.Key())
 	return markRead(m.ctx, m.client, leaving.ID)
 }
 
 func (m Model) View() tea.View {
 	content := "starting…"
 	if m.width > 0 {
-		body := forceHeight(m.bodyView(), m.bodyHeight())
+		body := core.ForceHeight(m.bodyView(), m.bodyHeight())
 		parts := []string{m.headerView(), "", body, m.statusView(), m.helpView()}
 		content = strings.Join(parts, "\n")
 	}
@@ -343,12 +344,12 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) headerView() string {
-	left := headerStyle.Render("inoreader-tui")
+	left := m.th.Header.Render("inoreader-tui")
 	label := "Articles"
 	if m.cfg.UnreadOnly {
 		label = "Unread"
 	}
-	left += headerMeta.Render(fmt.Sprintf("  %s · %d", label, len(m.feed.articles)))
+	left += m.th.Meta.Render(fmt.Sprintf("  %s · %d", label, m.feed.Len()))
 
 	var meta []string
 	if m.refreshInterval > 0 {
@@ -359,7 +360,7 @@ func (m Model) headerView() string {
 	}
 	right := ""
 	if len(meta) > 0 {
-		right = headerMeta.Render(strings.Join(meta, " · "))
+		right = m.th.Meta.Render(strings.Join(meta, " · "))
 	}
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
@@ -372,10 +373,10 @@ func (m Model) headerView() string {
 func (m Model) bodyView() string {
 	h := m.bodyHeight()
 	switch {
-	case m.loading && len(m.feed.articles) == 0:
-		return center(m.spinner.View()+" "+m.loadingNote, m.width, h)
-	case len(m.feed.articles) == 0:
-		return center(emptyStyle.Render("Inbox zero. Nothing unread."), m.width, h)
+	case m.loading && m.feed.Len() == 0:
+		return core.Center(m.spinner.View()+" "+m.loadingNote, m.width, h)
+	case m.feed.Len() == 0:
+		return core.Center(m.th.Empty.Render("Inbox zero. Nothing unread."), m.width, h)
 	default:
 		return m.feed.View()
 	}
@@ -383,12 +384,12 @@ func (m Model) bodyView() string {
 
 func (m Model) statusView() string {
 	switch {
-	case m.loading && len(m.feed.articles) > 0:
-		return m.spinner.View() + " " + helpStyle.Render(m.loadingNote)
+	case m.loading && m.feed.Len() > 0:
+		return m.spinner.View() + " " + m.th.Help.Render(m.loadingNote)
 	case m.statusErr && m.status != "":
-		return statusErrStyle.Render(m.status)
+		return m.th.StatusErr.Render(m.status)
 	case m.status != "":
-		return statusInfoStyle.Render(m.status)
+		return m.th.StatusInfo.Render(m.status)
 	default:
 		return ""
 	}
@@ -406,7 +407,7 @@ func (m *Model) layout() {
 		return
 	}
 	m.help.SetWidth(m.width)
-	m.feed.setSize(m.width, m.bodyHeight())
+	m.feed.SetSize(m.width, m.bodyHeight())
 }
 
 func (m Model) bodyHeight() int {
@@ -444,20 +445,4 @@ func friendlyError(err error) string {
 		s = s[:i]
 	}
 	return s
-}
-
-func center(s string, w, h int) string {
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, s)
-}
-
-// forceHeight pads or trims s to exactly h lines so the footer stays pinned.
-func forceHeight(s string, h int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) > h {
-		lines = lines[:h]
-	}
-	for len(lines) < h {
-		lines = append(lines, "")
-	}
-	return strings.Join(lines, "\n")
 }

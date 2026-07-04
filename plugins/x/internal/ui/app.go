@@ -1,6 +1,8 @@
 // Package ui implements the terminal interface: a scrolling list of posts from
 // one home timeline (For You or Following) that expand inline, with tab to
-// switch feeds and o to open a post in the browser.
+// switch feeds and o to open a post. The list itself is core.Feed, shared with
+// the other apps and the merged view; x's local read store and unread-only
+// filter live here in the model.
 package ui
 
 import (
@@ -15,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/x/internal/config"
 	"github.com/genkio/tui/plugins/x/internal/readstore"
 	"github.com/genkio/tui/plugins/x/internal/x"
@@ -38,13 +41,14 @@ type Model struct {
 
 	tab   x.Tab
 	cache map[x.Tab][]x.Tweet // last fetched posts per tab, so switching back is instant
+	read  *readstore.Store    // persistent set of read tweet ids
 
-	read *readstore.Store // persistent set of read tweet ids; shared with feed
-
-	feed    feedModel
-	spinner spinner.Model
-	help    help.Model
-	keys    keyMap
+	feed       core.Feed
+	th         core.Theme
+	unreadOnly bool
+	spinner    spinner.Model
+	help       help.Model
+	keys       keyMap
 
 	width, height   int
 	loading         bool
@@ -58,22 +62,23 @@ type Model struct {
 }
 
 func newModel(ctx context.Context, client *x.Client, cfg config.Config, refresh time.Duration) Model {
-	themeAuto := applyConfiguredTheme(cfg.Theme)
+	th, themeAuto := initialTheme(cfg.Theme)
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = spinnerStyle
+	sp.Style = th.Spinner
 
 	tab := tabFromString(cfg.DefaultTab)
-	read := readstore.Load("")
 	return Model{
 		ctx:             ctx,
 		client:          client,
 		cfg:             cfg,
 		tab:             tab,
 		cache:           map[x.Tab][]x.Tweet{},
-		read:            read,
-		feed:            newFeed(read, cfg.UnreadOnly),
+		read:            readstore.Load(""),
+		feed:            core.NewFeed(th, false), // single source: no per-app chip
+		th:              th,
+		unreadOnly:      cfg.UnreadOnly,
 		spinner:         sp,
 		help:            help.New(),
 		keys:            defaultKeys(),
@@ -93,18 +98,17 @@ func tabFromString(s string) x.Tab {
 	}
 }
 
-// applyConfiguredTheme honors an explicit "light"/"dark" choice and reports
-// whether to instead auto-detect from the terminal background.
-func applyConfiguredTheme(theme string) bool {
-	switch theme {
+// initialTheme honors an explicit "light"/"dark" choice and reports whether to
+// instead auto-detect from the terminal background.
+func initialTheme(pref string) (core.Theme, bool) {
+	switch pref {
 	case "light":
-		setTheme(false)
+		return core.NewTheme(false), false
 	case "dark":
-		setTheme(true)
+		return core.NewTheme(true), false
 	default:
-		return true
+		return core.NewTheme(true), true // dark until the terminal answers
 	}
-	return false
 }
 
 func (m Model) Init() tea.Cmd {
@@ -118,6 +122,32 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// showTweets maps raw tweets into the feed, applying the unread-only filter and
+// reflecting the read store in the grey overlay. Marking read mid-session only
+// greys in place (see markLocal); the filter runs here, on the next fetch or a
+// view toggle, so the list never shifts under the cursor as you scroll.
+func (m *Model) showTweets(raw []x.Tweet, resetCursor bool) {
+	items := make([]core.Item, 0, len(raw))
+	for _, t := range raw {
+		if m.unreadOnly && m.read.Has(t.ID) && !m.feed.IsKept(core.Key("x", t.ID)) {
+			continue
+		}
+		items = append(items, x.ToItem(t))
+	}
+	m.feed.SetItems(items, resetCursor)
+	m.feed.ClearRead()
+	for _, it := range items {
+		if m.read.Has(it.ID) && !m.feed.IsKept(it.Key()) {
+			m.feed.MarkRead(it.Key())
+		}
+	}
+}
+
+func (m *Model) markLocal(id string) {
+	m.read.Mark(id)
+	m.feed.MarkRead(core.Key("x", id))
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -127,8 +157,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.BackgroundColorMsg:
 		if m.themeAuto {
-			setTheme(msg.IsDark())
-			m.spinner.Style = spinnerStyle
+			m.th = core.NewTheme(msg.IsDark())
+			m.spinner.Style = m.th.Spinner
+			m.feed.SetTheme(m.th)
 		}
 		return m, nil
 
@@ -148,7 +179,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastRefresh = time.Now()
 		m.cache[msg.tab] = msg.tweets
 		if msg.tab == m.tab { // a stale fetch for the other tab just updates its cache
-			m.feed.setTweets(msg.tweets, msg.reset)
+			m.showTweets(msg.tweets, msg.reset)
 		}
 		return m, nil
 
@@ -196,21 +227,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.feed.vp, cmd = m.feed.vp.Update(msg)
-	return m, cmd
+	return m, m.feed.Update(msg)
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// 'q' and esc back out of an expanded post first; 'q' on the bare list quits.
 	switch msg.String() {
 	case "q":
-		if m.feed.collapseCursor() {
+		if m.feed.CollapseCursor() {
 			return m, nil
 		}
 		return m.quit()
 	case "esc":
-		m.feed.collapseCursor()
+		m.feed.CollapseCursor()
 		return m, nil
 	}
 
@@ -240,11 +269,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, m.keys.ToggleHandle):
-		m.feed.toggleHandle()
+		m.feed.ToggleSource()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Up):
-		if m.feed.scrollExpanded(-1) {
+		if m.feed.ScrollExpanded(-1) {
 			return m, nil
 		}
 		return m, m.moveMarkingRead(-1)
@@ -253,81 +282,68 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Inside an expanded post that overflows the viewport, j scrolls the body
 		// one line at a time; only once its tail is on screen does the cursor move
 		// on (collapsing the post).
-		if m.feed.scrollExpanded(1) {
+		if m.feed.ScrollExpanded(1) {
 			return m, nil
 		}
 		return m, m.moveMarkingRead(1)
 
 	case key.Matches(msg, m.keys.Top):
-		m.feed.toTop()
+		m.feed.ToTop()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Bottom):
-		m.feed.toBottom()
+		m.feed.ToBottom()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Expand):
-		opened := m.feed.toggleCursor()
-		t, ok := m.feed.selectedTweet()
-		if !opened || !ok || m.feed.isRead(t.ID) || m.feed.isKept(t.ID) {
+		opened := m.feed.ToggleCursor()
+		it, ok := m.feed.Selected()
+		if !opened || !ok || m.feed.IsRead(it.Key()) || m.feed.IsKept(it.Key()) {
 			return m, nil
 		}
-		m.feed.markReadLocal(t.ID)
+		m.markLocal(it.ID)
 		return m, m.scheduleSave()
 
 	case key.Matches(msg, m.keys.OpenURL):
-		t, ok := m.feed.selectedTweet()
-		if !ok {
-			return m, nil
+		if u, ok := m.selectedURL(); ok {
+			return m, openURL(u)
 		}
-		if t.URL == "" {
-			m.setStatus("No URL for this post.", true)
-			return m, nil
-		}
-		return m, openURL(t.URL)
+		return m, nil
 
 	case key.Matches(msg, m.keys.Carbonyl), key.Matches(msg, m.keys.CarbonylGfx):
-		t, ok := m.feed.selectedTweet()
-		if !ok {
-			return m, nil
+		if u, ok := m.selectedURL(); ok {
+			return m, openCarbonyl(u, key.Matches(msg, m.keys.CarbonylGfx))
 		}
-		if t.URL == "" {
-			m.setStatus("No URL for this post.", true)
-			return m, nil
-		}
-		return m, openCarbonyl(t.URL, key.Matches(msg, m.keys.CarbonylGfx))
+		return m, nil
 
 	case key.Matches(msg, m.keys.CopyURL):
-		t, ok := m.feed.selectedTweet()
-		if !ok {
-			return m, nil
+		if u, ok := m.selectedURL(); ok {
+			return m, copyToClipboard(u)
 		}
-		if t.URL == "" {
-			m.setStatus("No URL for this post.", true)
-			return m, nil
-		}
-		return m, copyToClipboard(t.URL)
+		return m, nil
 
 	case key.Matches(msg, m.keys.Mark):
-		t, ok := m.feed.selectedTweet()
-		if !ok || m.feed.isRead(t.ID) {
+		it, ok := m.feed.Selected()
+		if !ok || m.feed.IsRead(it.Key()) {
 			return m, nil
 		}
-		if m.feed.isKept(t.ID) {
+		if m.feed.IsKept(it.Key()) {
 			m.setStatus("Kept unread; press K to unlock first.", true)
 			return m, nil
 		}
 		m.clearStatus()
-		m.feed.markReadLocal(t.ID)
+		m.markLocal(it.ID)
 		return m, m.scheduleSave()
 
 	case key.Matches(msg, m.keys.Keep):
 		// Kept posts render normally (never grey); the status line is the only
 		// toggle feedback. Un-keeping leaves the post unread, not read.
-		if _, sel := m.feed.selectedTweet(); !sel {
+		it, sel := m.feed.Selected()
+		if !sel {
 			return m, nil
 		}
-		if kept, _ := m.feed.toggleKeep(); kept {
+		if kept, _ := m.feed.ToggleKeep(); kept {
+			m.read.Unmark(it.ID) // pinning restores unread in the store too
 			m.setStatus("Kept unread; scrolling won't mark it read. K again to unlock.", false)
 		} else {
 			m.setStatus("Keep removed.", false)
@@ -335,7 +351,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.scheduleSave() // keep un-marks read; persist that
 
 	case key.Matches(msg, m.keys.UnreadOnly):
-		if m.feed.toggleUnreadOnly() {
+		m.unreadOnly = !m.unreadOnly
+		m.showTweets(m.cache[m.tab], false)
+		if m.unreadOnly {
 			m.setStatus("Showing unread only.", false)
 		} else {
 			m.setStatus("Showing all posts (read ones greyed).", false)
@@ -343,9 +361,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.feed.vp, cmd = m.feed.vp.Update(msg)
-	return m, cmd
+	return m, m.feed.Update(msg)
+}
+
+// selectedURL is the cursored post's URL, with a status set when it has none.
+func (m *Model) selectedURL() (string, bool) {
+	it, ok := m.feed.Selected()
+	if !ok {
+		return "", false
+	}
+	if it.URL == "" {
+		m.setStatus("No URL for this post.", true)
+		return "", false
+	}
+	return it.URL, true
 }
 
 // quit persists any pending read marks before exiting so marks made inside the
@@ -359,13 +388,13 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 // removed mid-scroll), so you triage in either direction. Kept and already-read
 // posts are left alone. Returns the save-scheduling command, if any.
 func (m *Model) moveMarkingRead(delta int) tea.Cmd {
-	before := m.feed.cursor
-	leaving, ok := m.feed.selectedTweet()
-	m.feed.moveCursor(delta)
-	if !ok || m.feed.cursor == before || m.feed.isRead(leaving.ID) || m.feed.isKept(leaving.ID) {
+	before := m.feed.Cursor()
+	leaving, ok := m.feed.Selected()
+	m.feed.MoveCursor(delta)
+	if !ok || m.feed.Cursor() == before || m.feed.IsRead(leaving.Key()) || m.feed.IsKept(leaving.Key()) {
 		return nil
 	}
-	m.feed.markReadLocal(leaving.ID)
+	m.markLocal(leaving.ID)
 	return m.scheduleSave()
 }
 
@@ -388,7 +417,7 @@ func (m Model) switchTab(to x.Tab) (tea.Model, tea.Cmd) {
 	m.tab = to
 	m.clearStatus()
 	if cached, ok := m.cache[to]; ok {
-		m.feed.setTweets(cached, true)
+		m.showTweets(cached, true)
 		return m, nil
 	}
 	m.loading = true
@@ -399,7 +428,7 @@ func (m Model) switchTab(to x.Tab) (tea.Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	content := "starting…"
 	if m.width > 0 {
-		body := forceHeight(m.bodyView(), m.bodyHeight())
+		body := core.ForceHeight(m.bodyView(), m.bodyHeight())
 		parts := []string{m.headerView(), "", body, m.statusView(), m.helpView()}
 		content = strings.Join(parts, "\n")
 	}
@@ -409,20 +438,20 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) headerView() string {
-	left := headerStyle.Render("x-tui")
+	left := m.th.Header.Render("x-tui")
 
 	foryou, following := "For You", "Following"
 	if m.tab == x.ForYou {
-		foryou, following = titleSelStyle.Render(foryou), headerMeta.Render(following)
+		foryou, following = m.th.TitleSel.Render(foryou), m.th.Meta.Render(following)
 	} else {
-		foryou, following = headerMeta.Render(foryou), titleSelStyle.Render(following)
+		foryou, following = m.th.Meta.Render(foryou), m.th.TitleSel.Render(following)
 	}
-	left += "  " + foryou + headerMeta.Render(" · ") + following
+	left += "  " + foryou + m.th.Meta.Render(" · ") + following
 	mode := "all"
-	if m.feed.unreadOnly {
+	if m.unreadOnly {
 		mode = "unread"
 	}
-	left += headerMeta.Render(fmt.Sprintf("  %s · %d", mode, len(m.feed.tweets)))
+	left += m.th.Meta.Render(fmt.Sprintf("  %s · %d", mode, m.feed.Len()))
 
 	var meta []string
 	if m.refreshInterval > 0 {
@@ -433,7 +462,7 @@ func (m Model) headerView() string {
 	}
 	right := ""
 	if len(meta) > 0 {
-		right = headerMeta.Render(strings.Join(meta, " · "))
+		right = m.th.Meta.Render(strings.Join(meta, " · "))
 	}
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
@@ -446,10 +475,10 @@ func (m Model) headerView() string {
 func (m Model) bodyView() string {
 	h := m.bodyHeight()
 	switch {
-	case m.loading && len(m.feed.tweets) == 0:
-		return center(m.spinner.View()+" "+m.loadingNote, m.width, h)
-	case len(m.feed.tweets) == 0:
-		return center(emptyStyle.Render("Timeline empty."), m.width, h)
+	case m.loading && m.feed.Len() == 0:
+		return core.Center(m.spinner.View()+" "+m.loadingNote, m.width, h)
+	case m.feed.Len() == 0:
+		return core.Center(m.th.Empty.Render("Timeline empty."), m.width, h)
 	default:
 		return m.feed.View()
 	}
@@ -457,12 +486,12 @@ func (m Model) bodyView() string {
 
 func (m Model) statusView() string {
 	switch {
-	case m.loading && len(m.feed.tweets) > 0:
-		return m.spinner.View() + " " + helpStyle.Render(m.loadingNote)
+	case m.loading && m.feed.Len() > 0:
+		return m.spinner.View() + " " + m.th.Help.Render(m.loadingNote)
 	case m.statusErr && m.status != "":
-		return statusErrStyle.Render(m.status)
+		return m.th.StatusErr.Render(m.status)
 	case m.status != "":
-		return statusInfoStyle.Render(m.status)
+		return m.th.StatusInfo.Render(m.status)
 	default:
 		return ""
 	}
@@ -480,7 +509,7 @@ func (m *Model) layout() {
 		return
 	}
 	m.help.SetWidth(m.width)
-	m.feed.setSize(m.width, m.bodyHeight())
+	m.feed.SetSize(m.width, m.bodyHeight())
 }
 
 func (m Model) bodyHeight() int {
@@ -518,20 +547,4 @@ func friendlyError(err error) string {
 		s = s[:i]
 	}
 	return s
-}
-
-func center(s string, w, h int) string {
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, s)
-}
-
-// forceHeight pads or trims s to exactly h lines so the footer stays pinned.
-func forceHeight(s string, h int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) > h {
-		lines = lines[:h]
-	}
-	for len(lines) < h {
-		lines = append(lines, "")
-	}
-	return strings.Join(lines, "\n")
 }

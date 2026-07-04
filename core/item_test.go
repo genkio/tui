@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"testing"
@@ -63,11 +63,11 @@ func TestMergeSortMixed(t *testing.T) {
 		{"app":"folo","id":"c","title":"folo 2h ago","ts":"2026-07-03T10:00:00Z"},
 		{"app":"inoreader","id":"d","title":"ino no time","age":"Jul 1"}
 	]`)
-	items, err := parseItems(out, now)
+	items, err := ParseItems(out, now)
 	if err != nil {
-		t.Fatalf("parseItems: %v", err)
+		t.Fatalf("ParseItems: %v", err)
 	}
-	mergeSort(items)
+	MergeSort(items)
 
 	gotOrder := make([]string, len(items))
 	for i, it := range items {
@@ -84,9 +84,9 @@ func TestMergeSortMixed(t *testing.T) {
 
 func TestItemKeyDistinguishesApps(t *testing.T) {
 	// The same numeric id from two services must not collide.
-	a := item{App: "x", ID: "123"}
-	b := item{App: "folo", ID: "123"}
-	if a.key() == b.key() {
-		t.Errorf("keys collided across apps: %q", a.key())
+	a := Item{App: "x", ID: "123"}
+	b := Item{App: "folo", ID: "123"}
+	if a.Key() == b.Key() {
+		t.Errorf("keys collided across apps: %q", a.Key())
 	}
 }

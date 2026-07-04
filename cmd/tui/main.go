@@ -118,7 +118,8 @@ type execDoneMsg struct {
 }
 
 func runApp(a app) tea.Cmd {
-	cmd := exec.Command("make", "-C", a.dir, "run")
+	cmd := exec.Command(self(), a.name)
+	cmd.Env = appEnv(a.dir)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{a.name, "run", err} })
 }
 
@@ -158,7 +159,9 @@ func fetchCount(a app) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "make", "-C", dir, "count").Output()
+		cmd := exec.CommandContext(ctx, self(), name, "--count")
+		cmd.Env = appEnv(dir)
+		out, err := cmd.Output()
 		if err != nil {
 			return countMsg{name: name, err: true}
 		}
@@ -444,7 +447,7 @@ func (m model) updateAll(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.all.flushNow()
 			return m, tea.Quit
 		case "q", "esc":
-			if m.all.feed.collapseCursor() {
+			if m.all.feed.CollapseCursor() {
 				return m, nil
 			}
 			return m.leaveAll()
@@ -618,6 +621,9 @@ var (
 )
 
 func main() {
+	// `tui x`, `tui inoreader`, ... run that app in this same binary and exit.
+	runPluginIfRequested()
+
 	// Default 5m, overridable by TUI_POLL (env) then --poll (flag). 0 disables.
 	interval := 5 * time.Minute
 	if v := os.Getenv("TUI_POLL"); v != "" {

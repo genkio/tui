@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"encoding/json"
@@ -9,53 +9,58 @@ import (
 	"time"
 )
 
-// item is one unread entry in the "all" timeline, normalized from any app's
-// --json output. key uniquely identifies it across apps (ids collide between
-// services, e.g. a numeric inoreader id and an x tweet id).
-type item struct {
+// Item is one unread entry, normalized from any app's data so the per-app feeds
+// and the merged "all" feed render through the same widget. Key uniquely
+// identifies it across apps, since ids collide between services (a numeric
+// inoreader id and an x tweet id).
+type Item struct {
 	App    string
 	ID     string
 	Title  string
 	Body   string
-	Source string
+	Source string // @handle for x; a feed title in the readers
 	Author string
 	URL    string
 	Age    string
-	sortAt time.Time // publish time for the merged sort; zero sinks to the bottom
+	At     time.Time // publish time for the merged sort; zero sinks to the bottom
 }
 
-func (it item) key() string { return it.App + "\x00" + it.ID }
+func (it Item) Key() string { return Key(it.App, it.ID) }
 
-// wire mirrors the dumpItem shape every app prints; kept private so the app
-// modules and the launcher can evolve their own copies independently.
-type wire struct {
+// Key is an item's feed identity. Callers that hold only an app+id (e.g. a
+// mark-read result) build the same key to address the row.
+func Key(app, id string) string { return app + "\x00" + id }
+
+// Wire mirrors the JSON an app prints for --json; the launcher parses it back
+// into Items when it aggregates a plugin's output.
+type Wire struct {
 	App    string `json:"app"`
 	ID     string `json:"id"`
 	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Source string `json:"source"`
-	Author string `json:"author"`
-	URL    string `json:"url"`
-	Age    string `json:"age"`
-	TS     string `json:"ts"`
+	Body   string `json:"body,omitempty"`
+	Source string `json:"source,omitempty"`
+	Author string `json:"author,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Age    string `json:"age,omitempty"`
+	TS     string `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
 }
 
-// parseItems reads an app's --json output into items, deriving each one's sort
+// ParseItems reads an app's --json output into Items, deriving each one's sort
 // time from its absolute ts when present, else from its relative age. now is
 // threaded in (not time.Now) so a whole fetch shares one clock and tests are
 // deterministic. Any noise around the JSON array (build chatter) is tolerated.
-func parseItems(out []byte, now time.Time) ([]item, error) {
+func ParseItems(out []byte, now time.Time) ([]Item, error) {
 	raw := extractJSONArray(out)
 	if raw == nil {
 		return nil, nil
 	}
-	var ws []wire
+	var ws []Wire
 	if err := json.Unmarshal(raw, &ws); err != nil {
 		return nil, err
 	}
-	items := make([]item, 0, len(ws))
+	items := make([]Item, 0, len(ws))
 	for _, w := range ws {
-		items = append(items, item{
+		items = append(items, Item{
 			App:    w.App,
 			ID:     w.ID,
 			Title:  w.Title,
@@ -64,7 +69,7 @@ func parseItems(out []byte, now time.Time) ([]item, error) {
 			Author: w.Author,
 			URL:    w.URL,
 			Age:    w.Age,
-			sortAt: sortTime(w.TS, w.Age, now),
+			At:     SortTime(w.TS, w.Age, now),
 		})
 	}
 	return items, nil
@@ -99,10 +104,10 @@ func lastIndexByte(b []byte, c byte) int {
 	return -1
 }
 
-// sortTime resolves an item's position on the merged timeline: the exact ts if
-// the app gave one, else now minus its parsed relative age (Inoreader only
-// exposes "2h"-style ages), else the zero time so it sorts last.
-func sortTime(ts, age string, now time.Time) time.Time {
+// SortTime resolves an item's position on the merged timeline: the exact ts if
+// the app gave one, else now minus its parsed relative age (Inoreader exposes
+// only "2h"-style ages), else the zero time so it sorts last.
+func SortTime(ts, age string, now time.Time) time.Time {
 	if ts != "" {
 		if t, err := time.Parse(time.RFC3339, ts); err == nil {
 			return t.UTC()
@@ -155,11 +160,11 @@ func ageToDuration(age string) (time.Duration, bool) {
 	return 0, false
 }
 
-// mergeSort orders the combined feed newest first. Items without a resolvable
+// MergeSort orders the combined feed newest first. Items without a resolvable
 // time keep to the bottom in their original per-app order (a stable sort).
-func mergeSort(items []item) {
+func MergeSort(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
-		a, b := items[i].sortAt, items[j].sortAt
+		a, b := items[i].At, items[j].At
 		switch {
 		case a.IsZero() && b.IsZero():
 			return false

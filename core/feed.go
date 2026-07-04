@@ -1,9 +1,10 @@
-package main
+package core
 
 import (
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -14,13 +15,16 @@ const (
 	srcCol  = 16
 )
 
-// feed renders the merged "all" timeline as one scrolling list (newest first).
-// A cursor selects a row; expanding it shows the body and link inline. Because
-// the underlying items are already the unread set, reading is tracked in place:
-// a row you scroll past, expand, or mark greys out but stays put until the next
-// refresh drops it.
-type feed struct {
-	items    []item
+// Feed is the scrolling list shared by every app and the merged "all" view: a
+// cursor selects a row, expanding it shows the body and link inline. The items
+// are already the unread set, so reading is tracked in place: a row you scroll
+// past, expand, or mark greys out but stays put until the next refresh drops
+// it. ShowChip draws the per-source tag (𝕏/ino/folo) for the merged view; a
+// single-source app leaves it off.
+type Feed struct {
+	ShowChip bool
+
+	items    []Item
 	expanded map[string]bool // item key -> body shown
 	read     map[string]bool // item key -> greyed read this session
 	kept     map[string]bool // item key -> pinned unread this session
@@ -32,13 +36,14 @@ type feed struct {
 	total  int
 
 	vp     viewport.Model
-	th     theme
+	th     Theme
 	width  int
 	height int
 }
 
-func newFeed(th theme) feed {
-	return feed{
+func NewFeed(th Theme, showChip bool) Feed {
+	return Feed{
+		ShowChip: showChip,
 		expanded: map[string]bool{},
 		read:     map[string]bool{},
 		kept:     map[string]bool{},
@@ -48,45 +53,83 @@ func newFeed(th theme) feed {
 	}
 }
 
-// setItems replaces the list, jumping back to the newest row and collapsing
-// everything (a fetch or manual refresh always resets the view).
-func (f *feed) setItems(items []item) {
+// SetItems replaces the list. resetCursor jumps back to the top and collapses
+// everything (a manual refresh wants this; a background auto-refresh keeps the
+// reader's position). The read overlay is left alone; call ClearRead when a
+// fetch is a fresh unread baseline.
+func (f *Feed) SetItems(items []Item, resetCursor bool) {
 	f.items = items
-	f.expanded = map[string]bool{}
-	f.kept = map[string]bool{}
-	f.cursor = 0
-	f.yoff = 0
+	if resetCursor {
+		f.expanded = map[string]bool{}
+		f.kept = map[string]bool{}
+		f.cursor = 0
+		f.yoff = 0
+	}
 	f.clampCursor()
 	f.render()
 }
 
-func (f *feed) setTheme(th theme) { f.th = th; f.render() }
+// ClearRead drops the greyed-read overlay, for when a fresh fetch is the new
+// unread baseline (the server already dropped what we marked).
+func (f *Feed) ClearRead() { f.read = map[string]bool{}; f.render() }
 
-func (f *feed) toggleSource() { f.showSrc = !f.showSrc; f.render() }
+// SetBody replaces one item's body in place, for a body fetched lazily after
+// the list loaded (folo). Cursor and scroll are untouched.
+func (f *Feed) SetBody(key, body string) {
+	for i := range f.items {
+		if f.items[i].Key() == key {
+			f.items[i].Body = body
+			f.render()
+			return
+		}
+	}
+}
 
-func (f *feed) setSize(w, h int) {
+func (f *Feed) SetTheme(th Theme) { f.th = th; f.render() }
+
+func (f *Feed) ToggleSource() { f.showSrc = !f.showSrc; f.render() }
+
+func (f *Feed) SetSize(w, h int) {
 	f.width, f.height = w, h
 	f.vp.SetWidth(w)
 	f.vp.SetHeight(h)
 	f.render()
 }
 
-func (f *feed) markRead(key string) { f.read[key] = true; f.render() }
+func (f *Feed) MarkRead(key string) { f.read[key] = true; f.render() }
 
-func (f feed) isRead(key string) bool { return f.read[key] && !f.kept[key] }
+// Unmark undoes a mark whose persist failed (or an optimistic mark the caller
+// revokes), so the row returns to unread.
+func (f *Feed) Unmark(key string) { delete(f.read, key); f.render() }
 
-func (f feed) isKept(key string) bool { return f.kept[key] }
+// RevertKeep drops a keep pin and greys the row back, for when the server
+// refused the mark-unread that a keep on an already-read row requires: the UI
+// shouldn't promise an unread that won't survive the next refresh.
+func (f *Feed) RevertKeep(key string) { delete(f.kept, key); f.read[key] = true; f.render() }
 
-// toggleKeep pins the cursored row unread (and back). Pinning also un-greys it
+func (f Feed) IsRead(key string) bool { return f.read[key] && !f.kept[key] }
+
+func (f Feed) IsKept(key string) bool { return f.kept[key] }
+
+func (f Feed) IsExpanded(key string) bool { return f.expanded[key] }
+
+func (f Feed) Cursor() int { return f.cursor }
+
+func (f Feed) Len() int { return len(f.items) }
+
+// Items is the currently displayed slice (read-only); callers must not mutate.
+func (f Feed) Items() []Item { return f.items }
+
+// ToggleKeep pins the cursored row unread (and back). Pinning also un-greys it
 // so scrolling won't re-mark it read; the caller cancels any queued store mark.
 // The pin lasts until the next refresh. Reports the new state, false ok when
 // nothing is selected.
-func (f *feed) toggleKeep() (kept, ok bool) {
-	it, sel := f.selected()
+func (f *Feed) ToggleKeep() (kept, ok bool) {
+	it, sel := f.Selected()
 	if !sel {
 		return false, false
 	}
-	k := it.key()
+	k := it.Key()
 	if f.kept[k] {
 		delete(f.kept, k)
 	} else {
@@ -97,7 +140,7 @@ func (f *feed) toggleKeep() (kept, ok bool) {
 	return f.kept[k], true
 }
 
-func (f *feed) moveCursor(delta int) {
+func (f *Feed) MoveCursor(delta int) {
 	if len(f.items) == 0 {
 		return
 	}
@@ -108,14 +151,14 @@ func (f *feed) moveCursor(delta int) {
 	f.render()
 }
 
-func (f *feed) toTop() {
+func (f *Feed) ToTop() {
 	old := f.cursor
 	f.cursor = 0
 	f.leaveExpanded(old)
 	f.render()
 }
 
-func (f *feed) toBottom() {
+func (f *Feed) ToBottom() {
 	old := f.cursor
 	f.cursor = len(f.items) - 1
 	f.clampCursor()
@@ -125,14 +168,14 @@ func (f *feed) toBottom() {
 
 // leaveExpanded collapses row i once the cursor moves off it, so only the
 // cursored row stays open.
-func (f *feed) leaveExpanded(i int) {
+func (f *Feed) leaveExpanded(i int) {
 	if i == f.cursor || i < 0 || i >= len(f.items) {
 		return
 	}
-	delete(f.expanded, f.items[i].key())
+	delete(f.expanded, f.items[i].Key())
 }
 
-func (f *feed) clampCursor() {
+func (f *Feed) clampCursor() {
 	if f.cursor >= len(f.items) {
 		f.cursor = len(f.items) - 1
 	}
@@ -141,40 +184,47 @@ func (f *feed) clampCursor() {
 	}
 }
 
-func (f feed) selected() (item, bool) {
+func (f Feed) Selected() (Item, bool) {
 	if f.cursor < 0 || f.cursor >= len(f.items) {
-		return item{}, false
+		return Item{}, false
 	}
 	return f.items[f.cursor], true
 }
 
-// toggleCursor expands or collapses the cursored row, reporting whether it
+// ToggleCursor expands or collapses the cursored row, reporting whether it
 // ended up expanded (false also when nothing is selected).
-func (f *feed) toggleCursor() bool {
-	it, ok := f.selected()
+func (f *Feed) ToggleCursor() bool {
+	it, ok := f.Selected()
 	if !ok {
 		return false
 	}
-	f.expanded[it.key()] = !f.expanded[it.key()]
+	f.expanded[it.Key()] = !f.expanded[it.Key()]
 	f.render()
-	return f.expanded[it.key()]
+	return f.expanded[it.Key()]
 }
 
-// collapseCursor collapses the cursored row if expanded, reporting whether it
+// CollapseCursor collapses the cursored row if expanded, reporting whether it
 // did, so esc backs out of an expansion.
-func (f *feed) collapseCursor() bool {
-	it, ok := f.selected()
-	if !ok || !f.expanded[it.key()] {
+func (f *Feed) CollapseCursor() bool {
+	it, ok := f.Selected()
+	if !ok || !f.expanded[it.Key()] {
 		return false
 	}
-	delete(f.expanded, it.key())
+	delete(f.expanded, it.Key())
 	f.render()
 	return true
 }
 
-func (f feed) View() string { return f.vp.View() }
+func (f Feed) View() string { return f.vp.View() }
 
-func (f *feed) render() {
+// Update forwards a message to the inner viewport (mouse wheel, etc.).
+func (f *Feed) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	f.vp, cmd = f.vp.Update(msg)
+	return cmd
+}
+
+func (f *Feed) render() {
 	if f.width <= 0 {
 		return
 	}
@@ -182,8 +232,8 @@ func (f *feed) render() {
 	f.starts = make([]int, len(f.items))
 	for i, it := range f.items {
 		f.starts[i] = len(lines)
-		expanded := f.expanded[it.key()]
-		lines = append(lines, f.renderItem(it, i == f.cursor, expanded, f.isRead(it.key()))...)
+		expanded := f.expanded[it.Key()]
+		lines = append(lines, f.renderItem(it, i == f.cursor, expanded, f.IsRead(it.Key()))...)
 		if expanded {
 			lines = append(lines, "")
 		}
@@ -193,44 +243,48 @@ func (f *feed) render() {
 	f.scrollToCursor()
 }
 
-func (f feed) renderItem(it item, selected, expanded, read bool) []string {
+func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 	th := f.th
 	gutter := "  "
 	if selected {
-		gutter = th.selGutter.Render("▌ ")
+		gutter = th.SelGutter.Render("▌ ")
 	}
 
-	chip := th.chip(it.App)
-	if read { // a greyed row dims everything, chip included
-		chip = th.read.Render(plainChipLabel(it.App))
+	chipSeg, chipSegW := "", 0
+	if f.ShowChip {
+		chip := th.Chip(it.App)
+		if read { // a greyed row dims everything, chip included
+			chip = th.Read.Render(PlainChip(it.App))
+		}
+		chipSeg = chip + strings.Repeat(" ", max(1, chipCol-lipgloss.Width(chip)))
+		chipSegW = lipgloss.Width(chipSeg)
 	}
-	chipSeg := chip + strings.Repeat(" ", max(1, chipCol-lipgloss.Width(chip)))
 
 	srcSeg, srcSegW := "", 0
-	if f.showSrc {
-		srcSt := th.source
+	if f.showSrc && it.Source != "" {
+		srcSt := th.Source
 		if read {
-			srcSt = th.read
+			srcSt = th.Read
 		}
 		src := padRight(truncate(it.Source, srcCol), srcCol)
 		srcSeg = srcSt.Render(src) + " "
 		srcSegW = lipgloss.Width(srcSeg)
 	}
 
-	age := th.time.Render(it.Age)
+	age := th.Time.Render(it.Age)
 	if read {
-		age = th.read.Render(it.Age)
+		age = th.Read.Render(it.Age)
 	}
 
-	titleSt := th.title
+	titleSt := th.Title
 	switch {
 	case read:
-		titleSt = th.read
+		titleSt = th.Read
 	case selected:
-		titleSt = th.titleSel
+		titleSt = th.TitleSel
 	}
 
-	fixed := lipgloss.Width(gutter) + lipgloss.Width(chipSeg) + srcSegW + 1 + lipgloss.Width(age)
+	fixed := lipgloss.Width(gutter) + chipSegW + srcSegW + 1 + lipgloss.Width(age)
 	avail := f.width - fixed
 	if avail < 8 {
 		avail = 8
@@ -241,7 +295,7 @@ func (f feed) renderItem(it item, selected, expanded, read bool) []string {
 	}
 	title := titleSt.Render(truncate(oneLine, avail))
 
-	used := lipgloss.Width(gutter) + lipgloss.Width(chipSeg) + srcSegW + lipgloss.Width(title) + lipgloss.Width(age)
+	used := lipgloss.Width(gutter) + chipSegW + srcSegW + lipgloss.Width(title) + lipgloss.Width(age)
 	pad := f.width - used
 	if pad < 1 {
 		pad = 1
@@ -255,41 +309,51 @@ func (f feed) renderItem(it item, selected, expanded, read bool) []string {
 	return lines
 }
 
-func (f feed) renderBody(it item) []string {
+func (f Feed) renderBody(it Item) []string {
 	th := f.th
 	textWidth := f.width - 4
 	if textWidth < 10 {
 		textWidth = 10
 	}
 
-	byline := th.chip(it.App)
+	var byline string
+	if f.ShowChip {
+		byline = th.Chip(it.App)
+	}
 	if it.Source != "" {
-		byline += "  " + th.source.Render(it.Source)
+		if byline != "" {
+			byline += "  "
+		}
+		byline += th.Source.Render(it.Source)
 	}
 	if it.Author != "" && it.Author != it.Source {
-		byline += th.time.Render("  · " + it.Author)
+		byline += th.Time.Render("  · " + it.Author)
 	}
-	lines := []string{"", "    " + byline, ""}
+	lines := []string{""}
+	if strings.TrimSpace(byline) != "" {
+		lines = append(lines, "    "+byline)
+	}
+	lines = append(lines, "")
 
 	body := it.Body
 	if strings.TrimSpace(body) == "" {
 		body = it.Title
 	}
 	if strings.TrimSpace(body) == "" {
-		lines = append(lines, "    "+th.empty.Render("(no text; press o to read in carbonyl, b for browser)"))
+		lines = append(lines, "    "+th.Empty.Render("(no text; press o to read in carbonyl, b for browser)"))
 	} else {
 		for _, ln := range wrapText(body, textWidth) {
-			lines = append(lines, "    "+th.text.Render(ln))
+			lines = append(lines, "    "+th.Text.Render(ln))
 		}
 	}
 	if it.URL != "" {
-		lines = append(lines, "", "    "+th.link.Render(it.URL))
+		lines = append(lines, "", "    "+th.Link.Render(it.URL))
 	}
 	return lines
 }
 
 // cursorBlock returns the first and last rendered line of the selected row.
-func (f feed) cursorBlock() (top, bottom int) {
+func (f Feed) cursorBlock() (top, bottom int) {
 	top = f.starts[f.cursor]
 	bottom = f.total - 1
 	if f.cursor+1 < len(f.starts) {
@@ -298,13 +362,13 @@ func (f feed) cursorBlock() (top, bottom int) {
 	return top, bottom
 }
 
-// scrollExpanded consumes one down/up press as line scrolling inside the
+// ScrollExpanded consumes one down/up press as line scrolling inside the
 // expanded selected row while its body overflows the viewport. Reports false
 // when the body is already fully on screen (or not expanded), meaning the
 // cursor should move instead.
-func (f *feed) scrollExpanded(delta int) bool {
-	it, ok := f.selected()
-	if !ok || !f.expanded[it.key()] || len(f.starts) == 0 {
+func (f *Feed) ScrollExpanded(delta int) bool {
+	it, ok := f.Selected()
+	if !ok || !f.expanded[it.Key()] || len(f.starts) == 0 {
 		return false
 	}
 	top, bottom := f.cursorBlock()
@@ -325,7 +389,7 @@ func (f *feed) scrollExpanded(delta int) bool {
 
 // scrollToCursor clamps the viewport so the selected row stays visible, keeping
 // a fully-fitting selection on screen and letting a taller one scroll.
-func (f *feed) scrollToCursor() {
+func (f *Feed) scrollToCursor() {
 	if len(f.starts) == 0 {
 		f.yoff = 0
 		f.vp.SetYOffset(0)
@@ -351,13 +415,6 @@ func (f *feed) scrollToCursor() {
 	}
 	f.yoff = off
 	f.vp.SetYOffset(off)
-}
-
-func plainChipLabel(app string) string {
-	if l := map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo"}[app]; l != "" {
-		return l
-	}
-	return app
 }
 
 func padRight(s string, w int) string {
@@ -428,12 +485,12 @@ func wrapText(s string, width int) []string {
 	return out
 }
 
-func center(s string, w, h int) string {
+func Center(s string, w, h int) string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, s)
 }
 
-// forceHeight pads or trims s to exactly h lines so the footer stays pinned.
-func forceHeight(s string, h int) string {
+// ForceHeight pads or trims s to exactly h lines so a footer stays pinned.
+func ForceHeight(s string, h int) string {
 	lines := strings.Split(s, "\n")
 	if len(lines) > h {
 		lines = lines[:h]

@@ -1,6 +1,10 @@
 package ui
 
-import "charm.land/lipgloss/v2"
+import (
+	"charm.land/lipgloss/v2"
+
+	"github.com/genkio/tui/core"
+)
 
 // Styles are package globals rebuilt by setTheme once the terminal reports its
 // background color, so the same palette reads well on light and dark terminals.
@@ -21,14 +25,11 @@ func init() { setTheme(true) }
 // terminal's own foreground, which is legible on the user's background by
 // definition; only accents and dimmed shades adapt to light vs dark.
 func setTheme(isDark bool) {
+	p := core.NewPalette(isDark)
+	accent, green, red, subtle, faint := p.Accent, p.Green, p.Red, p.Subtle, p.Faint
 	pick := lipgloss.LightDark(isDark)
-	accent := pick(lipgloss.Color("26"), lipgloss.Color("39"))
 	magenta := pick(lipgloss.Color("125"), lipgloss.Color("212"))
-	green := pick(lipgloss.Color("29"), lipgloss.Color("42"))
-	red := pick(lipgloss.Color("124"), lipgloss.Color("203"))
 	yellow := pick(lipgloss.Color("130"), lipgloss.Color("221"))
-	subtle := pick(lipgloss.Color("240"), lipgloss.Color("245"))
-	faint := pick(lipgloss.Color("243"), lipgloss.Color("240"))
 
 	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	headerMeta = lipgloss.NewStyle().Foreground(faint)

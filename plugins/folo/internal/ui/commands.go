@@ -2,22 +2,19 @@ package ui
 
 import (
 	"context"
-	"encoding/base64"
-	"os"
-	"os/exec"
-	"runtime"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/folo/internal/folo"
 )
 
 // Messages flowing back into the update loop from background API calls.
 type (
 	articlesMsg struct {
-		articles []folo.Article
-		reset    bool // jump cursor to the top (manual refresh / first load), vs keep position
+		items []core.Item
+		reset bool // jump cursor to the top (manual refresh / first load), vs keep position
 	}
 	contentMsg struct {
 		id   string
@@ -46,7 +43,7 @@ func fetchUnreads(ctx context.Context, c *folo.Client, unreadOnly bool, max int,
 		if err != nil {
 			return errMsg{err}
 		}
-		return articlesMsg{articles: arts, reset: reset}
+		return articlesMsg{items: folo.ToItems(arts), reset: reset}
 	}
 }
 
@@ -84,7 +81,7 @@ func scheduleRefresh(d time.Duration) tea.Cmd {
 
 func openURL(url string) tea.Cmd {
 	return func() tea.Msg {
-		if err := openInBrowser(url); err != nil {
+		if err := core.OpenInBrowser(url); err != nil {
 			return errMsg{err}
 		}
 		return openedMsg{}
@@ -93,28 +90,9 @@ func openURL(url string) tea.Cmd {
 
 func copyToClipboard(s string) tea.Cmd {
 	return func() tea.Msg {
-		seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(s)) + "\a"
-		// tmux doesn't forward an app's bare OSC52 to the outer terminal; wrap it
-		// in DCS passthrough (needs allow-passthrough on) so tmux re-emits it.
-		if os.Getenv("TMUX") != "" {
-			seq = "\x1bPtmux;\x1b" + seq + "\x1b\\"
-		}
-		if _, err := os.Stdout.WriteString(seq); err != nil {
+		if err := core.CopyOSC52(s); err != nil {
 			return errMsg{err}
 		}
 		return copiedMsg{}
-	}
-}
-
-func openInBrowser(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Run()
-	case "windows":
-		// The empty "" is start's window-title argument; without it a quoted URL
-		// is mistaken for the title and nothing opens.
-		return exec.Command("cmd", "/c", "start", "", url).Run()
-	default:
-		return exec.Command("xdg-open", url).Run()
 	}
 }

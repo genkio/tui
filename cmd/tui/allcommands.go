@@ -2,21 +2,20 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/genkio/tui/core"
 )
 
 // Messages flowing back into the "all" screen's update loop.
 type (
 	allItemsMsg struct {
-		items []item
+		items []core.Item
 		note  string // non-fatal trouble, e.g. "couldn't load: folo"
 	}
 	markFlushedMsg struct {
@@ -44,7 +43,7 @@ func fetchAll(root string, apps []string) tea.Cmd {
 		now := time.Now()
 		type res struct {
 			app   string
-			items []item
+			items []core.Item
 			err   error
 		}
 		ch := make(chan res, len(apps))
@@ -52,16 +51,18 @@ func fetchAll(root string, apps []string) tea.Cmd {
 			go func(app string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 				defer cancel()
-				out, err := exec.CommandContext(ctx, "make", "-C", filepath.Join(root, "plugins", app), "json").Output()
+				cmd := exec.CommandContext(ctx, self(), app, "--json")
+				cmd.Env = appEnv(filepath.Join(root, "plugins", app))
+				out, err := cmd.Output()
 				if err != nil {
 					ch <- res{app: app, err: err}
 					return
 				}
-				items, perr := parseItems(out, now)
+				items, perr := core.ParseItems(out, now)
 				ch <- res{app: app, items: items, err: perr}
 			}(app)
 		}
-		var all []item
+		var all []core.Item
 		var failed []string
 		for range apps {
 			r := <-ch
@@ -71,7 +72,7 @@ func fetchAll(root string, apps []string) tea.Cmd {
 			}
 			all = append(all, r.items...)
 		}
-		mergeSort(all)
+		core.MergeSort(all)
 		note := ""
 		if len(failed) > 0 {
 			note = "couldn't load: " + strings.Join(failed, ", ")
@@ -96,7 +97,8 @@ func runMarkRead(root, app string, ids []string, timeout time.Duration) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "make", "-C", filepath.Join(root, "plugins", app), "mark-read")
+	cmd := exec.CommandContext(ctx, self(), app, "--mark-read")
+	cmd.Env = appEnv(filepath.Join(root, "plugins", app))
 	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
 	return cmd.Run()
 }
@@ -107,7 +109,7 @@ func scheduleFlush() tea.Cmd {
 
 func openURL(url string) tea.Cmd {
 	return func() tea.Msg {
-		if err := openInBrowser(url); err != nil {
+		if err := core.OpenInBrowser(url); err != nil {
 			return errMsg{err}
 		}
 		return openedMsg{}
@@ -116,26 +118,9 @@ func openURL(url string) tea.Cmd {
 
 func copyToClipboard(s string) tea.Cmd {
 	return func() tea.Msg {
-		seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(s)) + "\a"
-		// tmux doesn't forward an app's bare OSC52 to the outer terminal; wrap it
-		// in DCS passthrough (needs allow-passthrough on) so tmux re-emits it.
-		if os.Getenv("TMUX") != "" {
-			seq = "\x1bPtmux;\x1b" + seq + "\x1b\\"
-		}
-		if _, err := os.Stdout.WriteString(seq); err != nil {
+		if err := core.CopyOSC52(s); err != nil {
 			return errMsg{err}
 		}
 		return copiedMsg{}
-	}
-}
-
-func openInBrowser(url string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("open", url).Run()
-	case "windows":
-		return exec.Command("cmd", "/c", "start", "", url).Run()
-	default:
-		return exec.Command("xdg-open", url).Run()
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/genkio/tui/core"
 )
 
 // allModel is the "all" timeline screen: a merged, time-sorted feed of every
@@ -17,14 +19,14 @@ import (
 // standalone apps. It is driven by the launcher's top-level model, which owns
 // the home/all screen switch and decides which apps qualify (see app.feed).
 type allModel struct {
-	root string   // repo root; apps run via `make -C plugins/<app>`
+	root string   // repo root; used to load each plugin's .env for the self-exec'd data commands
 	apps []string // authed feed apps this screen fetches, set on enter
 
-	feed    feed
+	feed    core.Feed
 	spinner spinner.Model
 	help    help.Model
 	keys    allKeyMap
-	th      theme
+	th      core.Theme
 
 	pending    map[string][]string // app -> ids marked read, awaiting a flush
 	flushArmed bool
@@ -39,14 +41,14 @@ type allModel struct {
 }
 
 func newAllModel(root string) allModel {
-	th := newTheme(true) // dark until the terminal answers the background query
+	th := core.NewTheme(true) // dark until the terminal answers the background query
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = th.spinner
+	sp.Style = th.Spinner
 	return allModel{
 		root:    root,
 		th:      th,
-		feed:    newFeed(th),
+		feed:    core.NewFeed(th, true), // merged view: show the per-source chip
 		spinner: sp,
 		help:    help.New(),
 		keys:    defaultAllKeys(),
@@ -73,9 +75,9 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
 		if m.themeAuto {
-			m.th = newTheme(msg.IsDark())
-			m.spinner.Style = m.th.spinner
-			m.feed.setTheme(m.th)
+			m.th = core.NewTheme(msg.IsDark())
+			m.spinner.Style = m.th.Spinner
+			m.feed.SetTheme(m.th)
 		}
 		return m, nil
 
@@ -90,7 +92,7 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 	case allItemsMsg:
 		m.loading = false
 		m.lastRefresh = time.Now()
-		m.feed.setItems(msg.items)
+		m.feed.SetItems(msg.items, true)
 		if msg.note != "" {
 			m.setStatus(msg.note, true)
 		}
@@ -134,9 +136,7 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	var cmd tea.Cmd
-	m.feed.vp, cmd = m.feed.vp.Update(msg)
-	return m, cmd
+	return m, m.feed.Update(msg)
 }
 
 func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
@@ -154,39 +154,39 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, m.apps))
 
 	case key.Matches(msg, m.keys.Up):
-		if m.feed.scrollExpanded(-1) {
+		if m.feed.ScrollExpanded(-1) {
 			return m, nil
 		}
 		return m, m.moveMarkingRead(-1)
 
 	case key.Matches(msg, m.keys.Down):
-		if m.feed.scrollExpanded(1) {
+		if m.feed.ScrollExpanded(1) {
 			return m, nil
 		}
 		return m, m.moveMarkingRead(1)
 
 	case key.Matches(msg, m.keys.Top):
-		m.feed.toTop()
+		m.feed.ToTop()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Bottom):
-		m.feed.toBottom()
+		m.feed.ToBottom()
 		return m, nil
 
 	case key.Matches(msg, m.keys.Expand):
-		opened := m.feed.toggleCursor()
-		it, ok := m.feed.selected()
-		if !opened || !ok || m.feed.isRead(it.key()) || m.feed.isKept(it.key()) {
+		opened := m.feed.ToggleCursor()
+		it, ok := m.feed.Selected()
+		if !opened || !ok || m.feed.IsRead(it.Key()) || m.feed.IsKept(it.Key()) {
 			return m, nil
 		}
 		return m, m.markItem(it)
 
 	case key.Matches(msg, m.keys.Mark):
-		it, ok := m.feed.selected()
-		if !ok || m.feed.isRead(it.key()) {
+		it, ok := m.feed.Selected()
+		if !ok || m.feed.IsRead(it.Key()) {
 			return m, nil
 		}
-		if m.feed.isKept(it.key()) {
+		if m.feed.IsKept(it.Key()) {
 			m.setStatus("Kept unread; press K to unlock first.", true)
 			return m, nil
 		}
@@ -194,11 +194,11 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		return m, m.markItem(it)
 
 	case key.Matches(msg, m.keys.Keep):
-		it, ok := m.feed.selected()
+		it, ok := m.feed.Selected()
 		if !ok {
 			return m, nil
 		}
-		if kept, _ := m.feed.toggleKeep(); kept {
+		if kept, _ := m.feed.ToggleKeep(); kept {
 			m.unqueue(it)
 			m.setStatus("Kept unread; scrolling won't mark it read. K again to unlock.", false)
 		} else {
@@ -207,36 +207,34 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.OpenURL):
-		if it, ok := m.feed.selected(); ok {
+		if it, ok := m.feed.Selected(); ok {
 			return m, m.withURL(it, openURL)
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Carbonyl):
-		if it, ok := m.feed.selected(); ok {
+		if it, ok := m.feed.Selected(); ok {
 			return m, m.withURL(it, func(u string) tea.Cmd { return openCarbonyl(u, false) })
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.CarbonylGfx):
-		if it, ok := m.feed.selected(); ok {
+		if it, ok := m.feed.Selected(); ok {
 			return m, m.withURL(it, func(u string) tea.Cmd { return openCarbonyl(u, true) })
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.CopyURL):
-		if it, ok := m.feed.selected(); ok {
+		if it, ok := m.feed.Selected(); ok {
 			return m, m.withURL(it, copyToClipboard)
 		}
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.feed.vp, cmd = m.feed.vp.Update(msg)
-	return m, cmd
+	return m, m.feed.Update(msg)
 }
 
-func (m *allModel) withURL(it item, act func(string) tea.Cmd) tea.Cmd {
+func (m *allModel) withURL(it core.Item, act func(string) tea.Cmd) tea.Cmd {
 	if it.URL == "" {
 		m.setStatus("No URL for this item.", true)
 		return nil
@@ -247,10 +245,10 @@ func (m *allModel) withURL(it item, act func(string) tea.Cmd) tea.Cmd {
 // moveMarkingRead moves the cursor and marks the row it left read, so triage
 // happens by scrolling in either direction.
 func (m *allModel) moveMarkingRead(delta int) tea.Cmd {
-	before := m.feed.cursor
-	leaving, ok := m.feed.selected()
-	m.feed.moveCursor(delta)
-	if !ok || m.feed.cursor == before || m.feed.isRead(leaving.key()) || m.feed.isKept(leaving.key()) {
+	before := m.feed.Cursor()
+	leaving, ok := m.feed.Selected()
+	m.feed.MoveCursor(delta)
+	if !ok || m.feed.Cursor() == before || m.feed.IsRead(leaving.Key()) || m.feed.IsKept(leaving.Key()) {
 		return nil
 	}
 	return m.markItem(leaving)
@@ -258,8 +256,8 @@ func (m *allModel) moveMarkingRead(delta int) tea.Cmd {
 
 // markItem greys the row and queues its id for a debounced flush to that app's
 // own read state (x's local store, or Inoreader/Folo's server).
-func (m *allModel) markItem(it item) tea.Cmd {
-	m.feed.markRead(it.key())
+func (m *allModel) markItem(it core.Item) tea.Cmd {
+	m.feed.MarkRead(it.Key())
 	m.pending[it.App] = append(m.pending[it.App], it.ID)
 	if m.flushArmed {
 		return nil
@@ -270,7 +268,7 @@ func (m *allModel) markItem(it item) tea.Cmd {
 
 // unqueue drops a not-yet-flushed mark so keeping an item unread cancels it. A
 // mark already flushed to the app's store can't be undone (no mark-unread).
-func (m *allModel) unqueue(it item) {
+func (m *allModel) unqueue(it core.Item) {
 	ids := m.pending[it.App]
 	for i, id := range ids {
 		if id == it.ID {
@@ -322,14 +320,14 @@ func (m allModel) View() string {
 	if m.width == 0 {
 		return "starting…"
 	}
-	body := forceHeight(m.bodyView(), m.bodyHeight())
+	body := core.ForceHeight(m.bodyView(), m.bodyHeight())
 	return strings.Join([]string{m.headerView(), "", body, m.statusView(), m.helpView()}, "\n")
 }
 
 func (m allModel) headerView() string {
 	th := m.th
-	left := th.header.Render("all")
-	left += th.meta.Render(fmt.Sprintf("  %d unread · %s", len(m.feed.items), strings.Join(m.apps, " · ")))
+	left := th.Header.Render("all")
+	left += th.Meta.Render(fmt.Sprintf("  %d unread · %s", m.feed.Len(), strings.Join(m.apps, " · ")))
 
 	var meta []string
 	if !m.lastRefresh.IsZero() {
@@ -337,7 +335,7 @@ func (m allModel) headerView() string {
 	}
 	right := ""
 	if len(meta) > 0 {
-		right = th.meta.Render(strings.Join(meta, " · "))
+		right = th.Meta.Render(strings.Join(meta, " · "))
 	}
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
@@ -349,10 +347,10 @@ func (m allModel) headerView() string {
 func (m allModel) bodyView() string {
 	h := m.bodyHeight()
 	switch {
-	case m.loading && len(m.feed.items) == 0:
-		return center(m.spinner.View()+" "+m.loadingNote, m.width, h)
-	case len(m.feed.items) == 0:
-		return center(m.th.empty.Render("Inbox zero across every timeline."), m.width, h)
+	case m.loading && m.feed.Len() == 0:
+		return core.Center(m.spinner.View()+" "+m.loadingNote, m.width, h)
+	case m.feed.Len() == 0:
+		return core.Center(m.th.Empty.Render("Inbox zero across every timeline."), m.width, h)
 	default:
 		return m.feed.View()
 	}
@@ -360,12 +358,12 @@ func (m allModel) bodyView() string {
 
 func (m allModel) statusView() string {
 	switch {
-	case m.loading && len(m.feed.items) > 0:
-		return m.spinner.View() + " " + m.th.help.Render(m.loadingNote)
+	case m.loading && m.feed.Len() > 0:
+		return m.spinner.View() + " " + m.th.Help.Render(m.loadingNote)
 	case m.statusErr && m.status != "":
-		return m.th.statusErr.Render(m.status)
+		return m.th.StatusErr.Render(m.status)
 	case m.status != "":
-		return m.th.statusInfo.Render(m.status)
+		return m.th.StatusInfo.Render(m.status)
 	default:
 		return ""
 	}
@@ -383,7 +381,7 @@ func (m *allModel) layout() {
 		return
 	}
 	m.help.SetWidth(m.width)
-	m.feed.setSize(m.width, m.bodyHeight())
+	m.feed.SetSize(m.width, m.bodyHeight())
 }
 
 func (m allModel) bodyHeight() int {
