@@ -23,6 +23,7 @@ type feed struct {
 	items    []item
 	expanded map[string]bool // item key -> body shown
 	read     map[string]bool // item key -> greyed read this session
+	kept     map[string]bool // item key -> pinned unread this session
 	showSrc  bool
 	cursor   int
 	yoff     int
@@ -40,6 +41,7 @@ func newFeed(th theme) feed {
 	return feed{
 		expanded: map[string]bool{},
 		read:     map[string]bool{},
+		kept:     map[string]bool{},
 		showSrc:  true,
 		th:       th,
 		vp:       viewport.New(),
@@ -51,6 +53,7 @@ func newFeed(th theme) feed {
 func (f *feed) setItems(items []item) {
 	f.items = items
 	f.expanded = map[string]bool{}
+	f.kept = map[string]bool{}
 	f.cursor = 0
 	f.yoff = 0
 	f.clampCursor()
@@ -70,7 +73,29 @@ func (f *feed) setSize(w, h int) {
 
 func (f *feed) markRead(key string) { f.read[key] = true; f.render() }
 
-func (f feed) isRead(key string) bool { return f.read[key] }
+func (f feed) isRead(key string) bool { return f.read[key] && !f.kept[key] }
+
+func (f feed) isKept(key string) bool { return f.kept[key] }
+
+// toggleKeep pins the cursored row unread (and back). Pinning also un-greys it
+// so scrolling won't re-mark it read; the caller cancels any queued store mark.
+// The pin lasts until the next refresh. Reports the new state, false ok when
+// nothing is selected.
+func (f *feed) toggleKeep() (kept, ok bool) {
+	it, sel := f.selected()
+	if !sel {
+		return false, false
+	}
+	k := it.key()
+	if f.kept[k] {
+		delete(f.kept, k)
+	} else {
+		f.kept[k] = true
+		delete(f.read, k)
+	}
+	f.render()
+	return f.kept[k], true
+}
 
 func (f *feed) moveCursor(delta int) {
 	if len(f.items) == 0 {
