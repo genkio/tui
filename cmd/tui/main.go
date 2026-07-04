@@ -63,10 +63,11 @@ func (a app) authed() bool {
 		}
 	}
 	present := sourcedVars(a.dir, cands)
-	// A Homebrew install has no per-plugin .env; creds are in the process env
-	// via core.LoadUserEnv. (In a dev tree, sourcedVars already covers both.)
+	// A Homebrew install keeps creds in ~/.config/tui/env, not a per-plugin .env;
+	// read it fresh so a just-finished login shows as authed right away.
+	userEnv := core.ParseEnvFile(core.UserEnvPath())
 	for _, v := range cands {
-		if os.Getenv(v) != "" {
+		if userEnv[v] != "" || os.Getenv(v) != "" {
 			present[v] = true
 		}
 	}
@@ -111,16 +112,13 @@ func sourcedVars(dir string, names []string) map[string]bool {
 	return out
 }
 
-// missingAuthTools lists the tools `make auth` needs (browser capture) that are
-// not on PATH, so the picker can warn before a login attempt fails mid-flow.
+// missingAuthTools reports what the browser login needs but can't find: a
+// Chromium-family browser to drive. The picker warns before a login attempt.
 func missingAuthTools() []string {
-	var missing []string
-	for _, t := range []string{"playwright-cli", "jq", "node"} {
-		if _, err := exec.LookPath(t); err != nil {
-			missing = append(missing, t)
-		}
+	if _, err := core.FindChromium(); err != nil {
+		return []string{"a Chromium browser (Brave, Chrome, …)"}
 	}
-	return missing
+	return nil
 }
 
 type execDoneMsg struct {
@@ -136,7 +134,8 @@ func runApp(a app) tea.Cmd {
 }
 
 func authApp(a app) tea.Cmd {
-	cmd := exec.Command("make", "-C", a.dir, "auth")
+	cmd := exec.Command(self(), a.name, "--auth")
+	cmd.Env = appEnv(a.dir)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{a.name, "auth", err} })
 }
 
@@ -512,7 +511,7 @@ func (m model) View() tea.View {
 	b.WriteString(left + strings.Repeat(" ", gap) + right + "\n\n")
 
 	if len(m.missing) > 0 && m.anyNeedsLogin() {
-		b.WriteString(warnStyle.Render("⚠ login needs "+strings.Join(m.missing, ", ")+" on PATH") + "\n\n")
+		b.WriteString(warnStyle.Render("⚠ login needs "+strings.Join(m.missing, ", ")) + "\n\n")
 	}
 
 	renderRow := func(rowIdx int, name, desc, badge string) {
@@ -646,11 +645,9 @@ func main() {
 	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
 	flag.Parse()
 
-	// Creds/settings load from ~/.config/tui/env so an installed binary needs no
-	// source tree. A dev checkout can still override per-plugin via .env (appEnv).
-	core.LoadUserEnv()
-	// root locates the dev source tree (./plugins) for the make-based auth flow;
-	// running apps and reading counts self-exec this binary and don't need it.
+	// root locates the dev source tree for per-plugin .env; an installed binary
+	// works without it, reading creds from ~/.config/tui/env (each self-exec'd
+	// `tui <app>` loads that file itself, so a re-login is picked up live).
 	root, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())

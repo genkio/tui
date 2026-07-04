@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -40,6 +41,7 @@ func run() error {
 		count       = flag.Bool("count", false, "print the unread article count and exit")
 		dumpJSON    = flag.Bool("json", false, "print unread articles as JSON and exit (for the 'all' timeline)")
 		markRead    = flag.Bool("mark-read", false, "mark read the article ids read from stdin (one per line) and exit")
+		auth        = flag.Bool("auth", false, "log in via a browser and capture the session into ~/.config/tui/env")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/inoreader-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the unread list at this interval (e.g. 5m); off if unset")
 	)
@@ -48,6 +50,17 @@ func run() error {
 	if *showVersion {
 		fmt.Println("inoreader-tui " + versionString())
 		return nil
+	}
+	if *auth {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return core.RunAuth(ctx, "https://www.inoreader.com/all_articles", func(s *core.Session) (map[string]string, error) {
+			cookie := s.CookieHeader("inoreader.com")
+			if cookie == "" {
+				return nil, errors.New("no inoreader.com cookies captured; were you fully logged in?")
+			}
+			return map[string]string{"INOREADER_COOKIE": cookie}, nil
+		})
 	}
 
 	cfg, err := config.Load(*configPath)

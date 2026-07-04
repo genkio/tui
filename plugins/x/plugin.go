@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -42,6 +43,7 @@ func run() error {
 		count       = flag.Bool("count", false, "print the unread post count and exit")
 		dumpJSON    = flag.Bool("json", false, "print unread posts as JSON and exit (for the 'all' timeline)")
 		markRead    = flag.Bool("mark-read", false, "mark read the post ids read from stdin (one per line) and exit")
+		auth        = flag.Bool("auth", false, "log in via a browser and capture the session into ~/.config/tui/env")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/x-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the timeline at this interval (e.g. 2m); off if unset")
 	)
@@ -50,6 +52,18 @@ func run() error {
 	if *showVersion {
 		fmt.Println("x-tui " + versionString())
 		return nil
+	}
+	if *auth {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return core.RunAuth(ctx, "https://x.com/home", func(s *core.Session) (map[string]string, error) {
+			token := s.Cookie("auth_token", "x.com", "twitter.com")
+			ct0 := s.Cookie("ct0", "x.com", "twitter.com")
+			if token == "" || ct0 == "" {
+				return nil, errors.New("could not read auth_token/ct0 cookies; were you fully logged in?")
+			}
+			return map[string]string{"XTUI_AUTH_TOKEN": token, "XTUI_CT0": ct0}, nil
+		})
 	}
 
 	cfg, err := config.Load(*configPath)

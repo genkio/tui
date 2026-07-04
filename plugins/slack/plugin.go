@@ -6,6 +6,8 @@ package slack
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -35,6 +37,7 @@ func run() error {
 		showVersion = flag.Bool("version", false, "print version and exit")
 		check       = flag.Bool("check", false, "connect to the server, list its tools, and exit")
 		count       = flag.Bool("count", false, "print the unread message count and exit")
+		auth        = flag.Bool("auth", false, "log in via a browser and capture the tokens into ~/.config/tui/env")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/slack-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the unread list at this interval (e.g. 30s, 2m); off if unset")
 	)
@@ -43,6 +46,44 @@ func run() error {
 	if *showVersion {
 		fmt.Println("slack-tui " + versionString())
 		return nil
+	}
+	if *auth {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return core.RunAuth(ctx, "https://app.slack.com/client", func(s *core.Session) (map[string]string, error) {
+			xoxd := s.Cookie("d", "slack.com")
+			// xoxc token + workspace domain live in localStorage.localConfig_v2;
+			// the post-login URL has no workspace subdomain, so the domain must
+			// come from the team object.
+			raw, err := s.Eval(`JSON.stringify(Object.values((JSON.parse(localStorage.localConfig_v2||"{}").teams)||{}).map(function(t){return {domain:t.domain,url:t.url,token:t.token}}))`)
+			if err != nil {
+				return nil, err
+			}
+			var teams []struct {
+				Domain string `json:"domain"`
+				URL    string `json:"url"`
+				Token  string `json:"token"`
+			}
+			json.Unmarshal([]byte(raw), &teams)
+			var xoxc, domain string
+			for _, t := range teams {
+				if t.Token != "" {
+					xoxc, domain = t.Token, t.Domain
+					if domain == "" {
+						domain = t.URL
+					}
+					break
+				}
+			}
+			if xoxc == "" || xoxd == "" {
+				return nil, errors.New("could not read slack tokens (xoxc/xoxd); were you fully logged in?")
+			}
+			vars := map[string]string{"SLACK_MCP_XOXC_TOKEN": xoxc, "SLACK_MCP_XOXD_TOKEN": xoxd}
+			if domain != "" {
+				vars["SLACK_TUI_SLACK_DOMAIN"] = domain
+			}
+			return vars, nil
+		})
 	}
 
 	cfg, err := config.Load(*configPath)

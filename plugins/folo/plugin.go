@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -41,6 +42,7 @@ func run() error {
 		count       = flag.Bool("count", false, "print the pending (unread) article count and exit")
 		dumpJSON    = flag.Bool("json", false, "print pending articles as JSON and exit (for the 'all' timeline)")
 		markRead    = flag.Bool("mark-read", false, "mark read the entry ids read from stdin (one per line) and exit")
+		auth        = flag.Bool("auth", false, "log in via a browser and capture the session into ~/.config/tui/env")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/folo-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the list at this interval (e.g. 5m); off if unset")
 	)
@@ -49,6 +51,17 @@ func run() error {
 	if *showVersion {
 		fmt.Println("folo-tui " + versionString())
 		return nil
+	}
+	if *auth {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return core.RunAuth(ctx, "https://app.folo.is/timeline/articles/all/pending", func(s *core.Session) (map[string]string, error) {
+			cookie := s.CookieHeader("folo.is")
+			if cookie == "" {
+				return nil, errors.New("no folo.is cookies captured; were you fully logged in?")
+			}
+			return map[string]string{"FOLO_COOKIE": cookie}, nil
+		})
 	}
 
 	cfg, err := config.Load(*configPath)
