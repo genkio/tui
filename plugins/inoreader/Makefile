@@ -9,8 +9,8 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 build: ## Build the binary into ./inoreader-tui
 	go build $(LDFLAGS) -o $(BINARY) $(PKG)
 
-auth: ## Capture the Inoreader session cookie into .env (opens a browser to log in)
-	./tools/auth.sh inoreader https://www.inoreader.com/all_articles inoreader.com INOREADER_COOKIE .env
+auth: ## Log in via a browser and save the session to ~/.config/tui/env
+	go run $(PKG) --auth
 
 run: ## Build and run the TUI (sources .env if present)
 	@if [ -f .env ]; then . ./.env; fi; go run $(PKG)

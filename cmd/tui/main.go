@@ -384,7 +384,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.running = true // pause polling while the child owns the terminal
 				return m, runApp(a)
 			}
-			// Login drives a browser via playwright; bail with a clear message
+			// Login drives a Chromium browser; bail with a clear message
 			// rather than launching an auth flow that would fail partway.
 			if m.missing = missingAuthTools(); len(m.missing) > 0 {
 				m.setStatus("Can't log in to "+a.name+": install "+strings.Join(m.missing, ", "), true)

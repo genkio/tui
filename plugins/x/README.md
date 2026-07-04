@@ -28,15 +28,17 @@ x-tui   For You · Following  (82)                      updated 14:32:07
 
 ## Requirements
 
-- Go 1.25+
-- For `make auth` only: [`playwright-cli`](https://github.com/microsoft/playwright),
-  `jq`, and `node` on your `PATH`.
+- Go 1.26+ (to build from source)
+- For login only: a Chromium-family browser (Brave, Chrome, Chromium, Edge, …).
 
 ## Quick start
 
+This app ships as part of [`tui`](../../README.md), so the usual way in is
+`tui x`. To run it on its own from a source checkout:
+
 ```sh
-make auth     # opens a browser; log into x.com; captures the session to .env
-make run      # build and launch the TUI (sources .env)
+make auth     # opens a browser; log into x.com; saves the session to ~/.config/tui/env
+make run      # build and launch the TUI
 ```
 
 `make check` fetches one page from each timeline and prints the result, handy
@@ -109,11 +111,10 @@ x.com's web GraphQL API authenticates with two values from a logged-in browser:
 The OAuth2 `Bearer` is a public constant baked into the web app (identical for
 every user), so it is not a secret and ships in the binary.
 
-`make auth` runs `tools/auth.sh`, which opens a real browser with a persistent
-profile (so re-login is rare), waits for you to log in, and writes
-`XTUI_AUTH_TOKEN` and `XTUI_CT0` to `.env` via `playwright-cli`. Re-run it when
-the session expires (the TUI says "x.com rejected the session" when that
-happens).
+`tui x --auth` (or `make auth` from a checkout) opens a Chromium-family browser
+with a dedicated persistent profile (so re-login is rare), waits for you to log
+in, and saves `XTUI_AUTH_TOKEN` and `XTUI_CT0` to `~/.config/tui/env`. Re-run it
+when the session expires (the TUI says "x.com rejected the session" then).
 
 Prefer to do it by hand? In your browser's DevTools, copy the `auth_token` and
 `ct0` cookie values for `x.com` and set the two variables above.

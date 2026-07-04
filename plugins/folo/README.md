@@ -1,6 +1,6 @@
 # folo-tui
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Built with Bubble Tea](https://img.shields.io/badge/built%20with-Bubble%20Tea-ff69b4)](https://github.com/charmbracelet/bubbletea)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -10,11 +10,10 @@ job well: pull the Articles timeline, let you expand one inline to read it, open
 it in the browser, and mark it read. Keyboard-driven, single binary, no browser
 tab. It's the TUI of `https://app.folo.is/timeline/articles/all/pending`.
 
-It authenticates by reusing your logged-in `folo.is` browser session cookie, the
-same "stealth" idea as [inoreader-tui](https://github.com/genkio/inoreader-tui)
-and [slack-tui](https://github.com/genkio/slack-tui). A bundled helper drives a
-real browser with [`playwright-cli`](https://github.com/microsoft/playwright) so
-you just log in once and the cookie lands in `.env` automatically.
+It authenticates by reusing your logged-in `folo.is` browser session cookie (the
+same "cookie-stealth" idea as the other apps). `tui folo --auth` drives a
+Chromium-family browser so you log in once and the cookie is captured
+automatically.
 
 ```
 +-----------+   HTTPS (web API + session cookie)   +-------------+
@@ -62,17 +61,18 @@ reading stops working, that is the first place to look
 ## Requirements
 
 - **macOS or Linux.**
-- **Go 1.25+** to build from source.
-- For `make auth`: **[playwright-cli](https://github.com/microsoft/playwright)**
-  (`npm i -g @playwright/cli` or your package manager), `jq`, and `node`. You can
-  also set the cookie by hand without them.
+- **Go 1.26+** to build from source.
+- For login: a Chromium-family browser (Brave, Chrome, Chromium, Edge, …). You
+  can also set the cookie by hand instead.
 - A Folo account you can log into.
 
 ## Install
 
+Ships as part of [`tui`](../../README.md) (`brew install genkio/tap/tui`, then
+`tui folo`). To build this app on its own from a source checkout:
+
 ```bash
-git clone https://github.com/genkio/folo-tui
-cd folo-tui
+cd plugins/folo
 make build            # produces ./folo-tui
 # or: make install    # into $GOBIN / $GOPATH/bin
 ```
@@ -83,30 +83,22 @@ folo-tui reads your browser session cookie from the `FOLO_COOKIE` environment
 variable and sends it as the `Cookie` header. **It only reads the value to send
 it; it is never stored or logged.**
 
-### The easy way: `make auth`
+### The easy way: `--auth`
 
 ```bash
-cp .env.sample .env   # .env is gitignored
-make auth             # opens a browser; log in, then press Enter
+tui folo --auth   # or `make auth` from a source checkout
 ```
 
-`make auth` opens a real browser window (persistent profile, so you rarely have
-to log in again), waits for you to sign in, then writes the cookie to `.env` as
-`FOLO_COOKIE`. Re-run it whenever the session expires.
-
-Under the hood it runs [`tools/auth.sh`](tools/auth.sh), which is reusable for
-other sites:
-
-```bash
-tools/auth.sh <session> <url> <cookie-domain> <ENV_VAR> <env-file>
-```
+This opens a Chromium-family browser with a dedicated persistent profile (so you
+rarely have to log in again), waits for you to sign in, then saves the cookie as
+`FOLO_COOKIE` to `~/.config/tui/env`. Re-run it whenever the session expires.
 
 ### The manual way
 
-If you do not want playwright-cli: open
+Prefer not to use a browser? Open
 `https://app.folo.is/timeline/articles/all/pending` logged in, open DevTools
-(`Cmd+Option+I` / `F12`) -> Network, reload, click any `api.folo.is` request,
-and copy the entire **`Cookie`** request header. Put it in `.env`:
+(`Cmd+Option+I` / `F12`) → Network, reload, click any `api.folo.is` request,
+and copy the entire **`Cookie`** request header into `~/.config/tui/env`:
 
 ```bash
 export FOLO_COOKIE='__Secure-better-auth.session_token=...; ...'
@@ -119,10 +111,9 @@ logout; re-capture it when auth starts failing.
 ## Quick start
 
 ```bash
-make auth                          # capture the cookie into .env
-source .env && folo-tui --check    # verify the connection
-source .env && folo-tui            # launch the TUI
-# or simply:  make run
+tui folo --auth     # log in once (writes ~/.config/tui/env)
+tui folo            # launch the TUI
+# from a source checkout:  make auth && make run
 ```
 
 ## Keybindings
@@ -196,9 +187,9 @@ Environment variables win over the file.
 - Reusing the browser session is a gray area under Folo's terms; you are the
   only user and it touches only your own account. Its only writes are mark-read
   and mark-unread, through the web app's own endpoints.
-- Never commit your cookie. `.env` is gitignored; `.env.sample` ships a
-  placeholder. The playwright-cli browser profile lives under
-  `~/.config/folo/pw-profile` and also holds your session; keep it private.
+- Never commit your cookie. Creds live in `~/.config/tui/env` (0600). The login
+  browser profile lives under `~/.config/tui/profile` and also holds your
+  session; keep it private.
 
 ## License
 
@@ -209,5 +200,5 @@ MIT. See [`LICENSE`](LICENSE).
 - Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea),
   [Bubbles](https://github.com/charmbracelet/bubbles), and
   [Lip Gloss](https://github.com/charmbracelet/lipgloss).
-- Cookie capture via [`playwright-cli`](https://github.com/microsoft/playwright).
+- Browser login via [chromedp](https://github.com/chromedp/chromedp).
 - For [Folo](https://github.com/RSSNext/Folo), the open-source feed reader.

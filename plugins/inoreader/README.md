@@ -1,6 +1,6 @@
 # inoreader-tui
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Built with Bubble Tea](https://img.shields.io/badge/built%20with-Bubble%20Tea-ff69b4)](https://github.com/charmbracelet/bubbletea)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -10,10 +10,9 @@ expand one inline to read it, open it in the browser, and mark it read.
 Keyboard-driven, single binary, no browser tab.
 
 It authenticates by reusing your logged-in `inoreader.com` browser session
-cookie, the same "stealth" idea as
-[slack-tui](https://github.com/genkio/slack-tui). A bundled helper drives a real
-browser with [`playwright-cli`](https://github.com/microsoft/playwright) so you
-just log in once and the cookie lands in `.env` automatically.
+cookie (the same "cookie-stealth" idea as the other apps). `tui inoreader --auth`
+drives a Chromium-family browser so you log in once and the cookie is captured
+automatically.
 
 ```
 +----------------+   HTTPS (web "xajax" API)    +-----------+
@@ -61,17 +60,18 @@ first place to look (`internal/inoreader/client.go`, `scrapeArticle`).
 ## Requirements
 
 - **macOS or Linux.**
-- **Go 1.25+** to build from source.
-- For `make auth`: **[playwright-cli](https://github.com/microsoft/playwright)**
-  (`npm i -g @playwright/cli` or your package manager) and a browser it can
-  drive. You can also set the cookie by hand without it.
+- **Go 1.26+** to build from source.
+- For login: a Chromium-family browser (Brave, Chrome, Chromium, Edge, …). You
+  can also set the cookie by hand instead.
 - An Inoreader account you can log into. Any plan works.
 
 ## Install
 
+Ships as part of [`tui`](../../README.md) (`brew install genkio/tap/tui`, then
+`tui inoreader`). To build this app on its own from a source checkout:
+
 ```bash
-git clone https://github.com/genkio/inoreader-tui
-cd inoreader-tui
+cd plugins/inoreader
 make build            # produces ./inoreader-tui
 # or: make install    # into $GOBIN / $GOPATH/bin
 ```
@@ -82,30 +82,23 @@ inoreader-tui reads your browser session cookie from the `INOREADER_COOKIE`
 environment variable and sends it as the `Cookie` header. **It only reads the
 value to send it; it is never stored or logged.**
 
-### The easy way: `make auth`
+### The easy way: `--auth`
 
 ```bash
-cp .env.sample .env   # .env is gitignored
-make auth             # opens a browser; log in, then press Enter
+tui inoreader --auth   # or `make auth` from a source checkout
 ```
 
-`make auth` opens a real browser window (persistent profile, so you rarely have
-to log in again), waits for you to sign in, then writes the cookie to `.env` as
-`INOREADER_COOKIE`. Re-run it whenever the session expires.
-
-Under the hood it runs [`tools/auth.sh`](tools/auth.sh), which is reusable for
-other sites:
-
-```bash
-tools/auth.sh <session> <url> <cookie-domain> <ENV_VAR> <env-file>
-```
+This opens a Chromium-family browser with a dedicated persistent profile (so you
+rarely have to log in again), waits for you to sign in, then saves the cookie as
+`INOREADER_COOKIE` to `~/.config/tui/env`. Re-run it whenever the session
+expires.
 
 ### The manual way
 
-If you do not want playwright-cli: open `https://www.inoreader.com/all_articles`
-logged in, open DevTools (`Cmd+Option+I` / `F12`) -> Network, reload, click any
-`www.inoreader.com` request, and copy the entire **`Cookie`** request header.
-Put it in `.env`:
+Prefer not to use a browser? Open `https://www.inoreader.com/all_articles`
+logged in, open DevTools (`Cmd+Option+I` / `F12`) → Network, reload, click any
+`www.inoreader.com` request, and copy the entire **`Cookie`** request header
+into `~/.config/tui/env`:
 
 ```bash
 export INOREADER_COOKIE='ssid=...; ...'
@@ -118,10 +111,9 @@ logout; re-capture it when auth starts failing.
 ## Quick start
 
 ```bash
-make auth                    # capture the cookie into .env
-source .env && inoreader-tui --check   # verify the connection
-source .env && inoreader-tui           # launch the TUI
-# or simply:  make run
+tui inoreader --auth     # log in once (writes ~/.config/tui/env)
+tui inoreader            # launch the TUI
+# from a source checkout:  make auth && make run
 ```
 
 ## Keybindings
@@ -193,10 +185,9 @@ Environment variables win over the file.
 - Reusing the browser session is a gray area under Inoreader's terms; you are
   the only user and it touches only your own account. Its only write is
   mark-as-read, through the web app's own endpoint.
-- Never commit your cookie. `.env` is gitignored; `.env.sample` ships a
-  placeholder. The playwright-cli browser profile lives under
-  `~/.config/inoreader-tui/pw-profile` and also holds your session; keep it
-  private.
+- Never commit your cookie. Creds live in `~/.config/tui/env` (0600). The login
+  browser profile lives under `~/.config/tui/profile` and also holds your
+  session; keep it private.
 
 ## License
 
@@ -208,4 +199,4 @@ MIT. See [`LICENSE`](LICENSE).
   [Bubbles](https://github.com/charmbracelet/bubbles), and
   [Lip Gloss](https://github.com/charmbracelet/lipgloss).
 - HTML parsing via [`golang.org/x/net/html`](https://pkg.go.dev/golang.org/x/net/html).
-- Cookie capture via [`playwright-cli`](https://github.com/microsoft/playwright).
+- Browser login via [chromedp](https://github.com/chromedp/chromedp).

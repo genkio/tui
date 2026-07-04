@@ -24,8 +24,8 @@ json: ## Print unread posts as JSON (for the 'all' timeline; sources .env if pre
 mark-read: ## Mark read the post ids on stdin, one per line (sources .env if present)
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; go run $(PKG) --mark-read
 
-auth: ## Capture x.com session (auth_token + ct0) into .env (opens a browser to log in)
-	./tools/auth.sh x .env
+auth: ## Log in via a browser and save the session to ~/.config/tui/env
+	go run $(PKG) --auth
 
 test: ## Run tests
 	go test ./...

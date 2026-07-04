@@ -9,8 +9,8 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 build: ## Build the binary into ./slack-tui
 	go build $(LDFLAGS) -o $(BINARY) $(PKG)
 
-auth: ## Capture Slack browser session (xoxc + xoxd + workspace domain) into .env (opens a browser to log in)
-	./tools/auth.sh slack .env
+auth: ## Log in via a browser and save the session to ~/.config/tui/env
+	go run $(PKG) --auth
 
 run: ## Build and run the TUI (sources .env if present)
 	@if [ -f .env ]; then . ./.env; fi; go run $(PKG)

@@ -1,9 +1,7 @@
 # slack-tui
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/genkio/slack-tui.svg)](https://pkg.go.dev/github.com/genkio/slack-tui)
-[![Go Report Card](https://goreportcard.com/badge/github.com/genkio/slack-tui)](https://goreportcard.com/report/github.com/genkio/slack-tui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Built with Bubble Tea](https://img.shields.io/badge/built%20with-Bubble%20Tea-ff69b4)](https://github.com/charmbracelet/bubbletea)
 
 A terminal UI for triaging your unread Slack. It does one job well: pull your
@@ -39,13 +37,15 @@ never touches the Slack API or your tokens directly.
 
 - **macOS or Linux.**
 - **Node.js** (for the default `npx` launch of the server) **or Docker**.
-- **Go 1.25+** to build from source.
+- **Go 1.26+** to build from source.
 
 ## Install
 
+Ships as part of [`tui`](../../README.md) (`brew install genkio/tap/tui`, then
+`tui slack`). To build this app on its own from a source checkout:
+
 ```bash
-git clone https://github.com/genkio/slack-tui
-cd slack-tui
+cd plugins/slack
 make build            # produces ./slack-tui
 # or: make install    # into $GOBIN / $GOPATH/bin
 ```
@@ -68,12 +68,10 @@ mode you pick.
 
 ### Extracting browser-session tokens (xoxc + xoxd)
 
-**Easy way:** `make auth` opens a browser, waits for you to log into your
-workspace, then writes both `SLACK_MCP_XOXC_TOKEN` and `SLACK_MCP_XOXD_TOKEN`
-into `.env` for you. It needs [`playwright-cli`](https://github.com/microsoft/playwright)
-and `jq` on your PATH. Signed into more than one workspace?
-`./tools/auth.sh slack .env <name>` picks the one matching `<name>`. Re-run when
-the session expires.
+**Easy way:** `tui slack --auth` (or `make auth` from a checkout) opens a
+Chromium-family browser, waits for you to log into your workspace, then saves
+`SLACK_MCP_XOXC_TOKEN`, `SLACK_MCP_XOXD_TOKEN`, and the workspace domain to
+`~/.config/tui/env`. Re-run when the session expires.
 
 **Manual way:** the browser-session mode needs **both** values, and they live in
 different places. Grab them from the browser where you are logged into Slack
@@ -148,17 +146,13 @@ The first run downloads the server via `npx` and may take a moment.
 To avoid re-exporting tokens every session, copy the sample env file and source it:
 
 ```bash
-cp .env.sample .env          # .env is gitignored; fill in your values
-make auth                    # browser-session mode: log in once; writes xoxc/xoxd + domain to .env
-make check                   # verify the connection
-make run                     # launch the TUI
+tui slack --auth             # browser-session mode: log in once; writes to ~/.config/tui/env
+tui slack --check            # verify the connection
+tui slack                    # launch the TUI
 ```
 
-`make check` and `make run` source `.env` for you. The equivalent without Make is
-`source .env && slack-tui --check` / `source .env && slack-tui`.
-
-`.env.sample` lists every supported variable. To load it automatically, add
-`source /path/to/slack-tui/.env` to your `~/.zshrc`.
+`~/.config/tui/env` is read on every run. For the `xoxp` mode, put that token
+there (or export it in your shell) instead of running `--auth`.
 
 ## Keybindings
 
@@ -207,9 +201,8 @@ export SLACK_MCP_XOXD_TOKEN=xoxd-...
 export SLACK_MCP_MARK_TOOL=true
 ```
 
-Then `slack-tui` works from any directory. The `.env` + `source` approach in
-[Quick start](#quick-start) is just a convenience for keeping tokens in your
-working copy; it is not required.
+Then `tui slack` works from any directory. `--auth` writes the same tokens to
+`~/.config/tui/env`, which is read on every run; either is fine.
 
 **Server auth (forwarded to slack-mcp-server):** `SLACK_MCP_XOXP_TOKEN`,
 `SLACK_MCP_XOXB_TOKEN`, `SLACK_MCP_XOXC_TOKEN`, `SLACK_MCP_XOXD_TOKEN`,
@@ -278,7 +271,8 @@ args = ["run", "-i", "--rm",
   slack-tui makes a single read-only `emoji.list` request using the token already
   in your environment, to fetch custom-emoji names. The token value is read only
   for that one call; reactions and everything else still go through the server.
-- Never commit tokens. `.env` is gitignored; `.env.sample` ships placeholders.
+- Never commit tokens. Creds live in `~/.config/tui/env` (0600); the login
+  browser profile is under `~/.config/tui/profile`.
 
 ## License
 
