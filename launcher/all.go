@@ -121,6 +121,10 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 		m.clearStatus()
 		return m, nil
 
+	case carbonylBrowseMsg:
+		m.clearStatus()
+		return m, openURL(msg.url)
+
 	case errMsg:
 		m.loading = false
 		m.setStatus(friendlyAllError(msg.err), true)

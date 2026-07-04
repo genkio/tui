@@ -24,11 +24,12 @@ type (
 		ids []string
 		err error
 	}
-	flushTickMsg    struct{}
-	openedMsg       struct{}
-	copiedMsg       struct{}
-	carbonylDoneMsg struct{}
-	errMsg          struct{ err error }
+	flushTickMsg      struct{}
+	openedMsg         struct{}
+	copiedMsg         struct{}
+	carbonylDoneMsg   struct{}
+	carbonylBrowseMsg struct{ url string }
+	errMsg            struct{ err error }
 )
 
 // flushDebounce coalesces a burst of read marks (holding j) into one mark-read

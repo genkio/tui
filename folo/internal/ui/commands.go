@@ -32,11 +32,12 @@ type (
 		id  string
 		err error
 	}
-	openedMsg       struct{}
-	carbonylDoneMsg struct{}
-	copiedMsg       struct{}
-	autoRefreshMsg  struct{}
-	errMsg          struct{ err error }
+	openedMsg         struct{}
+	carbonylDoneMsg   struct{}
+	carbonylBrowseMsg struct{ url string }
+	copiedMsg         struct{}
+	autoRefreshMsg    struct{}
+	errMsg            struct{ err error }
 )
 
 func fetchUnreads(ctx context.Context, c *folo.Client, unreadOnly bool, max int, reset bool) tea.Cmd {

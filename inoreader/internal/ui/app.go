@@ -160,6 +160,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearStatus()
 		return m, nil
 
+	case carbonylBrowseMsg:
+		m.clearStatus()
+		return m, openURL(msg.url)
+
 	case copiedMsg:
 		m.setStatus("Copied URL to clipboard.", false)
 		return m, nil

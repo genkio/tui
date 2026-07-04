@@ -20,21 +20,27 @@ import (
 // openCarbonyl renders the URL in carbonyl full screen, suspending the TUI
 // until it exits.
 func openCarbonyl(url string, graphics bool) tea.Cmd {
-	return tea.Exec(&carbonylCmd{url: url, graphics: graphics}, func(err error) tea.Msg {
+	c := &carbonylCmd{url: url, graphics: graphics}
+	return tea.Exec(c, func(err error) tea.Msg {
 		if err != nil {
 			return errMsg{err}
+		}
+		if c.openBrowser {
+			return carbonylBrowseMsg{url: c.url}
 		}
 		return carbonylDoneMsg{}
 	})
 }
 
-// carbonylCmd runs carbonyl on a pty so a bare q quits it back to the list;
-// carbonyl itself only exits on ctrl+c and would otherwise send q to the page.
+// carbonylCmd runs carbonyl on a pty so a bare q quits back to the list and a
+// bare b quits then opens the URL in the browser; carbonyl itself only exits on
+// ctrl+c and would otherwise send those keys to the page.
 type carbonylCmd struct {
-	url      string
-	graphics bool
-	stdin    io.Reader
-	stdout   io.Writer
+	url         string
+	graphics    bool
+	openBrowser bool
+	stdin       io.Reader
+	stdout      io.Writer
 }
 
 func (c *carbonylCmd) SetStdin(r io.Reader)  { c.stdin = r }
@@ -86,7 +92,7 @@ func (c *carbonylCmd) Run() error {
 		return err
 	}
 
-	var quit atomic.Bool
+	var quit, browse atomic.Bool
 	go func() {
 		buf := make([]byte, 256)
 		for {
@@ -94,9 +100,11 @@ func (c *carbonylCmd) Run() error {
 			if err != nil {
 				return
 			}
-			// a lone q is the quit keypress; q inside a longer chunk is part
-			// of an escape sequence or paste and belongs to the page
-			if n == 1 && buf[0] == 'q' {
+			// a lone q quits; a lone b quits and opens the page in the browser.
+			// inside a longer chunk they're part of an escape sequence or paste,
+			// so they belong to the page
+			if n == 1 && (buf[0] == 'q' || buf[0] == 'b') {
+				browse.Store(buf[0] == 'b')
 				quit.Store(true)
 				// pty.Start setsid'd carbonyl; -pid takes its renderers too
 				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -123,6 +131,7 @@ func (c *carbonylCmd) Run() error {
 	// (mouse tracking, alt screen, cursor); undo them before bubbletea resumes
 	io.WriteString(c.stdout, "\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h")
 
+	c.openBrowser = browse.Load()
 	if quit.Load() {
 		return nil
 	}
