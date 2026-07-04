@@ -1,13 +1,13 @@
 # launcher binary
 /tui
-# stray binary from `go build .` in launcher/ (module base name is "tui")
-/launcher/tui
+# stray binary from `go build .` in cmd/tui (module base name is "tui")
+/cmd/tui/tui
 
 # built app binaries (each project also ignores its own)
-/x/x-tui
-/inoreader/inoreader-tui
-/slack/slack-tui
-/folo/folo-tui
+/plugins/x/x-tui
+/plugins/inoreader/inoreader-tui
+/plugins/slack/slack-tui
+/plugins/folo/folo-tui
 
 # secrets, in any project
 **/.env
