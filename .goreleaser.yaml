@@ -1,0 +1,61 @@
+# GoReleaser config for the single `tui` binary. Cross-compiles the bundle,
+# publishes a GitHub release, and updates the Homebrew formula in genkio/tap.
+# Run via the release workflow (tag push) or locally: `goreleaser release`.
+version: 2
+
+project_name: tui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: tui
+    main: ./cmd/tui
+    binary: tui
+    env:
+      - CGO_ENABLED=0 # pure Go: clean cross-compile, static binaries
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: tui
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: genkio
+    name: tui
+
+brews:
+  - name: tui
+    repository:
+      owner: genkio
+      name: homebrew-tap
+      branch: main
+      # default GITHUB_TOKEN can't push to another repo; use a PAT with
+      # contents:write on genkio/homebrew-tap.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/genkio/tui"
+    description: "One launcher for cookie-stealth terminal readers: x, inoreader, slack, folo"
+    license: MIT
+    # `o` renders a story in carbonyl; it's a runtime dependency from the same tap.
+    dependencies:
+      - name: genkio/tap/carbonyl
+    install: |
+      bin.install "tui"
+    test: |
+      assert_match "tui", shell_output("#{bin}/tui --version")
+    caveats: |
+      Run `tui` to open the picker.
+
+      Log into an app with:  tui <app> --auth   (e.g. tui x --auth)
+      That opens a Chromium-family browser (Brave, Chrome, Chromium, Edge, ...)
+      to capture your session, so install one if you haven't. Credentials and
+      settings are stored in ~/.config/tui/env.

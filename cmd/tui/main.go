@@ -631,6 +631,9 @@ var (
 	warnStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 )
 
+// version is stamped at release time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	// `tui x`, `tui inoreader`, ... run that app in this same binary and exit.
 	runPluginIfRequested()
@@ -642,8 +645,14 @@ func main() {
 			interval = d
 		}
 	}
+	showVersion := flag.Bool("version", false, "print version and exit")
 	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("tui " + version)
+		return
+	}
 
 	// root locates the dev source tree for per-plugin .env; an installed binary
 	// works without it, reading creds from ~/.config/tui/env (each self-exec'd

@@ -6,20 +6,36 @@ read daily:
 | App                      | What it is                                  |
 | ------------------------ | ------------------------------------------- |
 | **all**                  | Every app's unread items in one merged, time-sorted feed |
-| [`x`](x/README.md)               | x.com home timelines (For You / Following)  |
-| [`inoreader`](inoreader/README.md) | Inoreader unread article triage             |
-| [`slack`](slack/README.md)         | Slack unread messages and threads           |
-| [`folo`](folo/README.md)           | Folo pending (unread) article triage        |
+| [`x`](plugins/x/README.md)               | x.com home timelines (For You / Following)  |
+| [`inoreader`](plugins/inoreader/README.md) | Inoreader unread article triage             |
+| [`slack`](plugins/slack/README.md)         | Slack unread messages and threads           |
+| [`folo`](plugins/folo/README.md)           | Folo pending (unread) article triage        |
+
+The whole family ships as one binary; each app is a plugin under `plugins/`.
+
+## Install
+
+```sh
+brew install genkio/tap/tui
+tui                    # open the picker
+```
+
+Log into an app with `tui <app> --auth` (e.g. `tui x --auth`): it opens a
+Chromium-family browser (Brave, Chrome, Chromium, Edge, …) to capture your
+session, so install one if you haven't. Credentials and settings live in
+`~/.config/tui/env`. Reading a story with `o` uses
+[carbonyl](https://github.com/genkio/carbonyl), installed as a dependency.
 
 ## Use
 
 ```sh
-make run      # build the launcher and open the picker
+tui                    # installed via Homebrew
+make run               # from a source checkout (builds ./tui)
 ```
 
 Pick an app and press enter. If it's already logged in it opens straight away;
-if not, the launcher runs that project's `make auth` first (browser login), then
-opens it. Inside an app, `q` drops back to the picker; `q` again quits.
+if not, the launcher runs its `--auth` browser login first, then opens it.
+Inside an app, `q` drops back to the picker; `q` again quits.
 
 ## The `all` timeline
 
