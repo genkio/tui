@@ -9,12 +9,11 @@
 /plugins/slack/slack-tui
 /plugins/folo/folo-tui
 
+# local release artifacts (rebuilt per release, uploaded as gh release assets)
+/dist/
+
 # secrets, in any project
 **/.env
-
-# playwright capture data, in any project
-**/.playwright-cli/
-**/pw-profile/
 
 go.work
 go.work.sum

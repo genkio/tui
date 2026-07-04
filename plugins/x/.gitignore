@@ -6,9 +6,5 @@
 .env.*
 !.env.sample
 
-# playwright-cli session/profile data
-.playwright-cli/
-pw-profile/
-
 go.work
 go.work.sum
