@@ -387,26 +387,46 @@ func (f *Feed) ScrollExpanded(delta int) bool {
 	return true
 }
 
-// scrollToCursor clamps the viewport so the selected row stays visible, keeping
-// a fully-fitting selection on screen and letting a taller one scroll.
+// scrollToCursor positions the viewport for the selected row. A fitting row is
+// pinned at the half-screen line so the items ahead stay in view and the list
+// scrolls under the cursor; near the top the cursor rides above the line (the
+// offset floors at 0) and near the end the remaining items rise to meet it (the
+// offset caps at the last page). A selection taller than the viewport keeps its
+// sticky offset instead, so a long expanded body scrolls line by line
+// (ScrollExpanded) without snapping back to centre.
 func (f *Feed) scrollToCursor() {
 	if len(f.starts) == 0 {
 		f.yoff = 0
 		f.vp.SetYOffset(0)
 		return
 	}
+	h := f.vp.Height()
 	top, bottom := f.cursorBlock()
-	lo, hi := top, bottom-f.vp.Height()+1
-	if hi < lo {
-		lo, hi = hi, lo
+
+	if bottom-top+1 > h {
+		lo, hi := top, bottom-h+1
+		off := f.yoff
+		if off < lo {
+			off = lo
+		}
+		if off > hi {
+			off = hi
+		}
+		f.setOffset(off)
+		return
 	}
-	off := f.yoff
-	if off > hi {
-		off = hi
-	}
-	if off < lo {
+
+	off := top - h/2
+	if lo := bottom - h + 1; off < lo { // keep a multi-line selection fully on screen
 		off = lo
 	}
+	if off > top {
+		off = top
+	}
+	f.setOffset(off)
+}
+
+func (f *Feed) setOffset(off int) {
 	if maxOff := f.total - f.vp.Height(); off > maxOff {
 		off = maxOff
 	}

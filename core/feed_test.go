@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -156,6 +157,36 @@ func TestKeepPinsRowUnread(t *testing.T) {
 	f.SetItems(f.items, true) // manual refresh clears keeps
 	if f.IsKept(k1) {
 		t.Fatal("manual refresh should clear keeps")
+	}
+}
+
+func TestCursorPinnedAtHalfScreen(t *testing.T) {
+	f := NewFeed(NewTheme(true), false)
+	f.SetSize(40, 10) // half-screen line = 5
+	items := make([]Item, 30)
+	for i := range items {
+		items[i] = Item{App: "t", ID: fmt.Sprint(i), Title: fmt.Sprintf("item %d", i)}
+	}
+	f.SetItems(items, true)
+
+	row := func() int { return f.cursor - f.yoff }
+
+	// Above the half-screen line the list stays put; the cursor walks down.
+	f.MoveCursor(3)
+	if f.yoff != 0 || row() != 3 {
+		t.Fatalf("top region: yoff=%d row=%d, want 0 and 3", f.yoff, row())
+	}
+
+	// Past the line the cursor stops and the list scrolls under it.
+	f.MoveCursor(7) // cursor 10
+	if f.yoff != 5 || row() != 5 {
+		t.Fatalf("mid region: yoff=%d row=%d, want 5 and 5", f.yoff, row())
+	}
+
+	// Near the end the offset caps and the remaining items rise to the cursor.
+	f.ToBottom() // cursor 29
+	if maxOff := f.total - 10; f.yoff != maxOff || row() != 9 {
+		t.Fatalf("end region: yoff=%d row=%d, want %d and 9", f.yoff, row(), maxOff)
 	}
 }
 
