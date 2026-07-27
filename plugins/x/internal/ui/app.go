@@ -268,7 +268,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.switchTab(x.Following)
 		}
 
-	case key.Matches(msg, m.keys.ToggleHandle):
+	case key.Matches(msg, m.keys.ShowSource):
 		m.feed.ToggleSource()
 		return m, nil
 

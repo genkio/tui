@@ -181,6 +181,10 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		}
 		return m, m.markItem(it)
 
+	case key.Matches(msg, m.keys.ShowSource):
+		m.feed.ToggleSource()
+		return m, nil
+
 	case key.Matches(msg, m.keys.Mark):
 		it, ok := m.feed.Selected()
 		if !ok || m.feed.IsRead(it.Key()) {

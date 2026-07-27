@@ -46,8 +46,9 @@ merged and sorted newest-first, each row tagged with a colored source chip
 
 Triage works exactly like the individual apps: `j`/`k` move (and mark the row
 you leave read), `space` expands the body inline, `o`/`O` read it in carbonyl,
-`b` opens the browser, `c` copies the URL, `R` refetches, `q` backs out to the
-picker. Marking a row read flushes to that app's own read state (x's local
+`b` opens the browser, `c` copies the URL, `tab` shows the source names
+(`@handle` / feed title, hidden by default so rows are all content), `R`
+refetches, `q` backs out to the picker. Marking a row read flushes to that app's own read state (x's local
 store, or Inoreader/Folo's server), so it's read everywhere, and the picker's
 counts update the moment you return.
 

@@ -8,16 +8,16 @@ import (
 
 type keyMap struct {
 	core.FeedKeys
-	ToggleFeed key.Binding
-	Quit       key.Binding
+	Quit key.Binding
 }
 
 func defaultKeys() keyMap {
-	return keyMap{
-		FeedKeys:   core.NewFeedKeys(),
-		ToggleFeed: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle feed column")),
-		Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "close/quit")),
+	k := keyMap{
+		FeedKeys: core.NewFeedKeys(),
+		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "close/quit")),
 	}
+	k.ShowSource = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "show feed column"))
+	return k
 }
 
 func (k keyMap) shortHelp() []key.Binding {
@@ -27,7 +27,7 @@ func (k keyMap) shortHelp() []key.Binding {
 func (k keyMap) fullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.Expand, k.Carbonyl, k.CarbonylGfx, k.OpenURL, k.CopyURL, k.Mark, k.Keep, k.ToggleFeed, k.Refresh},
+		{k.Expand, k.Carbonyl, k.CarbonylGfx, k.OpenURL, k.CopyURL, k.Mark, k.Keep, k.ShowSource, k.Refresh},
 		{k.Help, k.Quit},
 	}
 }

@@ -130,6 +130,7 @@ tui inoreader            # launch the TUI
 | `q` / `esc` | Collapse the expanded article; on the bare list, `q` quits |
 | `R` | Refresh the list |
 | `g` / `G` | Jump to top / bottom |
+| `tab` | Show the feed column (hidden by default, so rows are all title) |
 | `?` | Toggle full help |
 | `ctrl+c` | Quit |
 

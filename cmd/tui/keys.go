@@ -27,7 +27,7 @@ func (k allKeyMap) shortHelp() []key.Binding {
 func (k allKeyMap) fullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.Expand, k.Mark, k.Keep, k.Carbonyl, k.CarbonylGfx, k.OpenURL, k.CopyURL, k.Refresh},
+		{k.Expand, k.Mark, k.Keep, k.ShowSource, k.Carbonyl, k.CarbonylGfx, k.OpenURL, k.CopyURL, k.Refresh},
 		{k.Help, k.Back},
 	}
 }

@@ -245,7 +245,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.feed.MarkRead(it.Key())
 		return m, markRead(m.ctx, m.client, it.ID)
 
-	case key.Matches(msg, m.keys.ToggleFeed):
+	case key.Matches(msg, m.keys.ShowSource):
 		m.feed.ToggleSource()
 		return m, nil
 

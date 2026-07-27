@@ -62,6 +62,24 @@ func newTestFeed(t *testing.T) Feed {
 	return f
 }
 
+func TestSourceColumnHiddenUntilToggled(t *testing.T) {
+	f := NewFeed(NewTheme(true), false)
+	f.SetSize(60, 6)
+	f.SetItems([]Item{{App: "x", ID: "1", Source: "@TimeOutTokyo", Title: "konbini"}}, true)
+
+	if strings.Contains(f.View(), "@TimeOutTokyo") {
+		t.Fatal("source column shown by default")
+	}
+	f.ToggleSource()
+	if !strings.Contains(f.View(), "@TimeOutTokyo") {
+		t.Fatal("tab did not reveal the source column")
+	}
+	f.ToggleSource()
+	if strings.Contains(f.View(), "@TimeOutTokyo") {
+		t.Fatal("tab did not hide the source column again")
+	}
+}
+
 func TestScrollExpandedReadsLongBodyLineByLine(t *testing.T) {
 	f := newTestFeed(t)
 	k1 := Key("t", "1")

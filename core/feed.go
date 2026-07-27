@@ -20,7 +20,8 @@ const (
 // are already the unread set, so reading is tracked in place: a row you scroll
 // past, expand, or mark greys out but stays put until the next refresh drops
 // it. ShowChip draws the per-source tag (𝕏/ino/folo) for the merged view; a
-// single-source app leaves it off.
+// single-source app leaves it off. The source column (@handle / feed title)
+// starts hidden so rows are all content; tab brings it back.
 type Feed struct {
 	ShowChip bool
 
@@ -47,7 +48,6 @@ func NewFeed(th Theme, showChip bool) Feed {
 		expanded: map[string]bool{},
 		read:     map[string]bool{},
 		kept:     map[string]bool{},
-		showSrc:  true,
 		th:       th,
 		vp:       viewport.New(),
 	}

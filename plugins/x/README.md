@@ -55,7 +55,7 @@ for confirming the session works before opening the UI.
 | `K`        | keep the post unread (scrolling won't mark it; `K` again unlocks) |
 | `u`        | toggle unread-only vs show-all (read posts greyed) |
 | `←` / `→`  | switch For You / Following      |
-| `tab`      | toggle the left `@handle` column |
+| `tab`      | show the left `@handle` column (hidden by default) |
 | `o`        | render the post in [carbonyl](https://github.com/genkio/carbonyl) in the terminal; `q` quits back |
 | `O`        | same as `o` but with `--graphics` (kitty graphics protocol) |
 | `b`        | open the post in the browser    |

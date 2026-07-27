@@ -3,7 +3,8 @@ package core
 import "charm.land/bubbles/v2/key"
 
 // FeedKeys are the bindings every scrolling feed shares, so j/k triage, o/O
-// carbonyl, b browser, c copy, r/K mark all mean the same thing in every app
+// carbonyl, b browser, c copy, r/K mark, tab source column all mean the same
+// thing in every app
 // and in the merged view. Each screen embeds this and adds its own (tabs,
 // toggles, quit vs back-to-picker).
 type FeedKeys struct {
@@ -18,6 +19,7 @@ type FeedKeys struct {
 	CopyURL     key.Binding
 	Mark        key.Binding
 	Keep        key.Binding
+	ShowSource  key.Binding
 	Refresh     key.Binding
 	Help        key.Binding
 }
@@ -35,6 +37,7 @@ func NewFeedKeys() FeedKeys {
 		CopyURL:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy URL")),
 		Mark:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "mark read")),
 		Keep:        key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "keep unread")),
+		ShowSource:  key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "show source names")),
 		Refresh:     key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 		Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	}
