@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"html"
@@ -90,11 +91,12 @@ func tailscaleURL(host, port string) string {
 // fetchAllItems runs each authed feed app's `--json` concurrently (the same
 // contract the all-view TUI uses) and returns the merged, newest-first items
 // plus the names of any apps that failed to load.
-func fetchAllItems(ctx context.Context, root string, apps []string, xTab string, now time.Time) ([]core.Item, []string) {
+func fetchAllItems(ctx context.Context, root string, apps []string, xTab string, now time.Time) ([]core.Item, []string, string) {
 	var (
 		mu     sync.Mutex
 		all    []core.Item
 		failed []string
+		warn   string
 		wg     sync.WaitGroup
 	)
 	for _, app := range apps {
@@ -109,9 +111,14 @@ func fetchAllItems(ctx context.Context, root string, apps []string, xTab string,
 			}
 			cmd := exec.CommandContext(appCtx, self(), args...)
 			cmd.Env = appEnv(filepath.Join(root, "plugins", app))
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
 			out, err := cmd.Output()
 			if err != nil {
 				mu.Lock()
+				if app == "inoreader" && len(stderr.Bytes()) > 0 && bytes.Contains(stderr.Bytes(), []byte("session is stale")) {
+					warn = "Inoreader session is stale — re-run `tui inoreader --auth`."
+				}
 				failed = append(failed, app)
 				mu.Unlock()
 				return
@@ -130,7 +137,7 @@ func fetchAllItems(ctx context.Context, root string, apps []string, xTab string,
 	}
 	wg.Wait()
 	core.MergeSort(all)
-	return all, failed
+	return all, failed, warn
 }
 
 // authedFeedApps lists the logged-in apps the all view merges, freshly computed
@@ -160,10 +167,11 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string) {
 
 	var items []core.Item
 	var failed []string
+	var warn string
 	if len(apps) > 0 {
 		fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
 		defer cancel()
-		items, failed = fetchAllItems(fetchCtx, root, apps, xTab, now)
+		items, failed, warn = fetchAllItems(fetchCtx, root, apps, xTab, now)
 	}
 	asc := r.URL.Query().Get("order") != "desc" // oldest first by default
 	sortItems(items, asc)
@@ -175,7 +183,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page := renderPage(items, apps, failed, now, asc, xTab)
+	page := renderPage(items, apps, failed, now, asc, xTab, warn)
 	_, _ = w.Write([]byte(page))
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"path/filepath"
@@ -43,9 +44,10 @@ func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 	return func() tea.Msg {
 		now := time.Now()
 		type res struct {
-			app   string
-			items []core.Item
-			err   error
+			app    string
+			items  []core.Item
+			err    error
+			stderr string
 		}
 		ch := make(chan res, len(apps))
 		for _, app := range apps {
@@ -58,9 +60,11 @@ func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 				}
 				cmd := exec.CommandContext(ctx, self(), args...)
 				cmd.Env = appEnv(filepath.Join(root, "plugins", app))
+				var stderr bytes.Buffer
+				cmd.Stderr = &stderr
 				out, err := cmd.Output()
 				if err != nil {
-					ch <- res{app: app, err: err}
+					ch <- res{app: app, err: err, stderr: stderr.String()}
 					return
 				}
 				items, perr := core.ParseItems(out, now)
@@ -69,10 +73,14 @@ func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 		}
 		var all []core.Item
 		var failed []string
+		inoreaderStale := false
 		for range apps {
 			r := <-ch
 			if r.err != nil {
 				failed = append(failed, r.app)
+				if r.app == "inoreader" && strings.Contains(r.stderr, "session is stale") {
+					inoreaderStale = true
+				}
 				continue
 			}
 			all = append(all, r.items...)
@@ -81,6 +89,11 @@ func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 		note := ""
 		if len(failed) > 0 {
 			note = "couldn't load: " + strings.Join(failed, ", ")
+			if inoreaderStale {
+				// distinguish a stale session from a hard failure so the user knows
+				// to re-auth rather than assume inoreader is broken.
+				note += " — inoreader session stale, run `tui inoreader --auth`"
+			}
 		}
 		return allItemsMsg{items: all, note: note}
 	}

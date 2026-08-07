@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -171,7 +172,28 @@ func (c *Client) postXajax(ctx context.Context, fn, body string) (*xjxEnvelope, 
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("decoding %s response: %w", fn, err)
 	}
+	if env.stale() {
+		return nil, errStale()
+	}
 	return &env, nil
+}
+
+// stale reports whether the app answered with the generic "no request
+// processor" envelope. Inoreader returns this when the session cookie has
+// rotated and the request is treated as unauthenticated — not a missing
+// endpoint. Distinguishing it saves us (and the user) from chasing a phantom
+// scraping break.
+func (e *xjxEnvelope) stale() bool {
+	for i := range e.Obj {
+		if bytes.Contains(e.Obj[i].Data, []byte("no request processor")) {
+			return true
+		}
+	}
+	return false
+}
+
+func errStale() error {
+	return errors.New("inoreader session is stale: the saved cookie expired. Re-run 'tui inoreader --auth' to refresh it")
 }
 
 func errSession(status int) error {

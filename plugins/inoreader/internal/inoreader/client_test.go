@@ -85,6 +85,26 @@ func TestUnreadsScrapesAndOrders(t *testing.T) {
 	}
 }
 
+func TestStaleSessionDetection(t *testing.T) {
+	// Inoreader answers with a generic "no request processor" envelope when the
+	// session cookie has rotated; we must surface it as a stale-session error so
+	// the UI can tell the user to re-auth.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"xjxobj":[{"cmd":"dbg","data":"Invalid function request received; no request processor found with this name."}]}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "cookie=1", "test-agent")
+	_, err := c.Unreads(context.Background(), true, 50)
+	if err == nil {
+		t.Fatal("expected a stale-session error, got nil")
+	}
+	if !strings.Contains(err.Error(), "session is stale") || !strings.Contains(err.Error(), "inoreader --auth") {
+		t.Fatalf("expected actionable stale message, got: %v", err)
+	}
+}
+
 func TestUnreadsRetriesEmptyFirstRender(t *testing.T) {
 	// The first offset-0 render can come back init-only (no articles); Unreads
 	// must retry once rather than give up and return empty.

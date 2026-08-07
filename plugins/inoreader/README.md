@@ -171,6 +171,11 @@ Environment variables win over the file.
 
 - **"Inoreader rejected the session"** the cookie is missing or expired. Run
   `make auth` again (or re-copy `INOREADER_COOKIE`).
+- **Shows 0 unread but the site has plenty** the saved session likely went
+  **stale** (Inoreader rotates it). The web app then answers xajax calls with a
+  generic `"no request processor"` envelope, so the fetch looks broken while
+  it's really just an expired cookie. Re-run `make auth` (or `tui inoreader
+  --auth`) to capture a fresh `INOREADER_COOKIE`; no code change is needed.
 - **`--check` says 0 fetched** you may be at inbox zero. Try
   `INOREADER_TUI_UNREAD_ONLY=false` to view all articles.
 - **Articles stop parsing / look blank** Inoreader likely changed their web

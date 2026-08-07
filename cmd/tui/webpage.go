@@ -14,7 +14,7 @@ import (
 // (keeps the release a single self-contained binary) and responsive: cards
 // stack full-width with tap-sized targets, and the palette follows the phone's
 // light/dark setting.
-func renderPage(items []core.Item, apps, failed []string, now time.Time, asc bool, xTab string) string {
+func renderPage(items []core.Item, apps, failed []string, now time.Time, asc bool, xTab, warn string) string {
 	var b strings.Builder
 
 	xAuth := "false"
@@ -75,6 +75,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .sortbar .slabel{opacity:.7}
 .sortbar a{color:var(--muted);text-decoration:none}
 .sortbar .on{font-weight:700;color:var(--fg)}
+.warn{background:rgba(214,69,69,.12);border:1px solid rgba(214,69,69,.5);color:var(--fg);border-radius:10px;padding:10px 12px;margin:-4px 0 12px;font-size:14px}
 .refresh{
   margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
   border-radius:10px;padding:8px 14px;font-size:14px;cursor:pointer;text-decoration:none;
@@ -126,6 +127,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   <a class="refresh" href="` + refreshHref + `">↻</a>
 </header>
 ` + renderSortbar(asc) + `
+` + renderWarn(warn) + `
 `)
 
 	if len(items) == 0 {
@@ -274,6 +276,15 @@ func renderSortbar(asc bool) string {
 		newest = `<span class="sort on">newest</span>`
 	}
 	return `<div class="sortbar"><span class="slabel">sort</span>` + oldest + newest + `</div>`
+}
+
+// renderWarn renders a prominent banner for a fixable condition (e.g. an
+// expired session), or nothing when there is nothing to warn about.
+func renderWarn(warn string) string {
+	if warn == "" {
+		return ""
+	}
+	return `<div class="warn">⚠ ` + escape(warn) + `</div>`
 }
 
 // renderCard renders one item as a card.
