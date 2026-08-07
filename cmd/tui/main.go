@@ -649,6 +649,8 @@ func main() {
 	}
 	showVersion := flag.Bool("version", false, "print version and exit")
 	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
+	web := flag.Bool("web", false, "run the web UI (all timeline) instead of the terminal app")
+	webAddr := flag.String("web-addr", "0.0.0.0:8080", "address:port to bind the web UI to")
 	flag.Parse()
 
 	if *showVersion {
@@ -663,6 +665,13 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())
 		os.Exit(1)
+	}
+	if *web {
+		if err := runWeb(root, *webAddr); err != nil {
+			fmt.Fprintln(os.Stderr, "tui --web: "+err.Error())
+			os.Exit(1)
+		}
+		return
 	}
 	if _, err := tea.NewProgram(newModel(root, *poll)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())

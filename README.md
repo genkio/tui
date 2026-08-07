@@ -89,6 +89,39 @@ make x        # build just one (also: make inoreader, make slack)
 make clean
 ```
 
+## Web view (mobile)
+
+The same `all` timeline is available as a mobile-friendly web page, so you can
+triage from your phone or any other device on your Tailscale network:
+
+```sh
+tui --web                 # serve the all timeline on 0.0.0.0:8080
+tui --web --web-addr :9000   # custom port
+```
+
+The server binds `0.0.0.0` by default so your other devices reach it, and
+prints the Tailscale URL to open when `tailscale` is on PATH. It exposes only
+the merged `all` view (no per-app views, no login flow): each logged-in feed
+app's unread items, newest-first. Reading happens by scrolling, like the
+terminal: a card is marked read the moment it scrolls fully off the top of the
+screen and is muted (greyed) in place — it stays in the list so you can see
+what you've read. Each card's footer has a **link icon** that opens the original
+post in a new tab (the only way to leave the page) and a **more/less** toggle
+that expands the full post content for long items. Since scroll-to-read can't
+reach the last few cards, a **mark all read** button sits at the end of the
+feed to clear the tail in one tap. It reuses the same `--json` / `--mark-read`
+contract the terminal `all` view uses, so read state stays consistent between
+the TUI and the page — mark something read and it's read in the app, and vice
+versa.
+
+read, and vice versa. Items are sorted **oldest-first by default** (triage in
+the order they arrived), with a sort toggle to flip to newest-first. The page
+uses the Inter webfont (with system fallbacks) for a polished read.
+
+The page is server-rendered and responsive (cards stack full-width, tap-sized
+targets, follows your phone's light/dark theme). `?json=1` returns the same feed
+as JSON for scripts. Runs indefinitely until you Ctrl-C.
+
 ## Layout
 
 Each app stays a self-contained Go module with its own `Makefile`, `README`,
