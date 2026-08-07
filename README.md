@@ -121,15 +121,38 @@ confirming switches x to For You (ephemerally — reloading the page returns to
 the Following default). It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
 the TUI and the page — mark something read and it's read in the app, and vice
-versa.
-
-read, and vice versa. Items are sorted **oldest-first by default** (triage in
+versa. Items are sorted **oldest-first by default** (triage in
 the order they arrived), with a sort toggle to flip to newest-first. The page
 uses the Inter webfont (with system fallbacks) for a polished read.
 
 The page is server-rendered and responsive (cards stack full-width, tap-sized
 targets, follows your phone's light/dark theme). `?json=1` returns the same feed
 as JSON for scripts. Runs indefinitely until you Ctrl-C.
+
+### macOS firewall vs. source builds
+
+If the macOS firewall is on, other devices can't reach the page even though it
+loads fine on localhost: the firewall judges the **listening app** (not
+tailscaled), and it silently blocks **unsigned** binaries — on Sequoia without
+the old "allow incoming connections?" popup, and allow rules don't stick until
+the binary is signed. Go builds are unsigned on Intel Macs (Apple Silicon
+ad-hoc signs automatically), so a source-built `./tui` is exactly that.
+
+After **every** `make build` / `go build` (rebuilding wipes the signature):
+
+```sh
+codesign -f -s - ./tui
+```
+
+and once per checkout path, register it with the firewall:
+
+```sh
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PWD/tui"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PWD/tui"
+```
+
+then restart `tui --web`. If another device still can't connect after a
+rebuild, re-run the two `socketfilterfw` lines.
 
 ## Layout
 
