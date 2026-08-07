@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -90,6 +91,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .src{font-weight:600;color:var(--fg)}
 .dot{opacity:.5}
 .body{margin:8px 0 4px;color:var(--fg);white-space:pre-wrap;word-break:break-word;font-size:15px}
+.body .link{color:var(--accent);text-decoration:underline;word-break:break-all}
 .card.read{opacity:.45}
 .footer{display:flex;align-items:center;gap:18px;margin-top:12px}
 .markall{
@@ -321,16 +323,16 @@ func renderCard(it core.Item) string {
 	// expand toggle reveals.
 	var preview, full strings.Builder
 	if dup {
-		preview.WriteString(`<div class="body">` + escape(clip(body, 220)) + `</div>`)
-		full.WriteString(`<div class="body">` + escape(body) + `</div>`)
+		preview.WriteString(`<div class="body">` + linkify(clip(body, 220)) + `</div>`)
+		full.WriteString(`<div class="body">` + linkify(body) + `</div>`)
 	} else {
 		if title != "" {
 			preview.WriteString(`<div class="ctitle">` + escape(title) + `</div>`)
 			full.WriteString(`<div class="ctitle">` + escape(title) + `</div>`)
 		}
 		if body != "" {
-			preview.WriteString(`<div class="body">` + escape(clip(body, 220)) + `</div>`)
-			full.WriteString(`<div class="body">` + escape(body) + `</div>`)
+			preview.WriteString(`<div class="body">` + linkify(clip(body, 220)) + `</div>`)
+			full.WriteString(`<div class="body">` + linkify(body) + `</div>`)
 		}
 	}
 	b.WriteString(`<div class="preview">` + preview.String() + `</div>`)
@@ -359,6 +361,40 @@ func clip(s string, n int) string {
 	r := []rune(s)
 	if len(r) > n {
 		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// linkRe matches a URL plus any trailing punctuation (so "see http://x.com."
+// renders the period as plain text, not part of the link).
+var linkRe = regexp.MustCompile(`(https?://[^\s<>"']+)([.,;:!?)\]}"']*)`)
+
+// linkify HTML-escapes text and turns embedded URLs into clickable links that
+// open in a new tab; non-URL text is escaped as before.
+func linkify(s string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range linkRe.FindAllStringSubmatchIndex(s, -1) {
+		b.WriteString(escape(s[last:m[2]])) // text before the URL
+		u := s[m[2]:m[3]]
+		b.WriteString(`<a class="link" href="` + escape(u) + `" target="_blank" rel="noopener" title="` + escape(u) + `">` + escape(linkLabel(u)) + `</a>`)
+		if m[4] >= 0 { // trailing punctuation kept as plain text
+			b.WriteString(escape(s[m[4]:m[5]]))
+		}
+		last = m[1]
+	}
+	b.WriteString(escape(s[last:]))
+	return b.String()
+}
+
+// linkLabel trims the scheme/www and shortens a URL for link text, keeping the
+// full address in href and the title tooltip.
+func linkLabel(u string) string {
+	s := strings.TrimPrefix(u, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimPrefix(s, "www.")
+	if r := []rune(s); len(r) > 40 {
+		return string(r[:40]) + "…"
 	}
 	return s
 }

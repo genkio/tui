@@ -106,6 +106,31 @@ func TestRenderPageWarn(t *testing.T) {
 	}
 }
 
+func TestLinkify(t *testing.T) {
+	cases := []struct{ in, wantSub string }{
+		// A bare URL on its own line becomes a clickable link.
+		{"https://preview.redd.it/wtlijoe96phh1.png?width=964", `href="https://preview.redd.it/wtlijoe96phh1.png?width=964"`},
+		// Multiple URLs each link, separated by the newlines.
+		{"https://a.example/1\nhttps://b.example/2\n", "https://b.example/2"},
+		// Surrounding prose is kept and links are inserted around it.
+		{"see https://x.com/oops.<b>x</b>", `see <a class="link"`},
+	}
+	for _, c := range cases {
+		out := linkify(c.in)
+		if !strings.Contains(out, c.wantSub) {
+			t.Errorf("linkify(%q) missing %q -> %s", c.in, c.wantSub, out)
+		}
+	}
+	// Prose after a URL is still escaped (no injection).
+	if out := linkify("https://x.com/a <b>hi</b>"); !strings.Contains(out, "&lt;b&gt;") {
+		t.Fatalf("linkify must escape prose after a URL: %s", out)
+	}
+	// No URLs -> no links.
+	if out := linkify("plain text with no links"); strings.Contains(out, "<a ") {
+		t.Fatalf("no URLs should produce no links: %s", out)
+	}
+}
+
 func TestRenderPageEmptyAndNote(t *testing.T) {
 	// No authed apps: the page tells the user to log in.
 	p := renderPage(nil, nil, nil, time.Now(), true, "following", "")
