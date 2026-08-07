@@ -17,25 +17,29 @@ import (
 )
 
 // FindChromium returns the path to a Chromium-family browser to drive for login
-// (Brave, Chrome, Chromium, Edge, Vivaldi, Arc), or an error naming what to
+// (Chromium, Brave, Chrome, Edge, Vivaldi, Arc), or an error naming what to
 // install. Any Chromium browser speaks the DevTools protocol; WebKit (Safari)
 // does not, so a Safari-only user sets credentials by hand instead.
+//
+// Chromium (e.g. brew install --cask ungoogled-chromium) is tried first so an
+// ungoogled build is the preferred login browser over the branded ones; reorder
+// the lists below to change the preference.
 func FindChromium() (string, error) {
 	if runtime.GOOS == "darwin" {
-		for _, app := range []string{"Brave Browser", "Google Chrome", "Chromium", "Microsoft Edge", "Vivaldi", "Arc"} {
+		for _, app := range []string{"Chromium", "Brave Browser", "Google Chrome", "Microsoft Edge", "Vivaldi", "Arc"} {
 			p := "/Applications/" + app + ".app/Contents/MacOS/" + app
 			if _, err := os.Stat(p); err == nil {
 				return p, nil
 			}
 		}
 	} else {
-		for _, name := range []string{"brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "vivaldi-stable"} {
+		for _, name := range []string{"chromium", "chromium-browser", "brave-browser", "brave", "google-chrome", "google-chrome-stable", "microsoft-edge", "vivaldi-stable"} {
 			if p, err := exec.LookPath(name); err == nil {
 				return p, nil
 			}
 		}
 	}
-	return "", errors.New("no Chromium-family browser found (Brave, Chrome, Chromium, Edge, …); install one, or set credentials by hand in " + UserEnvPath())
+	return "", errors.New("no Chromium-family browser found (Chromium, Brave, Chrome, Edge, …); install one, or set credentials by hand in " + UserEnvPath())
 }
 
 // Session is the captured browser state a plugin reads its credentials from.

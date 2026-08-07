@@ -10,6 +10,7 @@ read daily:
 | [`inoreader`](plugins/inoreader/README.md) | Inoreader unread article triage             |
 | [`slack`](plugins/slack/README.md)         | Slack unread messages and threads           |
 | [`folo`](plugins/folo/README.md)           | Folo pending (unread) article triage        |
+| [`reddit`](plugins/reddit/README.md)       | Reddit home timeline                         |
 
 The whole family ships as one binary; each app is a plugin under `plugins/`.
 
@@ -42,7 +43,7 @@ Inside an app, `q` drops back to the picker; `q` again quits.
 The first pick is **all**: one feed of the unread items from every logged-in
 reader app (`x`, `inoreader`, `folo`; slack is a chat model, not a stream),
 merged and sorted newest-first, each row tagged with a colored source chip
-(`𝕏`, `ino`, `folo`). It's the whole morning's backlog in one place.
+(`𝕏`, `ino`, `folo`, `rdt`). It's the whole morning's backlog in one place.
 
 Triage works exactly like the individual apps: `j`/`k` move (and mark the row
 you leave read), `space` expands the body inline, `o`/`O` read it in carbonyl,
