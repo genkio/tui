@@ -112,6 +112,11 @@ func RunAuth(ctx context.Context, loginURL string, capture func(*Session) (map[s
 		chromedp.ExecPath(browser),
 		chromedp.UserDataDir(profile),
 		chromedp.Flag("headless", false),
+		// Hide automation from bot detection: Google OAuth refuses sign-in
+		// ("This browser or app may not be secure") and X rate-limits login
+		// when navigator.webdriver is true.
+		chromedp.Flag("enable-automation", false),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancelAlloc()
