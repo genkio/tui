@@ -8,6 +8,7 @@
 /plugins/inoreader/inoreader-tui
 /plugins/slack/slack-tui
 /plugins/folo/folo-tui
+/plugins/reddit/reddit-tui
 
 # local release artifacts (rebuilt per release, uploaded as gh release assets)
 /dist/

@@ -1,4 +1,4 @@
-APPS := x inoreader slack folo
+APPS := x inoreader slack folo reddit
 
 .DEFAULT_GOAL := build
 .PHONY: build run launcher apps clean help $(APPS)

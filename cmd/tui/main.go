@@ -1,5 +1,5 @@
 // Command tui is a launcher for the terminal apps in this repo (x, inoreader,
-// slack, folo). It lists them, runs the selected one as a subprocess, and kicks off
+// slack, folo, reddit). It lists them, runs the selected one as a subprocess, and kicks off
 // that project's `make auth` first when it isn't logged in yet. Because each TUI
 // runs as a child process, quitting it (q) drops back here; q again exits.
 package main
@@ -46,6 +46,8 @@ func appsIn(root string) []app {
 			[][]string{{"SLACK_MCP_XOXP_TOKEN"}, {"SLACK_MCP_XOXC_TOKEN", "SLACK_MCP_XOXD_TOKEN"}}, false},
 		{"folo", "Folo pending articles (Follow reader)", filepath.Join(root, "plugins", "folo"),
 			[][]string{{"FOLO_COOKIE"}}, true},
+		{"reddit", "Reddit home timeline", filepath.Join(root, "plugins", "reddit"),
+			[][]string{{"RDTUI_COOKIE"}}, true},
 	}
 }
 
@@ -524,7 +526,7 @@ func (m model) View() tea.View {
 
 	// The all timeline leads the list as a synthetic first row, above the apps
 	// it aggregates.
-	renderRow(0, "all", "Merged unread across x · inoreader · folo", m.allBadge())
+	renderRow(0, "all", "Merged unread across x · inoreader · folo · reddit", m.allBadge())
 	for i, a := range m.apps {
 		renderRow(i+1, a.name, a.desc, m.badge(i))
 	}
