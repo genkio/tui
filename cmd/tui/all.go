@@ -38,6 +38,9 @@ type allModel struct {
 	statusErr     bool
 	themeAuto     bool
 	lastRefresh   time.Time
+
+	xTab     string // which x timeline to show: following | foryou
+	xOffered bool   // whether we've already suggested switching to For You
 }
 
 func newAllModel(root string) allModel {
@@ -53,6 +56,7 @@ func newAllModel(root string) allModel {
 		help:    help.New(),
 		keys:    defaultAllKeys(),
 		pending: map[string][]string{},
+		xTab:    "following",
 	}
 }
 
@@ -67,8 +71,10 @@ func (m allModel) enter(apps []string, w, h int) (allModel, tea.Cmd) {
 	m.status = ""
 	m.statusErr = false
 	m.themeAuto = true
+	m.xTab = "following" // every entry starts on x Following
+	m.xOffered = false
 	m.layout()
-	return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, apps), tea.RequestBackgroundColor)
+	return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, apps, "following"), tea.RequestBackgroundColor)
 }
 
 func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
@@ -96,6 +102,7 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 		if msg.note != "" {
 			m.setStatus(msg.note, true)
 		}
+		m.maybeOfferX()
 		return m, nil
 
 	case flushTickMsg:
@@ -151,7 +158,19 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		m.flushNow() // land pending marks first so they don't reappear unread
 		m.loading = true
 		m.loadingNote = "Refreshing…"
-		return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, m.apps))
+		return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, m.apps, m.xTab))
+
+	case key.Matches(msg, m.keys.ContinueX):
+		// 'f' switches x to For You once Following is exhausted.
+		if m.offerableX() {
+			m.clearStatus()
+			m.xTab = "foryou"
+			m.xOffered = false
+			m.loading = true
+			m.loadingNote = "Loading x For You…"
+			return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, m.apps, "foryou"))
+		}
+		return m, nil
 
 	case key.Matches(msg, m.keys.Up):
 		if m.feed.ScrollExpanded(-1) {
@@ -263,6 +282,7 @@ func (m *allModel) moveMarkingRead(delta int) tea.Cmd {
 func (m *allModel) markItem(it core.Item) tea.Cmd {
 	m.feed.MarkRead(it.Key())
 	m.pending[it.App] = append(m.pending[it.App], it.ID)
+	m.maybeOfferX()
 	if m.flushArmed {
 		return nil
 	}
@@ -403,6 +423,44 @@ func (m allModel) bodyHeight() int {
 
 func (m *allModel) setStatus(s string, isErr bool) { m.status = s; m.statusErr = isErr }
 func (m *allModel) clearStatus()                   { m.status = ""; m.statusErr = false }
+
+// hasX reports whether x is among the authed feed apps this screen merged.
+func (m *allModel) hasX() bool {
+	for _, a := range m.apps {
+		if a == "x" {
+			return true
+		}
+	}
+	return false
+}
+
+// offerableX reports whether we should suggest continuing on x For You: x is
+// authed, we're on Following, and there's nothing unread left in the feed.
+func (m *allModel) offerableX() bool {
+	if m.xTab != "following" || !m.hasX() {
+		return false
+	}
+	if m.feed.Len() == 0 {
+		return true
+	}
+	for _, it := range m.feed.Items() {
+		if !m.feed.IsRead(it.Key()) {
+			return false
+		}
+	}
+	return true
+}
+
+// maybeOfferX shows the "continue on x For You" hint once, when Following is
+// exhausted (so the user knows 'f' will switch), and only if not already on
+// For You.
+func (m *allModel) maybeOfferX() {
+	if m.xOffered || !m.offerableX() {
+		return
+	}
+	m.xOffered = true
+	m.setStatus("All read — press f to continue on x For You.", false)
+}
 
 // friendlyAllError trims a raw error to one readable line.
 func friendlyAllError(err error) string {

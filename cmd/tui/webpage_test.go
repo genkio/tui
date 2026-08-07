@@ -80,11 +80,11 @@ func TestRenderCardExpandOnlyWhenLong(t *testing.T) {
 }
 
 func TestRenderPageMarkAll(t *testing.T) {
-	with := renderPage([]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, time.Now(), true)
+	with := renderPage([]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, time.Now(), true, "following")
 	if !strings.Contains(with, "mark all read") {
 		t.Fatal("expected mark-all-read button when there are items")
 	}
-	without := renderPage(nil, []string{"x"}, nil, time.Now(), true)
+	without := renderPage(nil, []string{"x"}, nil, time.Now(), true, "following")
 	if strings.Contains(without, "mark all read") {
 		t.Fatal("mark-all-read should be absent when the feed is empty")
 	}
@@ -96,7 +96,7 @@ func TestRenderPageMarkAll(t *testing.T) {
 
 func TestRenderPageEmptyAndNote(t *testing.T) {
 	// No authed apps: the page tells the user to log in.
-	p := renderPage(nil, nil, nil, time.Now(), true)
+	p := renderPage(nil, nil, nil, time.Now(), true, "following")
 	if !strings.Contains(p, "No reader app is logged in") {
 		t.Fatal("expected login note, got: " + p)
 	}
@@ -105,12 +105,12 @@ func TestRenderPageEmptyAndNote(t *testing.T) {
 		t.Fatal("expected an oldest-first default sortbar: " + p)
 	}
 	// Authed but zero items: inbox zero.
-	p2 := renderPage(nil, []string{"x"}, nil, time.Now(), true)
+	p2 := renderPage(nil, []string{"x"}, nil, time.Now(), true, "following")
 	if !strings.Contains(p2, "Inbox zero") {
 		t.Fatal("expected inbox-zero message")
 	}
 	// One failing app is reported in the header.
-	p3 := renderPage(nil, []string{"x", "reddit"}, []string{"reddit"}, time.Now(), true)
+	p3 := renderPage(nil, []string{"x", "reddit"}, []string{"reddit"}, time.Now(), true, "following")
 	if !strings.Contains(p3, "unavailable: reddit") {
 		t.Fatal("expected failure note")
 	}

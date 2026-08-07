@@ -46,6 +46,7 @@ func run() error {
 		auth        = flag.Bool("auth", false, "log in via a browser and capture the session into ~/.config/tui/env")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/x-tui/config.toml)")
 		refresh     = flag.Duration("refresh", 0, "auto-refresh the timeline at this interval (e.g. 2m); off if unset")
+		tabFlag     = flag.String("tab", "", "x timeline to read: foryou | following (default from config)")
 	)
 	flag.Parse()
 
@@ -86,14 +87,18 @@ func run() error {
 
 	client := x.New(config.AuthToken(), config.CSRF(), cfg.Bearer, cfg.Lang)
 
+	// resolveTab lets the 'all' view (which drives --json/--count) switch x
+	// between For You and Following per request, falling back to the config default.
+	tab := resolveTab(cfg, *tabFlag)
+
 	if *check {
 		return printCheck(ctx, client)
 	}
 	if *count {
-		return printCount(ctx, client, cfg)
+		return printCount(ctx, client, cfg, tab)
 	}
 	if *dumpJSON {
-		return printJSON(ctx, client, cfg)
+		return printJSON(ctx, client, cfg, tab)
 	}
 
 	interval := cfg.RefreshInterval()
@@ -127,16 +132,20 @@ func printCheck(ctx context.Context, client *x.Client) error {
 // so it's reported as "N+"; the launcher treats that as saturated and stops
 // polling. A read post in the window marks where you left off, so a partial
 // count is treated as complete.
-func defaultTab(cfg config.Config) x.Tab {
-	switch strings.ToLower(strings.TrimSpace(cfg.DefaultTab)) {
-	case "foryou", "for you", "for-you":
-		return x.ForYou
+
+// resolveTab picks the x timeline: the --tab flag wins, else the config default.
+func resolveTab(cfg config.Config, flagTab string) x.Tab {
+	for _, s := range []string{flagTab, cfg.DefaultTab} {
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "foryou", "for you", "for-you":
+			return x.ForYou
+		}
 	}
 	return x.Following
 }
 
-func printCount(ctx context.Context, client *x.Client, cfg config.Config) error {
-	src := x.NewSource(client, readstore.Load(""), defaultTab(cfg), cfg.MaxTweets)
+func printCount(ctx context.Context, client *x.Client, cfg config.Config, tab x.Tab) error {
+	src := x.NewSource(client, readstore.Load(""), tab, cfg.MaxTweets)
 	n, capped, err := src.Count(ctx)
 	if err != nil {
 		return err
@@ -166,12 +175,7 @@ type dumpItem struct {
 // printJSON dumps the unread posts of the default timeline as a JSON array for
 // the launcher's "all" view, applying the same local read filter as --count so
 // the two stay consistent.
-func printJSON(ctx context.Context, client *x.Client, cfg config.Config) error {
-	tab := x.Following
-	switch strings.ToLower(strings.TrimSpace(cfg.DefaultTab)) {
-	case "foryou", "for you", "for-you":
-		tab = x.ForYou
-	}
+func printJSON(ctx context.Context, client *x.Client, cfg config.Config, tab x.Tab) error {
 	tweets, err := client.Timeline(ctx, tab, cfg.MaxTweets)
 	if err != nil {
 		return err

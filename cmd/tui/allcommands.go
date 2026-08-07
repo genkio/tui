@@ -37,8 +37,9 @@ const flushDebounce = 1500 * time.Millisecond
 
 // fetchAll runs each authed app's `make json` concurrently, parses the unread
 // items, and returns them merged and sorted newest-first. One app failing (an
-// expired cookie, say) drops only that app, noted for the status line.
-func fetchAll(root string, apps []string) tea.Cmd {
+// expired cookie, say) drops only that app, noted for the status line. xTab
+// (following|foryou) selects which x timeline to read.
+func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 	return func() tea.Msg {
 		now := time.Now()
 		type res struct {
@@ -51,7 +52,11 @@ func fetchAll(root string, apps []string) tea.Cmd {
 			go func(app string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, self(), app, "--json")
+				args := []string{app, "--json"}
+				if app == "x" {
+					args = append(args, "--tab", xTab) // For You / Following
+				}
+				cmd := exec.CommandContext(ctx, self(), args...)
 				cmd.Env = appEnv(filepath.Join(root, "plugins", app))
 				out, err := cmd.Output()
 				if err != nil {

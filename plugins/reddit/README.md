@@ -110,12 +110,13 @@ cookie header from the site's cookies: `reddit_session=…; token_v2=…; …` a
 
 ## How it works
 
-Each fetch is one GET to `https://old.reddit.com/.json?limit=N` (the root home
-feed), sent with
-the session's `Cookie` header and a browser User-Agent (Reddit rejects bare
-programmatic agents). The endpoint returns a `Listing` whose `children` are the
-posts of your authenticated home feed; the client keeps only the `t3` post
-entries and flattens each into a simple row.
+Each fetch is one GET to `https://old.reddit.com/.json?limit=N&sort=new` (the
+root home feed, sorted newest-first), sent with the session's `Cookie` header and
+a browser User-Agent (Reddit rejects bare programmatic agents). The endpoint
+returns a `Listing` whose `children` are the posts of your authenticated home
+feed; the client keeps only the `t3` post entries and flattens each into a
+simple row. `sort=new` is a stable reverse-chronological page, rather than
+Reddit's default "best" which reshuffles between fetches.
 
 A link post opens its external article; a self post (or one hosted on Reddit,
 like an image or gallery) opens the thread on `old.reddit.com`, which renders

@@ -46,7 +46,10 @@ func (c *Client) Home(ctx context.Context, limit int) ([]Post, error) {
 	if limit <= 0 {
 		limit = 25
 	}
-	query := "limit=" + url.QueryEscape(fmt.Sprint(limit)) + "&raw_json=1"
+	// sort=new gives a stable reverse-chronological feed, so a reload doesn't
+	// shuffle the pool and old items stop resurfacing (Reddit's default "best"
+	// reshuffles every fetch).
+	query := "limit=" + url.QueryEscape(fmt.Sprint(limit)) + "&raw_json=1&sort=new"
 
 	var lastErr error
 	for _, base := range homeEndpoints {

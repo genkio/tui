@@ -90,7 +90,7 @@ func tailscaleURL(host, port string) string {
 // fetchAllItems runs each authed feed app's `--json` concurrently (the same
 // contract the all-view TUI uses) and returns the merged, newest-first items
 // plus the names of any apps that failed to load.
-func fetchAllItems(ctx context.Context, root string, apps []string, now time.Time) ([]core.Item, []string) {
+func fetchAllItems(ctx context.Context, root string, apps []string, xTab string, now time.Time) ([]core.Item, []string) {
 	var (
 		mu     sync.Mutex
 		all    []core.Item
@@ -103,7 +103,11 @@ func fetchAllItems(ctx context.Context, root string, apps []string, now time.Tim
 			defer wg.Done()
 			appCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(appCtx, self(), app, "--json")
+			args := []string{app, "--json"}
+			if app == "x" {
+				args = append(args, "--tab", xTab) // For You / Following
+			}
+			cmd := exec.CommandContext(appCtx, self(), args...)
 			cmd.Env = appEnv(filepath.Join(root, "plugins", app))
 			out, err := cmd.Output()
 			if err != nil {
@@ -143,16 +147,23 @@ func authedFeedApps(root string) []string {
 
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
 // with ?json=1). Default order is oldest-first; ?order=desc flips to newest-first.
+// ?x=foryou serves x's For You timeline instead of the Following default (used
+// only ephemerally; the page resets to following on reload).
 func handleAll(w http.ResponseWriter, r *http.Request, root string) {
 	now := time.Now()
 	apps := authedFeedApps(root)
+
+	xTab := r.URL.Query().Get("x")
+	if xTab != "foryou" {
+		xTab = "following"
+	}
 
 	var items []core.Item
 	var failed []string
 	if len(apps) > 0 {
 		fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
 		defer cancel()
-		items, failed = fetchAllItems(fetchCtx, root, apps, now)
+		items, failed = fetchAllItems(fetchCtx, root, apps, xTab, now)
 	}
 	asc := r.URL.Query().Get("order") != "desc" // oldest first by default
 	sortItems(items, asc)
@@ -164,7 +175,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page := renderPage(items, apps, failed, now, asc)
+	page := renderPage(items, apps, failed, now, asc, xTab)
 	_, _ = w.Write([]byte(page))
 }
 

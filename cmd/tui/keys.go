@@ -10,13 +10,15 @@ import (
 // which drops to the picker rather than quitting the launcher.
 type allKeyMap struct {
 	core.FeedKeys
-	Back key.Binding
+	Back      key.Binding
+	ContinueX key.Binding
 }
 
 func defaultAllKeys() allKeyMap {
 	return allKeyMap{
-		FeedKeys: core.NewFeedKeys(),
-		Back:     key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "back to picker")),
+		FeedKeys:  core.NewFeedKeys(),
+		Back:      key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "back to picker")),
+		ContinueX: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "continue on x For You")),
 	}
 }
 
@@ -27,7 +29,7 @@ func (k allKeyMap) shortHelp() []key.Binding {
 func (k allKeyMap) fullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.Expand, k.Mark, k.Keep, k.ShowSource, k.Carbonyl, k.CarbonylGfx, k.OpenURL, k.CopyURL, k.Refresh},
+		{k.Expand, k.Mark, k.Keep, k.ShowSource, k.ContinueX, k.Carbonyl, k.CarbonylGfx, k.OpenURL, k.CopyURL, k.Refresh},
 		{k.Help, k.Back},
 	}
 }

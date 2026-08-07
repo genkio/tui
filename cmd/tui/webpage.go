@@ -14,8 +14,16 @@ import (
 // (keeps the release a single self-contained binary) and responsive: cards
 // stack full-width with tap-sized targets, and the palette follows the phone's
 // light/dark setting.
-func renderPage(items []core.Item, apps, failed []string, now time.Time, asc bool) string {
+func renderPage(items []core.Item, apps, failed []string, now time.Time, asc bool, xTab string) string {
 	var b strings.Builder
+
+	xAuth := "false"
+	for _, a := range apps {
+		if a == "x" {
+			xAuth = "true"
+			break
+		}
+	}
 
 	refreshHref := "/"
 	if !asc {
@@ -93,7 +101,17 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
 .hid{display:none}
 .empty{color:var(--muted);font-style:italic}
+.dlg{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:16px;padding:20px;max-width:360px;width:calc(100vw - 48px)}
+.dlg::backdrop{background:rgba(0,0,0,.55)}
+.dlg-title{margin:0 0 6px;font-size:19px;font-weight:700}
+.dlg-hint{margin:0 0 16px;color:var(--muted);font-size:15px}
+.dlg-actions{display:flex;gap:10px}
+.dlg-actions button{flex:1;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:600;min-height:44px;cursor:pointer}
+.dlg-go{border:none;background:var(--accent);color:#fff}
+.dlg-no{border:1px solid var(--line);background:transparent;color:var(--fg)}
 .note{padding:16px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:15px}
+.note a{color:var(--accent);font-weight:600;text-decoration:none}
+.note.offer{margin-top:10px}
 .toast{
   position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
   background:var(--fg);color:var(--bg);font-size:14px;font-weight:600;
@@ -101,6 +119,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 }
 </style>
 </head><body>
+<div id="state" data-xauth="` + xAuth + `" data-xtab="` + xTab + `" hidden></div>
 <div class="wrap">
 <header>
   <div class="sub" id="sub">` + escape(strings.Join(meta, " · ")) + `</div>
@@ -114,6 +133,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 			b.WriteString(`<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>`)
 		} else {
 			b.WriteString(`<div class="note">Inbox zero across every timeline.</div>`)
+			// With x authed on Following and nothing left to read, give a direct
+			// way into For You right from the empty state.
+			if xAuth == "true" && xTab == "following" {
+				b.WriteString(`<div class="note offer">All caught up. <a href="/?x=foryou">Continue with For You from x →</a></div>`)
+			}
 		}
 	}
 	for _, it := range items {
@@ -125,6 +149,16 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 		b.WriteString(`<button id="markAll" class="markall" type="button">✓ mark all read</button>`)
 	}
 	b.WriteString(`<div id="toast" class="toast"></div>
+<dialog id="forYou" class="dlg">
+  <div class="dlg-body">
+    <p class="dlg-title">All read.</p>
+    <p class="dlg-hint">Everything's clear. Want to keep going on x's For You timeline?</p>
+  </div>
+  <div class="dlg-actions">
+    <button id="forYouGo" class="dlg-go" type="button">Continue on For You</button>
+    <button id="forYouNo" class="dlg-no" type="button">Not now</button>
+  </div>
+</dialog>
 <script>
 // Reading = scrolling: the moment a card is fully off-screen (its bottom edge
 // clears the top of the viewport) it is marked read and muted in place — it
@@ -153,6 +187,7 @@ function decCount(n){
   var m = s.textContent.match(/^(\d+)/);
   var c = (m ? parseInt(m[1],10) : 0) - n; if(c < 0) c = 0;
   s.textContent = s.textContent.replace(/^\d+/, c);
+  if(c === 0) maybeOfferForYou();   // whole list read
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
 var obs = new IntersectionObserver(function(entries){
@@ -205,6 +240,23 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
   markAllBtn.textContent = '✓ all read';
   markAllBtn.disabled = true;
 });
+
+// x feed state (from the server): whether x is authed and which tab is live.
+var st = document.getElementById('state');
+var X_AUTHED = st ? st.getAttribute('data-xauth') === 'true' : false;
+var X_TAB = st ? st.getAttribute('data-xtab') : 'following';
+var forYouPrompted = false;
+// The ?x=foryou hand-off is one-shot: strip the param so any later reload
+// returns to the normal Following default.
+if(location.search.indexOf('x=foryou') !== -1){ history.replaceState(null, '', location.pathname); }
+// Once the whole list is read, offer to keep going on x For You.
+function maybeOfferForYou(){
+  if(forYouPrompted || !X_AUTHED || X_TAB !== 'following') return;
+  forYouPrompted = true;
+  document.getElementById('forYou').showModal();
+}
+document.getElementById('forYouGo').addEventListener('click', function(){ location.href = '/?x=foryou'; });
+document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>`)
 	return b.String()

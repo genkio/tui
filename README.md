@@ -53,6 +53,12 @@ refetches, `q` backs out to the picker. Marking a row read flushes to that app's
 store, or Inoreader/Folo's server), so it's read everywhere, and the picker's
 counts update the moment you return.
 
+Once you've read everything, `all` offers one more thing: if x is logged in and
+you were on its **Following** feed, it shows *"All read — press `f` to continue
+on x For You"*. `f` swaps the x source to the **For You** timeline and refetches
+(backing out of `all` and re-entering returns to Following, and a subsequent
+refresh keeps whatever tab is live).
+
 Sorting is by publish time: x and Folo carry an exact timestamp; Inoreader
 exposes only a relative age (`2h`), so its items are placed from that. An item
 with no resolvable time sinks to the bottom rather than jumping the queue.
@@ -109,7 +115,10 @@ what you've read. Each card's footer has a **link icon** that opens the original
 post in a new tab (the only way to leave the page) and a **more/less** toggle
 that expands the full post content for long items. Since scroll-to-read can't
 reach the last few cards, a **mark all read** button sits at the end of the
-feed to clear the tail in one tap. It reuses the same `--json` / `--mark-read`
+feed to clear the tail in one tap. Once everything is read, if x is logged in
+and on its Following timeline, a dialog offers to **continue on x For You**;
+confirming switches x to For You (ephemerally — reloading the page returns to
+the Following default). It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
 the TUI and the page — mark something read and it's read in the app, and vice
 versa.
