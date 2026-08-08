@@ -22,9 +22,13 @@ func userConfigDir() string {
 }
 
 // UserEnvPath is the bundle's single credentials + settings file,
-// $XDG_CONFIG_HOME/tui/env (default ~/.config/tui/env). Auth writes it; every
-// `tui <app>` reads it, so a Homebrew install needs no source tree.
+// $TUI_STATE_DIR/env when a state dir is set, else $XDG_CONFIG_HOME/tui/env
+// (default ~/.config/tui/env). Auth writes it; every `tui <app>` reads it, so
+// a Homebrew install needs no source tree.
 func UserEnvPath() string {
+	if dir := StateDir(); dir != "" {
+		return filepath.Join(dir, "env")
+	}
 	dir := userConfigDir()
 	if dir == "" {
 		return ""

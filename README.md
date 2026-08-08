@@ -28,6 +28,38 @@ session, so install one if you haven't. Credentials and settings live in
 `~/.config/tui/env`. Reading a story with `o` uses
 [carbonyl](https://github.com/genkio/carbonyl), installed as a dependency.
 
+### Syncing state between devices
+
+Point `TUI_STATE_DIR` (or `tui --state-dir <dir>`) at a synced folder and all
+persisted state moves under it, so sessions and read marks follow you across
+machines:
+
+```sh
+export TUI_STATE_DIR=~/Dropbox/tui   # in your shell profile; or: tui --state-dir ~/Dropbox/tui
+```
+
+```
+$TUI_STATE_DIR/
+  env                          credentials for every app (chmod 600)
+  state/<app>-tui/read.json    read state (x, reddit, douban)
+  config/<app>-tui/config.toml per-app settings
+```
+
+Migrate existing state once:
+
+```sh
+mkdir -p "$TUI_STATE_DIR"
+mv ~/.config/tui/env "$TUI_STATE_DIR/env"
+for d in ~/.local/state/*-tui; do mkdir -p "$TUI_STATE_DIR/state/$(basename $d)" && mv $d/* "$TUI_STATE_DIR/state/$(basename $d)/"; done
+```
+
+The flag only affects the launcher; when running a plugin directly
+(`tui x`), set the env var. The browser login profile
+(`~/.config/tui/profile`) deliberately stays local: live Chromium profiles
+don't survive file syncing, and the captured session values in `env` are what
+the apps actually use. Read marks are whole-file JSON saves, so triage from one
+device at a time; concurrent edits end as Dropbox conflict copies.
+
 ## Use
 
 ```sh

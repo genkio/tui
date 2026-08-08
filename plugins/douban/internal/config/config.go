@@ -7,12 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/genkio/tui/core"
 )
 
 // Config is the fully resolved configuration the app runs with.
@@ -48,17 +49,11 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// DefaultPath is $XDG_CONFIG_HOME/douban-tui/config.toml, falling back to
-// ~/.config/douban-tui/config.toml.
+// DefaultPath is $TUI_STATE_DIR/config/douban-tui/config.toml when a shared
+// state dir is set, else $XDG_CONFIG_HOME/douban-tui/config.toml, falling back
+// to ~/.config/douban-tui/config.toml.
 func DefaultPath() string {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return filepath.Join(dir, "douban-tui", "config.toml")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "douban-tui", "config.toml")
+	return core.ConfigPath("douban-tui", "config.toml")
 }
 
 func mergeFile(cfg *Config, path string) error {

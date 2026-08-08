@@ -11,6 +11,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/genkio/tui/core"
 )
 
 // maxEntries caps how many read markers we retain so the file can't grow without
@@ -50,17 +52,11 @@ func Load(path string) *Store {
 	return s
 }
 
-// DefaultPath is $XDG_STATE_HOME/x-tui/read.json, falling back to
-// ~/.local/state/x-tui/read.json. Empty when the home dir can't be resolved.
+// DefaultPath is where read state persists: $TUI_STATE_DIR/state/x-tui/read.json
+// when a shared state dir is set (synced between devices), else
+// $XDG_STATE_HOME/x-tui/read.json, else ~/.local/state/x-tui/read.json.
 func DefaultPath() string {
-	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
-		return filepath.Join(dir, "x-tui", "read.json")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".local", "state", "x-tui", "read.json")
+	return core.StatePath("x-tui", "read.json")
 }
 
 // Path reports where the store persists.

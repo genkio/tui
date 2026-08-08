@@ -672,11 +672,20 @@ func main() {
 	web := flag.Bool("web", false, "run the web UI (all timeline) instead of the terminal app")
 	webAddr := flag.String("web-addr", "0.0.0.0:8080", "address:port to bind the web UI to")
 	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild) and cache fetched items briefly")
+	stateDir := flag.String("state-dir", os.Getenv("TUI_STATE_DIR"), "single dir for credentials, read state, and configs (e.g. ~/Dropbox/tui to sync between devices); env TUI_STATE_DIR")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("tui " + version)
 		return
+	}
+
+	// Export the state dir so every self-exec'd `tui <app>` subprocess resolves
+	// the same env/read-state/config paths as the launcher; normalized (~ and
+	// relative paths expanded) so children don't depend on the launcher's cwd.
+	if *stateDir != "" {
+		os.Setenv("TUI_STATE_DIR", *stateDir)
+		os.Setenv("TUI_STATE_DIR", core.StateDir())
 	}
 
 	// root locates the dev source tree for per-plugin .env; an installed binary
