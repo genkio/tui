@@ -8,6 +8,42 @@ import (
 	"github.com/genkio/tui/core"
 )
 
+// renderPage / renderCard execute the embedded page template the way handleAll
+// does, so the tests cover the real markup.
+func renderPage(t *testing.T, items []core.Item, apps, failed []string, asc bool, xTab, warn string) string {
+	t.Helper()
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := tmpl.Execute(&b, buildPageData(items, apps, failed, time.Now(), asc, xTab, warn)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func renderCard(t *testing.T, it core.Item) string {
+	t.Helper()
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "card", buildCard(it)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
 func TestRenderCardEscapes(t *testing.T) {
 	// Title differs from body here, so the card shows a title + body.
 	it := core.Item{
@@ -20,7 +56,7 @@ func TestRenderCardEscapes(t *testing.T) {
 		URL:    "https://example.com/?a=1&b=2",
 		Age:    "2h",
 	}
-	out := renderCard(it)
+	out := renderCard(t, it)
 	if strings.Contains(out, "<script>") {
 		t.Fatal("script tag not escaped")
 	}
@@ -51,7 +87,7 @@ func TestRenderCardDedupTitle(t *testing.T) {
 		URL:    "https://x.com/alice/status/tweet1",
 		Age:    "5m",
 	}
-	out := renderCard(it)
+	out := renderCard(t, it)
 	if strings.Count(out, "class=\"ctitle\"") != 0 {
 		t.Fatalf("expected no duplicate title, got: %s", out)
 	}
@@ -66,11 +102,11 @@ func TestRenderCardDedupTitle(t *testing.T) {
 
 func TestRenderCardExpandOnlyWhenLong(t *testing.T) {
 	short := core.Item{App: "reddit", ID: "1", Title: "T", Body: "short", Source: "r/g", URL: "https://e.com", Age: "1m"}
-	if strings.Contains(renderCard(short), "expand") {
+	if strings.Contains(renderCard(t, short), "expand") {
 		t.Fatal("expand should not appear for short content")
 	}
 	long := core.Item{App: "reddit", ID: "2", Title: "T", Body: strings.Repeat("word ", 200), Source: "r/g", URL: "https://e.com", Age: "1m"}
-	out := renderCard(long)
+	out := renderCard(t, long)
 	if !strings.Contains(out, "class=\"expand\"") {
 		t.Fatal("expand should appear for long content")
 	}
@@ -80,11 +116,11 @@ func TestRenderCardExpandOnlyWhenLong(t *testing.T) {
 }
 
 func TestRenderPageMarkAll(t *testing.T) {
-	with := renderPage([]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, time.Now(), true, "following", "")
+	with := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, true, "following", "")
 	if !strings.Contains(with, "mark all read") {
 		t.Fatal("expected mark-all-read button when there are items")
 	}
-	without := renderPage(nil, []string{"x"}, nil, time.Now(), true, "following", "")
+	without := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
 	if strings.Contains(without, "mark all read") {
 		t.Fatal("mark-all-read should be absent when the feed is empty")
 	}
@@ -95,12 +131,12 @@ func TestRenderPageMarkAll(t *testing.T) {
 }
 
 func TestRenderPageWarn(t *testing.T) {
-	p := renderPage(nil, []string{"inoreader"}, []string{"inoreader"}, time.Now(), true, "following", "Inoreader session is stale — re-run `tui inoreader --auth`.")
+	p := renderPage(t, nil, []string{"inoreader"}, []string{"inoreader"}, true, "following", "Inoreader session is stale — re-run `tui inoreader --auth`.")
 	if !strings.Contains(p, "session is stale") || !strings.Contains(p, `class="warn"`) {
 		t.Fatalf("expected a warn banner: %s", p)
 	}
 	// No warning message → no banner.
-	p2 := renderPage(nil, []string{"x"}, nil, time.Now(), true, "following", "")
+	p2 := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
 	if strings.Contains(p2, `class="warn"`) {
 		t.Fatal("warn banner should be absent when there's no warning")
 	}
@@ -133,7 +169,7 @@ func TestLinkify(t *testing.T) {
 
 func TestRenderPageEmptyAndNote(t *testing.T) {
 	// No authed apps: the page tells the user to log in.
-	p := renderPage(nil, nil, nil, time.Now(), true, "following", "")
+	p := renderPage(t, nil, nil, nil, true, "following", "")
 	if !strings.Contains(p, "No reader app is logged in") {
 		t.Fatal("expected login note, got: " + p)
 	}
@@ -142,7 +178,7 @@ func TestRenderPageEmptyAndNote(t *testing.T) {
 		t.Fatal("expected an oldest-first default sortbar: " + p)
 	}
 	// Authed but zero items: inbox zero.
-	p2 := renderPage(nil, []string{"x"}, nil, time.Now(), true, "following", "")
+	p2 := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
 	if !strings.Contains(p2, "Inbox zero") {
 		t.Fatal("expected inbox-zero message")
 	}
@@ -151,7 +187,7 @@ func TestRenderPageEmptyAndNote(t *testing.T) {
 func TestRenderPageHealthDots(t *testing.T) {
 	// Every logged-in service gets a labeled dot: green when it loaded, red
 	// when its fetch failed. The dots replace the refresh button.
-	p := renderPage(nil, []string{"x", "reddit"}, []string{"reddit"}, time.Now(), true, "following", "")
+	p := renderPage(t, nil, []string{"x", "reddit"}, []string{"reddit"}, true, "following", "")
 	if !strings.Contains(p, `title="x: live"`) || !strings.Contains(p, `hdot ok`) {
 		t.Fatal("expected a green dot for the healthy service")
 	}
@@ -162,7 +198,7 @@ func TestRenderPageHealthDots(t *testing.T) {
 		t.Fatal("refresh button should be replaced by the health dots")
 	}
 	// No logged-in services: no health strip at all.
-	if strings.Contains(renderPage(nil, nil, nil, time.Now(), true, "following", ""), `class="health"`) {
+	if strings.Contains(renderPage(t, nil, nil, nil, true, "following", ""), `class="health"`) {
 		t.Fatal("health strip should be absent with no logged-in services")
 	}
 }

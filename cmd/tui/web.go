@@ -40,14 +40,29 @@ var appLabels = map[string]string{
 // same subprocess contract as the terminal all view — each authed app's
 // `--json` for the list and `--mark-read` for triage — so read state stays
 // consistent between the TUI and the web page. Only the all view is exposed.
-func runWeb(root, addr string) error {
+// dev turns on the client hot-reload loop: page.tmpl is re-read per request
+// and fetched items are cached briefly so refreshes don't re-scrape services.
+func runWeb(root, addr string, dev bool) error {
+	devPath := ""
+	if dev {
+		devPath = filepath.Join(root, "cmd", "tui", "page.tmpl")
+	}
+	loader, err := newPageLoader(devPath)
+	if err != nil {
+		return err
+	}
+	var cache *fetchCache
+	if dev {
+		cache = &fetchCache{}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root)
+		handleAll(w, r, root, loader, cache)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -71,6 +86,9 @@ func runWeb(root, addr string) error {
 	fmt.Printf("tui --web serving the all timeline on %s\n", addr)
 	if u := tailscaleURL(host, port); u != "" {
 		fmt.Printf("  tailnet:  %s\n", u)
+	}
+	if dev {
+		fmt.Printf("  dev: edit %s and refresh — items cached %s between fetches\n", devPath, devCacheTTL)
 	}
 	fmt.Println("  (ctrl-c to stop)")
 
@@ -155,11 +173,49 @@ func authedFeedApps(root string) []string {
 	return out
 }
 
+// devCacheTTL is how long --dev reuses fetched items between page loads, so a
+// style-tweak refresh loop doesn't re-scrape every service.
+const devCacheTTL = 60 * time.Second
+
+// fetchCache remembers the last fetch per x tab; --dev only.
+type fetchCache struct {
+	mu     sync.Mutex
+	xTab   string
+	at     time.Time
+	items  []core.Item
+	failed []string
+	warn   string
+}
+
+func (c *fetchCache) get(xTab string, now time.Time) ([]core.Item, []string, string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.xTab != xTab || c.at.IsZero() || now.Sub(c.at) > devCacheTTL {
+		return nil, nil, "", false
+	}
+	// copy: callers sort in place, and concurrent requests share this cache
+	return append([]core.Item(nil), c.items...), c.failed, c.warn, true
+}
+
+func (c *fetchCache) put(xTab string, now time.Time, items []core.Item, failed []string, warn string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.xTab, c.at, c.items, c.failed, c.warn = xTab, now, items, failed, warn
+}
+
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
 // with ?json=1). Default order is oldest-first; ?order=desc flips to newest-first.
 // ?x=foryou serves x's For You timeline instead of the Following default (used
 // only ephemerally; the page resets to following on reload).
-func handleAll(w http.ResponseWriter, r *http.Request, root string) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *fetchCache) {
+	// In --dev a template typo should show up immediately, not after a full
+	// fetch, so load (and in dev, re-parse) the template first.
+	tmpl, err := loader.load()
+	if err != nil {
+		http.Error(w, "page template: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	now := time.Now()
 	apps := authedFeedApps(root)
 
@@ -172,9 +228,18 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string) {
 	var failed []string
 	var warn string
 	if len(apps) > 0 {
-		fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
-		defer cancel()
-		items, failed, warn = fetchAllItems(fetchCtx, root, apps, xTab, now)
+		cached := false
+		if cache != nil {
+			items, failed, warn, cached = cache.get(xTab, now)
+		}
+		if !cached {
+			fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
+			defer cancel()
+			items, failed, warn = fetchAllItems(fetchCtx, root, apps, xTab, now)
+			if cache != nil {
+				cache.put(xTab, now, items, failed, warn)
+			}
+		}
 	}
 	asc := r.URL.Query().Get("order") != "desc" // oldest first by default
 	sortItems(items, asc)
@@ -185,9 +250,15 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string) {
 		return
 	}
 
+	// Render to a buffer first so a template error mid-page becomes a clean
+	// 500 instead of half a document.
+	var page bytes.Buffer
+	if err := tmpl.Execute(&page, buildPageData(items, apps, failed, now, asc, xTab, warn)); err != nil {
+		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page := renderPage(items, apps, failed, now, asc, xTab, warn)
-	_, _ = w.Write([]byte(page))
+	_, _ = w.Write(page.Bytes())
 }
 
 // sortItems orders the feed by publish time: oldest first when asc is true,
