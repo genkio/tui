@@ -2,7 +2,6 @@ package x
 
 import (
 	"context"
-	"strings"
 
 	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/x/internal/readstore"
@@ -70,13 +69,14 @@ func ToItem(t Tweet) core.Item {
 		App:    "x",
 		ID:     t.ID,
 		Title:  t.Text,
-		Body:   tweetBody(t),
+		Body:   t.Text,
 		Source: tweetSource(t),
 		Author: t.Name,
 		URL:    t.URL,
 		Age:    t.Age,
 		Video:  t.VideoURL,
 		Poster: t.VideoPoster,
+		Quote:  tweetQuote(t),
 	}
 	if !t.CreatedAt.IsZero() {
 		it.At = t.CreatedAt.UTC()
@@ -103,12 +103,18 @@ func tweetSource(t Tweet) string {
 	return "@" + t.Handle
 }
 
-// tweetBody is the expanded text: the post plus its quoted post, if any, since
-// the shared feed renders one body string rather than x's bespoke quote box.
-func tweetBody(t Tweet) string {
-	body := t.Text
-	if t.Quoted != nil {
-		body = strings.TrimSpace(body + "\n\nquoting @" + t.Quoted.Handle + ": " + t.Quoted.Text)
+// tweetQuote maps a quoted post onto the shared embed shape, so renderers can
+// draw it as a nested card instead of appending it to the body.
+func tweetQuote(t Tweet) *core.Quote {
+	if t.Quoted == nil {
+		return nil
 	}
-	return body
+	return &core.Quote{
+		Source: "@" + t.Quoted.Handle,
+		Author: t.Quoted.Name,
+		Text:   t.Quoted.Text,
+		URL:    t.Quoted.URL,
+		Video:  t.Quoted.VideoURL,
+		Poster: t.Quoted.VideoPoster,
+	}
 }

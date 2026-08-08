@@ -80,6 +80,25 @@ func TestSourceColumnHiddenUntilToggled(t *testing.T) {
 	}
 }
 
+// The terminal draws one body string, so an embedded post has to be flattened
+// back into it when the row expands.
+func TestExpandedRowShowsQuote(t *testing.T) {
+	f := NewFeed(NewTheme(true), false)
+	f.SetSize(60, 12)
+	f.SetItems([]Item{{
+		App: "x", ID: "1", Title: "see this", Body: "see this",
+		Quote: &Quote{Source: "@eve", Author: "Eve", Text: "quoted body"},
+	}}, true)
+
+	if strings.Contains(f.View(), "quoted body") {
+		t.Fatal("a collapsed row should show only its title")
+	}
+	f.ToggleCursor()
+	if !strings.Contains(f.View(), "quoting @eve") || !strings.Contains(f.View(), "quoted body") {
+		t.Fatalf("expanded row lost the quote:\n%s", f.View())
+	}
+}
+
 func TestScrollExpandedReadsLongBodyLineByLine(t *testing.T) {
 	f := newTestFeed(t)
 	k1 := Key("t", "1")

@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/x/internal/config"
@@ -158,73 +157,24 @@ func printCount(ctx context.Context, client *x.Client, cfg config.Config, tab x.
 	return nil
 }
 
-// dumpItem is the normalized shape the launcher's "all" timeline consumes from
-// every app's --json output. Each app maps its own model onto these fields.
-type dumpItem struct {
-	App    string `json:"app"`
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Body   string `json:"body,omitempty"`
-	Source string `json:"source,omitempty"` // @handle here; a feed title in the readers
-	Author string `json:"author,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Age    string `json:"age,omitempty"`
-	TS     string `json:"ts,omitempty"`     // RFC3339 publish time, for the merged sort
-	Video  string `json:"video,omitempty"`  // direct mp4 of the attached video/GIF
-	Poster string `json:"poster,omitempty"` // still frame shown before Video plays
-}
-
 // printJSON dumps the unread posts of the default timeline as a JSON array for
 // the launcher's "all" view, applying the same local read filter as --count so
-// the two stay consistent.
+// the two stay consistent. It emits the same normalization the in-process feed
+// uses, so the merged view and the standalone app can't drift apart.
 func printJSON(ctx context.Context, client *x.Client, cfg config.Config, tab x.Tab) error {
 	tweets, err := client.Timeline(ctx, tab, cfg.MaxTweets)
 	if err != nil {
 		return err
 	}
 	read := readstore.Load("")
-	items := make([]dumpItem, 0, len(tweets))
+	items := make([]core.Wire, 0, len(tweets))
 	for _, t := range tweets {
 		if read.Has(t.ID) {
 			continue
 		}
-		item := dumpItem{
-			App:    "x",
-			ID:     t.ID,
-			Title:  t.Text,
-			Body:   tweetBody(t),
-			Source: tweetSource(t),
-			Author: t.Name,
-			URL:    t.URL,
-			Age:    t.Age,
-			Video:  t.VideoURL,
-			Poster: t.VideoPoster,
-		}
-		if !t.CreatedAt.IsZero() {
-			item.TS = t.CreatedAt.UTC().Format(time.RFC3339)
-		}
-		items = append(items, item)
+		items = append(items, x.ToItem(t).Wire())
 	}
 	return json.NewEncoder(os.Stdout).Encode(items)
-}
-
-// tweetSource is the row's left label: the author handle, flagged when the post
-// reached the timeline as someone else's repost.
-func tweetSource(t x.Tweet) string {
-	if t.RepostBy != "" {
-		return "🔁 @" + t.Handle
-	}
-	return "@" + t.Handle
-}
-
-// tweetBody is the expanded text: the post plus its quoted post, if any, since
-// the merged view can't lazily re-fetch the way the standalone app does.
-func tweetBody(t x.Tweet) string {
-	body := t.Text
-	if t.Quoted != nil {
-		body = strings.TrimSpace(body + "\n\nquoting @" + t.Quoted.Handle + ": " + t.Quoted.Text)
-	}
-	return body
 }
 
 // markReadFromStdin marks read every post id on stdin (one per line), so the

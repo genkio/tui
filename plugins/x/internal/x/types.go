@@ -24,9 +24,12 @@ type Tweet struct {
 	VideoPoster string       // still frame shown before the video plays
 }
 
-// QuotedTweet is the post a Tweet quotes, shown inline when expanded.
+// QuotedTweet is the post a Tweet quotes, rendered as a card inside its parent.
 type QuotedTweet struct {
-	Handle string
-	Name   string
-	Text   string
+	Handle      string
+	Name        string
+	Text        string
+	URL         string // https://x.com/<handle>/status/<id>
+	VideoURL    string // best mp4 of the quoted post's video or GIF; "" when none
+	VideoPoster string
 }

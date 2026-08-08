@@ -50,10 +50,18 @@ func buildSample() []byte {
 		"retweeted_status_result": map[string]any{"result": original},
 	}))
 
-	quoted := userResult("Eve", "eve", legacy("30", "quoted body", nil))
-	dave := userResult("Dave", "dave", legacy("3", "truncated", map[string]any{
-		"quoted_status_result": map[string]any{"result": quoted},
+	// x.com hangs quoted_status_result off the result, not off legacy.
+	quoted := userResult("Eve", "eve", legacy("30", "quoted body https://t.co/def", map[string]any{
+		"extended_entities": map[string]any{"media": []any{map[string]any{
+			"type":            "video",
+			"media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/30/poster.jpg",
+			"video_info": map[string]any{"variants": []any{
+				map[string]any{"content_type": "video/mp4", "bitrate": 832000, "url": "https://video.twimg.com/ext_tw_video/30/quoted.mp4"},
+			}},
+		}}},
 	}))
+	dave := userResult("Dave", "dave", legacy("3", "truncated", nil))
+	dave["quoted_status_result"] = map[string]any{"result": quoted}
 	dave["note_tweet"] = map[string]any{"note_tweet_results": map[string]any{"result": map[string]any{"text": "a very long note body"}}}
 	visibility := map[string]any{"__typename": "TweetWithVisibilityResults", "tweet": dave}
 
@@ -124,7 +132,72 @@ func TestParseTimeline(t *testing.T) {
 		t.Errorf("note text = %q, want the note body (overrides truncated legacy)", note.Text)
 	}
 	if note.Quoted == nil || note.Quoted.Handle != "eve" || note.Quoted.Text != "quoted body" {
-		t.Errorf("note quoted = %+v, want eve/quoted body", note.Quoted)
+		t.Fatalf("note quoted = %+v, want eve/quoted body", note.Quoted)
+	}
+	if note.Quoted.Name != "Eve" || note.Quoted.URL != "https://x.com/eve/status/30" {
+		t.Errorf("note quoted author/url = %q/%q, want Eve/https://x.com/eve/status/30", note.Quoted.Name, note.Quoted.URL)
+	}
+	if note.Quoted.VideoURL != "https://video.twimg.com/ext_tw_video/30/quoted.mp4" {
+		t.Errorf("quoted video = %q, want the quoted post's mp4", note.Quoted.VideoURL)
+	}
+	if note.Quoted.VideoPoster != "https://pbs.twimg.com/ext_tw_video_thumb/30/poster.jpg" {
+		t.Errorf("quoted poster = %q", note.Quoted.VideoPoster)
+	}
+	// The parent keeps its own (absent) media: the quote's video is not adopted.
+	if note.VideoURL != "" {
+		t.Errorf("parent video = %q, want empty (the video belongs to the quote)", note.VideoURL)
+	}
+}
+
+// A quote nested under legacy is the older shape; it must still parse, since
+// the timeline endpoints don't all move at once.
+func TestParseTimelineQuoteUnderLegacy(t *testing.T) {
+	quoted := userResult("Eve", "eve", legacy("30", "quoted body", nil))
+	parent := userResult("Dave", "dave", legacy("3", "see this", map[string]any{
+		"quoted_status_result": map[string]any{"result": quoted},
+	}))
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{item("tweet-3", parent)}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	if len(tweets) != 1 {
+		t.Fatalf("got %d tweets, want 1", len(tweets))
+	}
+	if q := tweets[0].Quoted; q == nil || q.Handle != "eve" || q.Text != "quoted body" {
+		t.Errorf("quoted = %+v, want eve/quoted body from the legacy slot", q)
+	}
+}
+
+// The post body no longer swallows the quote: it stays structured so renderers
+// can draw it as a nested card.
+func TestToItemCarriesQuote(t *testing.T) {
+	tw := Tweet{
+		ID: "3", Handle: "dave", Name: "Dave", Text: "see this",
+		Quoted: &QuotedTweet{
+			Handle: "eve", Name: "Eve", Text: "quoted body",
+			URL: "https://x.com/eve/status/30", VideoURL: "https://video.twimg.com/q.mp4",
+		},
+	}
+	it := ToItem(tw)
+	if it.Body != "see this" {
+		t.Errorf("body = %q, want just the post's own text", it.Body)
+	}
+	if it.Quote == nil {
+		t.Fatal("expected a structured quote")
+	}
+	if it.Quote.Source != "@eve" || it.Quote.Author != "Eve" || it.Quote.Text != "quoted body" {
+		t.Errorf("quote = %+v", it.Quote)
+	}
+	if it.Quote.URL != "https://x.com/eve/status/30" || it.Quote.Video != "https://video.twimg.com/q.mp4" {
+		t.Errorf("quote url/video = %q/%q", it.Quote.URL, it.Quote.Video)
+	}
+	if ToItem(Tweet{ID: "4", Text: "no quote"}).Quote != nil {
+		t.Error("a post with no quote must carry no quote")
 	}
 }
 

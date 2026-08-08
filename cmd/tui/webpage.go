@@ -96,8 +96,21 @@ type cardData struct {
 	URL         string
 	Video       string // direct mp4; the card shows an inline player
 	Poster      string
+	HasVideo    bool // this card or its quote has a player, so show the shared controls
+	Quote       *quoteData
 	Expand      bool
 	Saved       bool // starred: the footer button offers to unsave it
+}
+
+// quoteData is the embedded post drawn inside a card: x's quote box.
+type quoteData struct {
+	Source      string
+	Author      string // blank when it duplicates Source
+	PreviewBody template.HTML
+	FullBody    template.HTML
+	URL         string
+	Video       string
+	Poster      string
 }
 
 // buildPageData shapes the items into what page.tmpl renders: header counts,
@@ -190,21 +203,52 @@ func buildCard(it core.Item, starred bool) cardData {
 		URL:    it.URL,
 		Video:  it.Video,
 		Poster: it.Poster,
-		Expand: needsExpand(body, title),
 		Saved:  starred,
 	}
 	// Two content panels: a clipped preview and a full version the footer's
 	// expand toggle reveals. linkify escapes, so the HTML is safe as-is.
 	if body != "" {
-		c.PreviewBody = template.HTML(linkify(clip(body, 220)))
+		c.PreviewBody = template.HTML(linkify(clip(body, bodyClip)))
 		c.FullBody = template.HTML(linkify(body))
 	}
+	if it.Quote != nil {
+		c.Quote = buildQuote(*it.Quote)
+	}
+	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
+	c.Expand = needsExpand(body, title) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	return c
 }
 
+// buildQuote shapes an embedded post into the nested card, clipped tighter than
+// the parent so a long quote can't bury the post that quotes it.
+func buildQuote(q core.Quote) *quoteData {
+	author := q.Author
+	if author == q.Source {
+		author = ""
+	}
+	d := &quoteData{
+		Source: q.Source,
+		Author: author,
+		URL:    q.URL,
+		Video:  q.Video,
+		Poster: q.Poster,
+	}
+	if q.Text != "" {
+		d.PreviewBody = template.HTML(linkify(clip(q.Text, quoteClip)))
+		d.FullBody = template.HTML(linkify(q.Text))
+	}
+	return d
+}
+
+// How much of a body survives into the clipped preview panel, in runes.
+const (
+	bodyClip  = 220
+	quoteClip = 140
+)
+
 // needsExpand reports whether anything is clipped, i.e. there is more to reveal.
 func needsExpand(body, title string) bool {
-	return len([]rune(body)) > 220 || len([]rune(title)) > 220
+	return len([]rune(body)) > bodyClip || len([]rune(title)) > bodyClip
 }
 
 // clip truncates s to at most n runes, adding an ellipsis when cut.
@@ -253,17 +297,18 @@ func linkLabel(u string) string {
 // writeJSONItems writes the merged feed as JSON, for API clients.
 func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 	type wireItem struct {
-		App    string `json:"app"`
-		ID     string `json:"id"`
-		Title  string `json:"title"`
-		Body   string `json:"body,omitempty"`
-		Source string `json:"source,omitempty"`
-		Author string `json:"author,omitempty"`
-		URL    string `json:"url,omitempty"`
-		Age    string `json:"age,omitempty"`
-		TS     string `json:"ts,omitempty"`
-		Video  string `json:"video,omitempty"`
-		Poster string `json:"poster,omitempty"`
+		App    string      `json:"app"`
+		ID     string      `json:"id"`
+		Title  string      `json:"title"`
+		Body   string      `json:"body,omitempty"`
+		Source string      `json:"source,omitempty"`
+		Author string      `json:"author,omitempty"`
+		URL    string      `json:"url,omitempty"`
+		Age    string      `json:"age,omitempty"`
+		TS     string      `json:"ts,omitempty"`
+		Video  string      `json:"video,omitempty"`
+		Poster string      `json:"poster,omitempty"`
+		Quote  *core.Quote `json:"quote,omitempty"`
 	}
 	out := make([]wireItem, 0, len(items))
 	for _, it := range items {
@@ -278,6 +323,7 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 			Age:    it.Age,
 			Video:  it.Video,
 			Poster: it.Poster,
+			Quote:  it.Quote,
 		}
 		if !it.At.IsZero() {
 			wi.TS = it.At.UTC().Format(time.RFC3339)

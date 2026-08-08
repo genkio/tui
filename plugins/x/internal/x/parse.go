@@ -104,14 +104,33 @@ func (t *tweetResult) toTweet() Tweet {
 	if handle != "" && src.RestID != "" {
 		tw.URL = "https://x.com/" + handle + "/status/" + src.RestID
 	}
-	if lg.QuotedStatusResult != nil && lg.QuotedStatusResult.Result != nil {
-		if q := lg.QuotedStatusResult.Result.normalize(); q != nil && q.Legacy != nil {
-			qn, qh := q.author()
-			tw.Quoted = &QuotedTweet{Name: qn, Handle: qh, Text: cleanText(q.text())}
-		}
-	}
+	tw.Quoted = src.quoted()
 	tw.VideoURL, tw.VideoPoster = lg.video()
 	return tw
+}
+
+// quoted flattens the post this one quotes. x.com hangs quoted_status_result off
+// the result itself, not off legacy the way retweeted_status_result is; the
+// legacy slot is read as a fallback in case the shape moves back.
+func (t *tweetResult) quoted() *QuotedTweet {
+	res := t.QuotedStatusResult
+	if res == nil && t.Legacy != nil {
+		res = t.Legacy.QuotedStatusResult
+	}
+	if res == nil || res.Result == nil {
+		return nil
+	}
+	q := res.Result.normalize()
+	if q == nil || q.Legacy == nil {
+		return nil // tombstone / unavailable post
+	}
+	name, handle := q.author()
+	qt := &QuotedTweet{Name: name, Handle: handle, Text: cleanText(q.text())}
+	if handle != "" && q.RestID != "" {
+		qt.URL = "https://x.com/" + handle + "/status/" + q.RestID
+	}
+	qt.VideoURL, qt.VideoPoster = q.Legacy.video()
+	return qt
 }
 
 // video returns the best mp4 (highest bitrate) of the first attached video or
@@ -216,23 +235,24 @@ type tweetResult struct {
 			} `json:"result"`
 		} `json:"note_tweet_results"`
 	} `json:"note_tweet"`
-	Legacy *legacyTweet `json:"legacy"`
+	QuotedStatusResult *statusResult `json:"quoted_status_result"`
+	Legacy             *legacyTweet  `json:"legacy"`
+}
+
+type statusResult struct {
+	Result *tweetResult `json:"result"`
 }
 
 type legacyTweet struct {
-	FullText              string `json:"full_text"`
-	CreatedAt             string `json:"created_at"`
-	ReplyCount            int    `json:"reply_count"`
-	RetweetCount          int    `json:"retweet_count"`
-	FavoriteCount         int    `json:"favorite_count"`
-	QuoteCount            int    `json:"quote_count"`
-	RetweetedStatusResult *struct {
-		Result *tweetResult `json:"result"`
-	} `json:"retweeted_status_result"`
-	QuotedStatusResult *struct {
-		Result *tweetResult `json:"result"`
-	} `json:"quoted_status_result"`
-	ExtendedEntities struct {
+	FullText              string        `json:"full_text"`
+	CreatedAt             string        `json:"created_at"`
+	ReplyCount            int           `json:"reply_count"`
+	RetweetCount          int           `json:"retweet_count"`
+	FavoriteCount         int           `json:"favorite_count"`
+	QuoteCount            int           `json:"quote_count"`
+	RetweetedStatusResult *statusResult `json:"retweeted_status_result"`
+	QuotedStatusResult    *statusResult `json:"quoted_status_result"`
+	ExtendedEntities      struct {
 		Media []mediaEntity `json:"media"`
 	} `json:"extended_entities"`
 }

@@ -246,13 +246,112 @@ func TestRenderCardVideo(t *testing.T) {
 		t.Fatalf("expected speed, mute, and rotate controls: %s", out)
 	}
 	if !strings.Contains(out, `href="/dl?n=x-50.mp4&u=https%3a%2f%2fvideo.twimg.com`) {
-		t.Fatalf("expected a /dl save link: %s", out)
+		t.Fatalf("expected a /dl download link: %s", out)
+	}
+	// Download is 'keep', so it doesn't read as a second copy of the star button.
+	if !strings.Contains(out, "<span>keep</span>") || strings.Count(out, ">save</button>") != 1 {
+		t.Fatalf("the download link must not also be labelled save: %s", out)
 	}
 	// No video -> no player, no controls.
 	it.Video, it.Poster = "", ""
 	out = renderCard(t, it)
 	if strings.Contains(out, "<video") || strings.Contains(out, `class="speed"`) || strings.Contains(out, "/dl?") {
 		t.Fatal("player and controls should be absent without a video")
+	}
+}
+
+func TestRenderCardQuote(t *testing.T) {
+	it := core.Item{
+		App: "x", ID: "3", Title: "see this", Body: "see this",
+		Source: "@dave", URL: "https://x.com/dave/status/3", Age: "2h",
+		Quote: &core.Quote{
+			Source: "@eve", Author: "Eve", Text: "the <quoted> post",
+			URL: "https://x.com/eve/status/30",
+		},
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `class="quote"`) {
+		t.Fatalf("expected an embedded quote block: %s", out)
+	}
+	if !strings.Contains(out, "@eve") || !strings.Contains(out, "Eve") {
+		t.Errorf("quote should show its own author: %s", out)
+	}
+	if !strings.Contains(out, `href="https://x.com/eve/status/30"`) {
+		t.Errorf("quote handle should link to the quoted post: %s", out)
+	}
+	if !strings.Contains(out, "the &lt;quoted&gt; post") {
+		t.Errorf("quote text must be escaped: %s", out)
+	}
+	// The parent's own text is not repeated inside the quote box, and a short
+	// quote needs no expand toggle.
+	if strings.Contains(out, "quoting @eve") {
+		t.Errorf("the quote must not also be appended to the body: %s", out)
+	}
+	if strings.Contains(out, `class="expand"`) {
+		t.Errorf("a short post + short quote needs no expand toggle: %s", out)
+	}
+
+	// A long quote alone is enough to earn the expand toggle, and the quote gets
+	// its own preview/full pair so expanding reveals all of it.
+	it.Quote.Text = strings.Repeat("word ", 100)
+	out = renderCard(t, it)
+	if !strings.Contains(out, `class="expand"`) {
+		t.Errorf("a clipped quote should offer expand: %s", out)
+	}
+	if strings.Count(out, `class="full hid"`) != 2 {
+		t.Errorf("expected a full panel for both the body and the quote: %s", out)
+	}
+
+	// No quote -> no quote block.
+	it.Quote = nil
+	if out := renderCard(t, it); strings.Contains(out, `class="quote"`) {
+		t.Errorf("quote block should be absent without a quote: %s", out)
+	}
+}
+
+func TestRenderCardQuoteVideo(t *testing.T) {
+	it := core.Item{
+		App: "x", ID: "3", Title: "see this", Body: "see this",
+		Source: "@dave", URL: "https://x.com/dave/status/3",
+		Quote: &core.Quote{
+			Source: "@eve", Text: "watch",
+			Video:  "https://video.twimg.com/ext_tw_video/30/quoted.mp4",
+			Poster: "https://pbs.twimg.com/ext_tw_video_thumb/30/poster.jpg",
+		},
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `src="https://video.twimg.com/ext_tw_video/30/quoted.mp4"`) {
+		t.Fatalf("expected a player for the quoted post's video: %s", out)
+	}
+	// The shared playback controls appear even though the parent has no video.
+	if !strings.Contains(out, `class="speed"`) || !strings.Contains(out, `class="rot"`) {
+		t.Errorf("expected the video controls for a quote-only video: %s", out)
+	}
+	if !strings.Contains(out, `href="/dl?n=x-3-quote.mp4&u=https%3a%2f%2fvideo.twimg.com`) {
+		t.Errorf("expected a /dl link for the quoted video: %s", out)
+	}
+	if !strings.Contains(out, "<span>keep</span>") {
+		t.Errorf("the quoted video download should be labelled keep: %s", out)
+	}
+	// The parent has no video of its own, so no parent download link.
+	if strings.Contains(out, "/dl?n=x-3.mp4") {
+		t.Errorf("parent has no video; it must not offer one: %s", out)
+	}
+}
+
+func TestSavedQuoteRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "saved.json")
+	s := loadSaved(path)
+	it := core.Item{
+		App: "x", ID: "3", Title: "see this", Body: "see this", Source: "@dave",
+		Quote: &core.Quote{Source: "@eve", Author: "Eve", Text: "quoted body", URL: "https://x.com/eve/status/30"},
+	}
+	if err := s.add(it, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got := loadSaved(path).list(time.Now())[0]
+	if got.Quote == nil || got.Quote.Source != "@eve" || got.Quote.Text != "quoted body" {
+		t.Fatalf("quote lost in the saved round trip: %+v", got.Quote)
 	}
 }
 

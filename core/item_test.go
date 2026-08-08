@@ -82,6 +82,38 @@ func TestMergeSortMixed(t *testing.T) {
 	}
 }
 
+// An embedded post has to survive the subprocess hop (an app's --json into the
+// launcher) and the saved store, both of which go through Wire.
+func TestQuoteSurvivesTheWire(t *testing.T) {
+	out := []byte(`[{"app":"x","id":"3","title":"see this","body":"see this","source":"@dave",
+		"quote":{"source":"@eve","author":"Eve","text":"quoted body","url":"https://x.com/eve/status/30","video":"https://video.twimg.com/q.mp4"}}]`)
+	items, err := ParseItems(out, time.Now())
+	if err != nil {
+		t.Fatalf("ParseItems: %v", err)
+	}
+	q := items[0].Quote
+	if q == nil {
+		t.Fatal("quote dropped on the way in")
+	}
+	if q.Source != "@eve" || q.Text != "quoted body" || q.Video != "https://video.twimg.com/q.mp4" {
+		t.Errorf("quote = %+v", q)
+	}
+	if got := q.Inline(); got != "quoting @eve: quoted body" {
+		t.Errorf("Inline() = %q", got)
+	}
+	if items[0].Wire().Quote != q {
+		t.Error("quote dropped on the way back out")
+	}
+	// A post with no quote stays quote-free rather than gaining an empty one.
+	plain, err := ParseItems([]byte(`[{"app":"x","id":"4","title":"solo"}]`), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain[0].Quote != nil {
+		t.Error("a quote-free post must not gain one")
+	}
+}
+
 func TestItemKeyDistinguishesApps(t *testing.T) {
 	// The same numeric id from two services must not collide.
 	a := Item{App: "x", ID: "123"}

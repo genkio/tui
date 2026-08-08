@@ -339,6 +339,9 @@ func (f Feed) renderBody(it Item) []string {
 	if strings.TrimSpace(body) == "" {
 		body = it.Title
 	}
+	if it.Quote != nil {
+		body = strings.TrimSpace(body + "\n\n" + it.Quote.Inline())
+	}
 	if strings.TrimSpace(body) == "" {
 		lines = append(lines, "    "+th.Empty.Render("(no text; press o to read in carbonyl, b for browser)"))
 	} else {

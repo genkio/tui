@@ -25,6 +25,29 @@ type Item struct {
 	At     time.Time // publish time for the merged sort; zero sinks to the bottom
 	Video  string    // direct mp4 of an attached video, when the app provides one
 	Poster string    // still frame shown before Video plays
+	Quote  *Quote    // the post this one embeds (an x quote), if any
+}
+
+// Quote is the post an item embeds. It stays structured rather than folded into
+// Body so the web page can draw it as a nested card; the terminal feed flattens
+// it back to text with Inline.
+type Quote struct {
+	Source string `json:"source,omitempty"` // @handle
+	Author string `json:"author,omitempty"` // display name
+	Text   string `json:"text,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Video  string `json:"video,omitempty"`
+	Poster string `json:"poster,omitempty"`
+}
+
+// Inline renders the quote as plain text, for renderers that draw a single body
+// string rather than a nested card.
+func (q Quote) Inline() string {
+	s := "quoting " + q.Source
+	if q.Text != "" {
+		s += ": " + q.Text
+	}
+	return strings.TrimSpace(s)
 }
 
 func (it Item) Key() string { return Key(it.App, it.ID) }
@@ -47,6 +70,7 @@ type Wire struct {
 	TS     string `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
 	Video  string `json:"video,omitempty"`
 	Poster string `json:"poster,omitempty"`
+	Quote  *Quote `json:"quote,omitempty"`
 }
 
 // Item converts a wire item, deriving the sort time from the absolute ts when
@@ -65,6 +89,7 @@ func (w Wire) Item(now time.Time) Item {
 		At:     SortTime(w.TS, w.Age, now),
 		Video:  w.Video,
 		Poster: w.Poster,
+		Quote:  w.Quote,
 	}
 }
 
@@ -82,6 +107,7 @@ func (it Item) Wire() Wire {
 		Age:    it.Age,
 		Video:  it.Video,
 		Poster: it.Poster,
+		Quote:  it.Quote,
 	}
 	if !it.At.IsZero() {
 		w.TS = it.At.UTC().Format(time.RFC3339)
