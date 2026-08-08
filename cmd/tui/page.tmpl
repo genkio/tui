@@ -84,7 +84,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 <div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" hidden></div>
 <div class="wrap">
 <header>
-  <div class="sub" id="sub">{{.Meta}}</div>
+  <div class="sub" id="sub">{{if .HasApps}}{{.Unread}} unread {{end}}at {{.Clock}}</div>
 {{if .Health}}<div class="health">{{range .Health}}<span class="svc" title="{{.Title}}"><span class="hdot {{if .OK}}ok{{else}}bad{{end}}"></span>{{.Label}}</span>{{end}}</div>
 {{end}}</header>
 <div class="sortbar"><span class="slabel">sort</span>{{if .Asc}}<span class="sort on">oldest</span><a class="sort" href="?order=desc">newest</a>{{else}}<a class="sort" href="?order=asc">oldest</a><span class="sort on">newest</span>{{end}}</div>

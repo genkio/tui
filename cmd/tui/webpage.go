@@ -51,7 +51,8 @@ func (l *pageLoader) load() (*template.Template, error) {
 }
 
 type pageData struct {
-	Meta        string
+	Unread      int    // shown only when HasApps; JS decrements it in place
+	Clock       string // local HH:MM of this page load
 	XAuth       bool
 	XTab        string
 	Health      []healthEntry
@@ -92,12 +93,6 @@ func buildPageData(items []core.Item, apps, failed []string, now time.Time, asc 
 		}
 	}
 
-	var meta []string
-	if len(apps) > 0 {
-		meta = append(meta, fmt.Sprintf("%d unread", len(items)))
-	}
-	meta = append(meta, "updated "+now.Local().Format("15:04"))
-
 	bad := map[string]bool{}
 	for _, f := range failed {
 		bad[f] = true
@@ -121,7 +116,8 @@ func buildPageData(items []core.Item, apps, failed []string, now time.Time, asc 
 	}
 
 	return pageData{
-		Meta:    strings.Join(meta, " · "),
+		Unread:  len(items),
+		Clock:   now.Local().Format("15:04"),
 		XAuth:   xAuth,
 		XTab:    xTab,
 		Health:  health,
