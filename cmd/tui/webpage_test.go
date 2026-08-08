@@ -202,3 +202,56 @@ func TestRenderPageHealthDots(t *testing.T) {
 		t.Fatal("health strip should be absent with no logged-in services")
 	}
 }
+
+func TestRenderCardVideo(t *testing.T) {
+	it := core.Item{
+		App: "x", ID: "50", Title: "watch this", Body: "watch this",
+		Source: "@vera", URL: "https://x.com/vera/status/50",
+		Video:  "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4",
+		Poster: "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg",
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `<video class="vid"`) || !strings.Contains(out, `src="https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4"`) {
+		t.Fatalf("expected an inline video player: %s", out)
+	}
+	if !strings.Contains(out, `poster="https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg"`) {
+		t.Fatalf("expected the poster frame: %s", out)
+	}
+	// Footer gains the video controls: speed + mute toggles and a save link
+	// through the /dl proxy.
+	if !strings.Contains(out, `class="speed"`) || !strings.Contains(out, `class="mute"`) || !strings.Contains(out, `class="rot"`) {
+		t.Fatalf("expected speed, mute, and rotate controls: %s", out)
+	}
+	if !strings.Contains(out, `href="/dl?n=x-50.mp4&u=https%3a%2f%2fvideo.twimg.com`) {
+		t.Fatalf("expected a /dl save link: %s", out)
+	}
+	// No video -> no player, no controls.
+	it.Video, it.Poster = "", ""
+	out = renderCard(t, it)
+	if strings.Contains(out, "<video") || strings.Contains(out, `class="speed"`) || strings.Contains(out, "/dl?") {
+		t.Fatal("player and controls should be absent without a video")
+	}
+}
+
+func TestDownloadGuards(t *testing.T) {
+	for _, bad := range []string{
+		"", "http://video.twimg.com/a.mp4", "https://evil.com/a.mp4",
+		"https://video.twimg.com.evil.com/a.mp4", "://nope",
+	} {
+		if _, err := parseVideoURL(bad); err == nil {
+			t.Errorf("parseVideoURL(%q) should be rejected", bad)
+		}
+	}
+	if _, err := parseVideoURL("https://video.twimg.com/amplify_video/1/vid/avc1/720x1280/x.mp4?tag=14"); err != nil {
+		t.Errorf("real CDN URL rejected: %v", err)
+	}
+	if got := dlName("x-123.mp4"); got != "x-123.mp4" {
+		t.Errorf("dlName = %q", got)
+	}
+	if got := dlName(`../../etc/passwd"`); got != "....etcpasswd" {
+		t.Errorf("dlName should strip separators and quotes, got %q", got)
+	}
+	if got := dlName(""); got != "video.mp4" {
+		t.Errorf("empty name should default, got %q", got)
+	}
+}

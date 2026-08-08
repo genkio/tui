@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"html"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -72,6 +76,7 @@ func runWeb(root, addr string, dev bool) error {
 		}
 		handleMark(w, r, root)
 	})
+	mux.HandleFunc("/dl", handleDownload)
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -313,6 +318,64 @@ func handleMark(w http.ResponseWriter, r *http.Request, root string) {
 		back = "/"
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// handleDownload streams an x video through the server with an attachment
+// disposition: browsers ignore the download attribute on cross-origin links,
+// and video.twimg.com rejects requests that carry a referer, so a same-origin
+// proxy is the only way a tap can save the mp4 with a proper filename.
+func handleDownload(w http.ResponseWriter, r *http.Request) {
+	u, err := parseVideoURL(r.URL.Query().Get("u"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if rng := r.Header.Get("Range"); rng != "" {
+		req.Header.Set("Range", rng) // let download managers resume
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "fetch video: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		http.Error(w, "video source: "+resp.Status, http.StatusBadGateway)
+		return
+	}
+	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+dlName(r.URL.Query().Get("n"))+`"`)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+// parseVideoURL admits only x's video CDN, so /dl can't be used as an open proxy.
+func parseVideoURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host != "video.twimg.com" {
+		return nil, errors.New("u must be an https://video.twimg.com/... URL")
+	}
+	return u, nil
+}
+
+var reDlName = regexp.MustCompile(`[^\w.-]+`)
+
+// dlName sanitizes the requested filename to a safe attachment name.
+func dlName(n string) string {
+	n = reDlName.ReplaceAllString(n, "")
+	if n == "" || n == ".mp4" {
+		n = "video.mp4"
+	}
+	return n
 }
 
 // escape is a shorthand for html.EscapeString in templates below.

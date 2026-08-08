@@ -169,7 +169,9 @@ type dumpItem struct {
 	Author string `json:"author,omitempty"`
 	URL    string `json:"url,omitempty"`
 	Age    string `json:"age,omitempty"`
-	TS     string `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
+	TS     string `json:"ts,omitempty"`     // RFC3339 publish time, for the merged sort
+	Video  string `json:"video,omitempty"`  // direct mp4 of the attached video/GIF
+	Poster string `json:"poster,omitempty"` // still frame shown before Video plays
 }
 
 // printJSON dumps the unread posts of the default timeline as a JSON array for
@@ -195,6 +197,8 @@ func printJSON(ctx context.Context, client *x.Client, cfg config.Config, tab x.T
 			Author: t.Name,
 			URL:    t.URL,
 			Age:    t.Age,
+			Video:  t.VideoURL,
+			Poster: t.VideoPoster,
 		}
 		if !t.CreatedAt.IsZero() {
 			item.TS = t.CreatedAt.UTC().Format(time.RFC3339)

@@ -79,6 +79,8 @@ type cardData struct {
 	PreviewBody template.HTML
 	FullBody    template.HTML
 	URL         string
+	Video       string // direct mp4; the card shows an inline player
+	Poster      string
 	Expand      bool
 }
 
@@ -161,6 +163,8 @@ func buildCard(it core.Item) cardData {
 		Age:    it.Age,
 		Title:  title,
 		URL:    it.URL,
+		Video:  it.Video,
+		Poster: it.Poster,
 		Expand: needsExpand(body, title),
 	}
 	// Two content panels: a clipped preview and a full version the footer's
@@ -232,6 +236,8 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 		URL    string `json:"url,omitempty"`
 		Age    string `json:"age,omitempty"`
 		TS     string `json:"ts,omitempty"`
+		Video  string `json:"video,omitempty"`
+		Poster string `json:"poster,omitempty"`
 	}
 	out := make([]wireItem, 0, len(items))
 	for _, it := range items {
@@ -244,6 +250,8 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 			Author: it.Author,
 			URL:    it.URL,
 			Age:    it.Age,
+			Video:  it.Video,
+			Poster: it.Poster,
 		}
 		if !it.At.IsZero() {
 			wi.TS = it.At.UTC().Format(time.RFC3339)

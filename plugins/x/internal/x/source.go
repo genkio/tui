@@ -75,6 +75,8 @@ func ToItem(t Tweet) core.Item {
 		Author: t.Name,
 		URL:    t.URL,
 		Age:    t.Age,
+		Video:  t.VideoURL,
+		Poster: t.VideoPoster,
 	}
 	if !t.CreatedAt.IsZero() {
 		it.At = t.CreatedAt.UTC()

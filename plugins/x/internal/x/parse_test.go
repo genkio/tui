@@ -134,3 +134,59 @@ func TestParseTimelineError(t *testing.T) {
 		t.Fatal("expected an error from a GraphQL errors payload")
 	}
 }
+
+func TestParseTimelineVideo(t *testing.T) {
+	video := userResult("Vera", "vera", legacy("50", "watch this https://t.co/xyz", map[string]any{
+		"extended_entities": map[string]any{"media": []any{
+			map[string]any{"type": "photo", "media_url_https": "https://pbs.twimg.com/media/photo.jpg"},
+			map[string]any{
+				"type":            "video",
+				"media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg",
+				"video_info": map[string]any{"variants": []any{
+					map[string]any{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/ext_tw_video/50/pu/pl/list.m3u8"},
+					map[string]any{"content_type": "video/mp4", "bitrate": 632000, "url": "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/320x568/low.mp4"},
+					map[string]any{"content_type": "video/mp4", "bitrate": 2176000, "url": "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4"},
+				}},
+			},
+		}},
+	}))
+	gif := userResult("Gil", "gil", legacy("51", "lol", map[string]any{
+		"extended_entities": map[string]any{"media": []any{
+			map[string]any{
+				"type":            "animated_gif",
+				"media_url_https": "https://pbs.twimg.com/tweet_video_thumb/51.jpg",
+				"video_info": map[string]any{"variants": []any{
+					map[string]any{"content_type": "video/mp4", "bitrate": 0, "url": "https://video.twimg.com/tweet_video/51.mp4"},
+				}},
+			},
+		}},
+	}))
+	plain := userResult("Pat", "pat", legacy("52", "no media", nil))
+
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{
+			item("tweet-50", video), item("tweet-51", gif), item("tweet-52", plain),
+		}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	if len(tweets) != 3 {
+		t.Fatalf("got %d tweets, want 3", len(tweets))
+	}
+	if got, want := tweets[0].VideoURL, "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4"; got != want {
+		t.Errorf("video url = %q, want highest-bitrate mp4 %q", got, want)
+	}
+	if got, want := tweets[0].VideoPoster, "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg"; got != want {
+		t.Errorf("video poster = %q, want %q", got, want)
+	}
+	if got, want := tweets[1].VideoURL, "https://video.twimg.com/tweet_video/51.mp4"; got != want {
+		t.Errorf("gif url = %q, want %q (bitrate-0 variant still picked)", got, want)
+	}
+	if tweets[2].VideoURL != "" || tweets[2].VideoPoster != "" {
+		t.Errorf("plain tweet video = %q/%q, want empty", tweets[2].VideoURL, tweets[2].VideoPoster)
+	}
+}

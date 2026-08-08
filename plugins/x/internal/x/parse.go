@@ -110,7 +110,28 @@ func (t *tweetResult) toTweet() Tweet {
 			tw.Quoted = &QuotedTweet{Name: qn, Handle: qh, Text: cleanText(q.text())}
 		}
 	}
+	tw.VideoURL, tw.VideoPoster = lg.video()
 	return tw
+}
+
+// video returns the best mp4 (highest bitrate) of the first attached video or
+// animated GIF, plus its poster frame; empty strings when the post has none.
+func (lg *legacyTweet) video() (url, poster string) {
+	for _, m := range lg.ExtendedEntities.Media {
+		if m.VideoInfo == nil || (m.Type != "video" && m.Type != "animated_gif") {
+			continue
+		}
+		best := -1 // GIF variants carry bitrate 0, so start below it
+		for _, v := range m.VideoInfo.Variants {
+			if v.ContentType == "video/mp4" && v.Bitrate > best {
+				best, url = v.Bitrate, v.URL
+			}
+		}
+		if url != "" {
+			return url, m.MediaURLHTTPS
+		}
+	}
+	return "", ""
 }
 
 // reTrailingTco strips the t.co link x.com appends for attached media or a
@@ -211,4 +232,19 @@ type legacyTweet struct {
 	QuotedStatusResult *struct {
 		Result *tweetResult `json:"result"`
 	} `json:"quoted_status_result"`
+	ExtendedEntities struct {
+		Media []mediaEntity `json:"media"`
+	} `json:"extended_entities"`
+}
+
+type mediaEntity struct {
+	Type          string `json:"type"` // photo, video, animated_gif
+	MediaURLHTTPS string `json:"media_url_https"`
+	VideoInfo     *struct {
+		Variants []struct {
+			Bitrate     int    `json:"bitrate"`
+			ContentType string `json:"content_type"`
+			URL         string `json:"url"`
+		} `json:"variants"`
+	} `json:"video_info"`
 }

@@ -2,6 +2,7 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>all — tui</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='12'>🗞️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -61,6 +62,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall:disabled{opacity:.5;cursor:default}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 .hid{display:none}
 .empty{color:var(--muted);font-style:italic}
 .dlg{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:16px;padding:20px;max-width:360px;width:calc(100vw - 48px)}
@@ -79,6 +81,45 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   background:var(--fg);color:var(--bg);font-size:14px;font-weight:600;
   padding:8px 16px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .2s;
 }
+.yt{position:relative;margin:10px 0 2px;border-radius:12px;overflow:hidden;cursor:pointer;aspect-ratio:16/9;background:#000}
+.yt img{width:100%;height:100%;object-fit:cover;display:block;opacity:.85}
+.yt .yt-play{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:26px;color:#fff;background:rgba(0,0,0,.25);text-shadow:0 1px 8px rgba(0,0,0,.6);
+}
+.yt-embed{aspect-ratio:16/9;margin:10px 0 2px}
+.yt-embed iframe{display:block;width:100%;height:100%;border:0;border-radius:12px}
+.yt-blocked{display:block;margin:10px 0 2px;padding:14px;border:1px dashed var(--line);border-radius:12px;color:var(--accent);font-size:14px;font-weight:600;text-decoration:none}
+html.ffs-on,html.ffs-on body{overflow-x:hidden;background:#000 !important}
+/* guarantee scroll room while rotated: Safari only hides its bars when a swipe
+   actually scrolls, and a short or bottomed-out feed otherwise has nowhere to go */
+html.ffs-on body{padding-bottom:100lvh}
+/* iOS lays out fixed elements against the bars-visible viewport, so the player
+   can't cover the status-bar strip or the area around the bottom address bar;
+   blank the feed instead so every uncovered edge is seamless black */
+html.ffs-on .wrap{visibility:hidden}
+.ffs{
+  position:fixed !important;top:50vh !important;left:50vw !important;
+  top:50lvh !important;left:50lvw !important;
+  width:100vh !important;height:100vw !important;
+  width:100lvh !important;height:100lvw !important;
+  max-height:none !important;margin:0 !important;
+  transform:translate(-50%,-50%) rotate(-90deg) !important;transform-origin:center !important;
+  border-radius:0 !important;background:#000 !important;
+  z-index:2147483646 !important;overflow:hidden !important;
+  touch-action:pan-y !important; /* vertical swipes scroll the page, letting mobile Safari hide its bars */
+  visibility:visible !important; /* the player lives inside the hidden .wrap */
+}
+video.ffs{object-fit:cover !important}
+.ffs iframe{display:block !important;width:100% !important;height:100% !important;border-radius:0 !important}
+.ffs-tap{position:fixed;inset:0;z-index:2147483646;background:transparent;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.ffs-exit{
+  position:fixed;top:max(16px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));
+  width:44px;height:44px;border:0;border-radius:50%;padding:0;color:#fff;background:rgba(0,0,0,.65);
+  font:24px/44px -apple-system,system-ui,sans-serif;text-align:center;cursor:pointer;
+  z-index:2147483647;transform:rotate(-90deg);-webkit-tap-highlight-color:transparent;
+}
+.vid{display:block;width:100%;max-height:70vh;border-radius:12px;margin:10px 0 2px;background:#000}
 </style>
 </head><body>
 <div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" hidden></div>
@@ -137,6 +178,8 @@ function decCount(n){
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
 var obs = new IntersectionObserver(function(entries){
+  if (ffs) return; // fake fullscreen scrolls the feed behind the video (hiding
+                   // Safari's bars); that motion must not mark cards read
   var dirty = false;
   entries.forEach(function(en){
     if(en.isIntersecting) return;                 // still visible
@@ -152,6 +195,203 @@ var obs = new IntersectionObserver(function(entries){
   if(dirty && !flushTimer) flushTimer = setTimeout(flushPending, 400);
 },{threshold:0});
 document.querySelectorAll('article.card').forEach(function(c){ obs.observe(c); });
+
+// YouTube links get an inline click-to-play embed: a lazy thumbnail per video
+// that swaps on tap to the official IFrame-API player, so the global speed and
+// mute toggles drive it too. Embedding is the owner's call — when it's
+// disabled (error 101/150) no embed can play the video, so the player is
+// swapped for a watch-on-YouTube link instead of a dead black frame.
+var ytPlayers = [];
+var ytApiRequested = false;
+function ytApi(cb){
+  if (window.YT && window.YT.Player){ cb(); return; }
+  if (!ytApiRequested){
+    ytApiRequested = true;
+    var s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+  var wait = setInterval(function(){
+    if (window.YT && window.YT.Player){ clearInterval(wait); cb(); }
+  }, 100);
+}
+function ytId(href){
+  var m = href.match(/(?:youtube\.com\/watch\?[^#]*v=|youtu\.be\/|youtube\.com\/shorts\/|youtube\.com\/embed\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+function ytPlay(thumb, id){
+  var wrap = document.createElement('div');
+  wrap.className = 'yt-embed';
+  var target = document.createElement('div');
+  wrap.appendChild(target);
+  thumb.replaceWith(wrap);
+  ytApi(function(){
+    var pending = true;
+    var p = new YT.Player(target, {
+      videoId: id,
+      host: 'https://www.youtube-nocookie.com',
+      playerVars: {autoplay: 1, playsinline: 1, origin: location.origin},
+      events: {
+        onReady: function(e){
+          e.target.setPlaybackRate(SPEED);
+          if (MUTED) e.target.mute(); else e.target.unMute();
+          e.target.playVideo();
+        },
+        onStateChange: function(e){
+          if (e.data === YT.PlayerState.PLAYING && pending){
+            e.target.setPlaybackRate(SPEED); // loading resets the rate
+            pending = false;
+          }
+        },
+        onError: function(){
+          var a = document.createElement('a');
+          a.className = 'yt-blocked';
+          a.href = 'https://www.youtube.com/watch?v=' + id;
+          a.target = '_blank'; a.rel = 'noopener';
+          a.textContent = 'embedding disabled — watch on YouTube ↗';
+          wrap.replaceWith(a);
+          ytPlayers = ytPlayers.filter(function(q){ return q !== p; });
+        }
+      }
+    });
+    ytPlayers.push(p);
+    wrap._ytPlayer = p; // fake fullscreen finds the player via its wrapper
+  });
+}
+document.querySelectorAll('article.card').forEach(function(card){
+  var seen = {};
+  card.querySelectorAll('a[href]').forEach(function(a){
+    var id = ytId(a.href); if(!id || seen[id]) return; seen[id] = true;
+    var d = document.createElement('div');
+    d.className = 'yt';
+    var img = document.createElement('img');
+    img.src = 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg';
+    img.alt = ''; img.loading = 'lazy';
+    var play = document.createElement('span');
+    play.className = 'yt-play'; play.textContent = '▶';
+    d.appendChild(img); d.appendChild(play);
+    d.addEventListener('click', function(){ ytPlay(d, id); });
+    var foot = card.querySelector('.footer');
+    foot.before(d);
+    // The speed/mute toggles are server-rendered only for native videos;
+    // give YouTube cards the same footer controls (no save — YouTube doesn't
+    // hand out direct streams the way video.twimg.com does).
+    if (!foot.querySelector('button.speed')){
+      var sp = document.createElement('button'); sp.type = 'button'; sp.className = 'speed'; sp.title = 'playback speed for all videos';
+      var mu = document.createElement('button'); mu.type = 'button'; mu.className = 'mute'; mu.title = 'sound for all videos';
+      var ro = document.createElement('button'); ro.type = 'button'; ro.className = 'rot'; ro.title = 'rotated fullscreen'; ro.textContent = 'rotate';
+      var ex = foot.querySelector('button.expand');
+      foot.insertBefore(sp, ex); foot.insertBefore(mu, ex); foot.insertBefore(ro, ex);
+    }
+  });
+});
+
+// Video playback settings are global: the speed (default 2x) and mute
+// (default muted) buttons on any card apply to every player — native <video>
+// and YouTube embeds alike — so the whole feed behaves one way. The rate is
+// re-applied on play because loading media resets it. Clicks are delegated
+// since YouTube cards get their buttons injected after this runs.
+var SPEED = 2;
+var MUTED = true;
+function applyVideoPrefs(){
+  document.querySelectorAll('video.vid').forEach(function(v){
+    v.defaultPlaybackRate = SPEED; v.playbackRate = SPEED; v.muted = MUTED;
+  });
+  ytPlayers.forEach(function(p){
+    if (p.setPlaybackRate) p.setPlaybackRate(SPEED);
+    if (p.mute && p.unMute){ if (MUTED) p.mute(); else p.unMute(); }
+  });
+  document.querySelectorAll('button.speed').forEach(function(b){ b.textContent = SPEED + '×'; });
+  document.querySelectorAll('button.mute').forEach(function(b){ b.textContent = MUTED ? 'unmute' : 'mute'; });
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.speed, button.mute') : null;
+  if (!b) return;
+  if (b.classList.contains('speed')) SPEED = SPEED === 2 ? 1 : 2;
+  else MUTED = !MUTED;
+  applyVideoPrefs();
+});
+document.querySelectorAll('video.vid').forEach(function(v){
+  v.addEventListener('play', function(){ v.playbackRate = SPEED; });
+});
+applyVideoPrefs();
+
+// Fake fullscreen (pipepipe-web's trick): pin the card's player over the
+// viewport, sized 100vh×100vw and rotated -90°, so a landscape video fills a
+// portrait phone without native fullscreen. A transparent tap layer splits
+// the screen into thirds — top seeks +30s, bottom -30s, middle toggles play —
+// and the rotated × (or Escape) exits, restoring the scroll position.
+var FFS_SEEK = 30;
+var ffs = null; // {el, scrollY} while active
+function ffsPlayers(){
+  if (!ffs) return {};
+  if (ffs.el.tagName === 'VIDEO') return {video: ffs.el};
+  return {yt: ffs.el._ytPlayer}; // may still be null while the API loads
+}
+function enterFfs(card){
+  if (ffs || !card) return;
+  var el = card.querySelector('video.vid') || card.querySelector('.yt-embed');
+  if (!el){
+    var thumb = card.querySelector('.yt'); // not started yet: start it now
+    if (thumb) thumb.click();
+    el = card.querySelector('.yt-embed');
+    if (!el) return;
+  }
+  ffs = {el: el, scrollY: window.scrollY || 0};
+  var v = ffsPlayers();
+  if (v.video && v.video.paused) v.video.play();
+  document.documentElement.classList.add('ffs-on');
+  el.classList.add('ffs');
+  var tap = document.createElement('div');
+  tap.className = 'ffs-tap';
+  tap.addEventListener('click', ffsTap);
+  document.body.appendChild(tap);
+  var exit = document.createElement('button');
+  exit.className = 'ffs-exit'; exit.type = 'button'; exit.title = 'exit fullscreen';
+  exit.textContent = '×';
+  exit.addEventListener('click', exitFfs);
+  document.body.appendChild(exit);
+}
+function exitFfs(){
+  if (!ffs) return;
+  document.documentElement.classList.remove('ffs-on');
+  ffs.el.classList.remove('ffs');
+  var t = document.querySelector('.ffs-tap'); if (t) t.remove();
+  var x = document.querySelector('.ffs-exit'); if (x) x.remove();
+  window.scrollTo(0, ffs.scrollY);
+  ffs = null;
+}
+function ffsTap(e){
+  e.preventDefault();
+  var pos = e.clientY / window.innerHeight;
+  if (pos < 1/3) ffsSeek(FFS_SEEK);
+  else if (pos > 2/3) ffsSeek(-FFS_SEEK);
+  else ffsToggle();
+}
+function ffsSeek(d){
+  var v = ffsPlayers();
+  if (v.yt && v.yt.seekTo){
+    var dur = (v.yt.getDuration && v.yt.getDuration()) || Infinity;
+    v.yt.seekTo(Math.min(dur, Math.max(0, v.yt.getCurrentTime() + d)), true);
+  } else if (v.video){
+    var vd = isFinite(v.video.duration) ? v.video.duration : Infinity;
+    v.video.currentTime = Math.min(vd, Math.max(0, v.video.currentTime + d));
+  }
+}
+function ffsToggle(){
+  var v = ffsPlayers();
+  if (v.yt && v.yt.getPlayerState){
+    if (v.yt.getPlayerState() === YT.PlayerState.PLAYING) v.yt.pauseVideo();
+    else v.yt.playVideo();
+  } else if (v.video){
+    if (v.video.paused) v.video.play(); else v.video.pause();
+  }
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.rot') : null;
+  if (b) enterFfs(b.closest('article.card'));
+});
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') exitFfs(); });
 
 // Expand/collapse reveals the full post content.
 document.querySelectorAll('.expand').forEach(function(btn){
@@ -205,4 +445,4 @@ document.getElementById('forYouGo').addEventListener('click', function(){ locati
 document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div><div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .Video}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button><a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>save</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}

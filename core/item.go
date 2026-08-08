@@ -23,6 +23,8 @@ type Item struct {
 	URL    string
 	Age    string
 	At     time.Time // publish time for the merged sort; zero sinks to the bottom
+	Video  string    // direct mp4 of an attached video, when the app provides one
+	Poster string    // still frame shown before Video plays
 }
 
 func (it Item) Key() string { return Key(it.App, it.ID) }
@@ -43,6 +45,8 @@ type Wire struct {
 	URL    string `json:"url,omitempty"`
 	Age    string `json:"age,omitempty"`
 	TS     string `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
+	Video  string `json:"video,omitempty"`
+	Poster string `json:"poster,omitempty"`
 }
 
 // ParseItems reads an app's --json output into Items, deriving each one's sort
@@ -70,6 +74,8 @@ func ParseItems(out []byte, now time.Time) ([]Item, error) {
 			URL:    w.URL,
 			Age:    w.Age,
 			At:     SortTime(w.TS, w.Age, now),
+			Video:  w.Video,
+			Poster: w.Poster,
 		})
 	}
 	return items, nil
