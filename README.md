@@ -172,14 +172,27 @@ the binary is signed. Go builds are unsigned on Intel Macs (Apple Silicon
 ad-hoc signs automatically), so a source-built `./tui` is exactly that.
 
 `make launcher` / `make build` re-sign the binary automatically after every
-build (rebuilding wipes the signature). Once per checkout path — or whenever
-another device can't connect after a rebuild — register it with the firewall:
+build (rebuilding wipes the signature). But the firewall remembers your
+"Allow" by code signature, and an **ad-hoc** signature (`codesign -s -`) is a
+new identity on every build — so each rebuild re-triggers the "accept incoming
+network connections?" popup. To answer it once and for all, create a stable
+self-signed signing cert (one time, in a regular terminal — keychain prompts
+can't appear in non-interactive sessions):
 
 ```sh
-make firewall   # asks for sudo
+make signing-cert   # creates "tui-codesign" in the login keychain; approve the trust dialog
+make                # first signing use: keychain dialog → Always Allow
+make firewall       # register the signed binary with the firewall (asks for sudo)
 ```
 
-then restart `tui --web`.
+then restart `tui --web` and Allow the popup one last time. From then on every
+build signs with the same identity, so the firewall rule keeps matching across
+rebuilds. `make launcher` uses the cert automatically whenever it exists and
+falls back to ad-hoc signing otherwise; if serving `--web` from another Mac,
+run `make signing-cert` there once too. If the CLI route fails, the GUI
+equivalent is Keychain Access → Certificate Assistant → Create a Certificate
+(name `tui-codesign`, Self-Signed Root, Code Signing), then Trust → Code
+Signing: Always Trust.
 
 ## Layout
 
