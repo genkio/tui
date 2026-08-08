@@ -24,6 +24,7 @@ var appColors = map[string]string{
 	"inoreader": "#ffb100", // amber
 	"folo":      "#d07df0", // magenta
 	"reddit":    "#ff6b33", // orange
+	"douban":    "#00b51d", // douban green
 }
 
 var appLabels = map[string]string{
@@ -31,6 +32,7 @@ var appLabels = map[string]string{
 	"inoreader": "ino",
 	"folo":      "folo",
 	"reddit":    "rdt",
+	"douban":    "dou",
 }
 
 // runWeb serves the merged "all" timeline over HTTP, bound to addr (default
@@ -116,8 +118,9 @@ func fetchAllItems(ctx context.Context, root string, apps []string, xTab string,
 			out, err := cmd.Output()
 			if err != nil {
 				mu.Lock()
-				if app == "inoreader" && len(stderr.Bytes()) > 0 && bytes.Contains(stderr.Bytes(), []byte("session is stale")) {
-					warn = "Inoreader session is stale — re-run `tui inoreader --auth`."
+				// every plugin emits this marker for an expired session
+				if bytes.Contains(stderr.Bytes(), []byte("session is stale")) {
+					warn = strings.TrimSpace(warn + " " + app + " session is stale — re-run `tui " + app + " --auth`.")
 				}
 				failed = append(failed, app)
 				mu.Unlock()

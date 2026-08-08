@@ -52,13 +52,14 @@ func NewTheme(isDark bool) Theme {
 			"inoreader": chip("214"), // amber
 			"folo":      chip("170"), // magenta
 			"reddit":    chip("208"), // orange
+			"douban":    chip("34"),  // douban green
 		},
 	}
 }
 
 // Chip renders app's colored source tag (𝕏 / ino / folo) for the merged view.
 func (t Theme) Chip(app string) string {
-	label := map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo", "reddit": "rdt"}[app]
+	label := chipLabels[app]
 	if label == "" {
 		label = app
 	}
@@ -71,8 +72,10 @@ func (t Theme) Chip(app string) string {
 
 // PlainChip is the chip label without color, for a greyed (read) row.
 func PlainChip(app string) string {
-	if l := map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo", "reddit": "rdt"}[app]; l != "" {
+	if l := chipLabels[app]; l != "" {
 		return l
 	}
 	return app
 }
+
+var chipLabels = map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo", "reddit": "rdt", "douban": "dou"}

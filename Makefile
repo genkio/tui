@@ -1,4 +1,4 @@
-APPS := x inoreader slack folo reddit
+APPS := x inoreader slack folo reddit douban
 
 .DEFAULT_GOAL := build
 .PHONY: build run launcher apps firewall clean help $(APPS)

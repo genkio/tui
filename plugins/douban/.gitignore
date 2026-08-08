@@ -1,0 +1,10 @@
+# build artifact (binary shares the repo name)
+/douban-tui
+
+# secrets and local env
+.env
+.env.*
+!.env.sample
+
+go.work
+go.work.sum

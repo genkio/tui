@@ -11,6 +11,7 @@ read daily:
 | [`slack`](plugins/slack/README.md)         | Slack unread messages and threads           |
 | [`folo`](plugins/folo/README.md)           | Folo pending (unread) article triage        |
 | [`reddit`](plugins/reddit/README.md)       | Reddit home timeline                         |
+| [`douban`](plugins/douban/README.md)       | Douban following timeline (友邻广播)          |
 
 The whole family ships as one binary; each app is a plugin under `plugins/`.
 

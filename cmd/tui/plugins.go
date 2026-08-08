@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/genkio/tui/core"
+	"github.com/genkio/tui/plugins/douban"
 	"github.com/genkio/tui/plugins/folo"
 	"github.com/genkio/tui/plugins/inoreader"
 	"github.com/genkio/tui/plugins/reddit"
@@ -23,6 +24,7 @@ var pluginMains = map[string]func() int{
 	"slack":     slack.Main,
 	"folo":      folo.Main,
 	"reddit":    reddit.Main,
+	"douban":    douban.Main,
 }
 
 // runPluginIfRequested runs a plugin and exits when the first argument names

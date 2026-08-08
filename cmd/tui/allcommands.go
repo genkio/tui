@@ -72,14 +72,15 @@ func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 			}(app)
 		}
 		var all []core.Item
-		var failed []string
-		inoreaderStale := false
+		var failed, stale []string
 		for range apps {
 			r := <-ch
 			if r.err != nil {
 				failed = append(failed, r.app)
-				if r.app == "inoreader" && strings.Contains(r.stderr, "session is stale") {
-					inoreaderStale = true
+				// every plugin emits this marker for an expired session, so the
+				// user knows to re-auth rather than assume the app is broken.
+				if strings.Contains(r.stderr, "session is stale") {
+					stale = append(stale, r.app)
 				}
 				continue
 			}
@@ -89,10 +90,8 @@ func fetchAll(root string, apps []string, xTab string) tea.Cmd {
 		note := ""
 		if len(failed) > 0 {
 			note = "couldn't load: " + strings.Join(failed, ", ")
-			if inoreaderStale {
-				// distinguish a stale session from a hard failure so the user knows
-				// to re-auth rather than assume inoreader is broken.
-				note += " — inoreader session stale, run `tui inoreader --auth`"
+			for _, app := range stale {
+				note += " — " + app + " session stale, run `tui " + app + " --auth`"
 			}
 		}
 		return allItemsMsg{items: all, note: note}

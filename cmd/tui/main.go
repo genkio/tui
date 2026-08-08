@@ -1,5 +1,5 @@
 // Command tui is a launcher for the terminal apps in this repo (x, inoreader,
-// slack, folo, reddit). It lists them, runs the selected one as a subprocess, and kicks off
+// slack, folo, reddit, douban). It lists them, runs the selected one as a subprocess, and kicks off
 // that project's `make auth` first when it isn't logged in yet. Because each TUI
 // runs as a child process, quitting it (q) drops back here; q again exits.
 package main
@@ -49,6 +49,8 @@ func appsIn(root string) []app {
 			[][]string{{"FOLO_COOKIE"}}, true},
 		{"reddit", "Reddit home timeline", filepath.Join(root, "plugins", "reddit"),
 			[][]string{{"RDTUI_COOKIE"}}, true},
+		{"douban", "Douban following timeline (友邻广播)", filepath.Join(root, "plugins", "douban"),
+			[][]string{{"DBTUI_COOKIE"}}, true},
 	}
 }
 
@@ -232,8 +234,8 @@ type model struct {
 	counts     map[string]string // app name -> last count token
 	countErr   map[string]bool   // app name -> last poll failed
 	countStale map[string]bool   // app name -> last poll failed on an expired session
-	running   bool              // a child TUI/auth flow is active; pause polling
-	lastFetch time.Time         // when the most recent count landed, for the freshness label
+	running    bool              // a child TUI/auth flow is active; pause polling
+	lastFetch  time.Time         // when the most recent count landed, for the freshness label
 }
 
 func newModel(root string, pollEvery time.Duration) model {
@@ -536,7 +538,7 @@ func (m model) View() tea.View {
 
 	// The all timeline leads the list as a synthetic first row, above the apps
 	// it aggregates.
-	renderRow(0, "all", "Merged unread across x · inoreader · folo · reddit", m.allBadge())
+	renderRow(0, "all", "Merged unread across x · inoreader · folo · reddit · douban", m.allBadge())
 	for i, a := range m.apps {
 		renderRow(i+1, a.name, a.desc, m.badge(i))
 	}
