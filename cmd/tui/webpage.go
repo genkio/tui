@@ -50,9 +50,24 @@ func (l *pageLoader) load() (*template.Template, error) {
 	return template.New("page").Parse(string(src))
 }
 
+// pageInput is everything a render needs; a struct because the feed view and
+// the saved view fill in different halves of it.
+type pageInput struct {
+	items     []core.Item
+	apps      []string
+	failed    []string
+	now       time.Time
+	asc       bool
+	xTab      string
+	warn      string
+	saved     *savedStore
+	savedView bool
+}
+
 type pageData struct {
-	Unread      int    // shown only when HasApps; JS decrements it in place
-	Clock       string // local HH:MM of this page load
+	Unread      int  // shown only when HasApps; JS decrements it in place
+	Saved       int  // size of the saved list, in the header and its link
+	SavedView   bool // rendering the saved list rather than the live feed
 	XAuth       bool
 	XTab        string
 	Health      []healthEntry
@@ -82,13 +97,14 @@ type cardData struct {
 	Video       string // direct mp4; the card shows an inline player
 	Poster      string
 	Expand      bool
+	Saved       bool // starred: the footer button offers to unsave it
 }
 
-// buildPageData shapes the fetched items into what page.tmpl renders: header
-// meta, per-service health dots, and one card per item.
-func buildPageData(items []core.Item, apps, failed []string, now time.Time, asc bool, xTab, warn string) pageData {
+// buildPageData shapes the items into what page.tmpl renders: header counts,
+// per-service health dots, and one card per item.
+func buildPageData(in pageInput) pageData {
 	xAuth := false
-	for _, a := range apps {
+	for _, a := range in.apps {
 		if a == "x" {
 			xAuth = true
 			break
@@ -96,12 +112,12 @@ func buildPageData(items []core.Item, apps, failed []string, now time.Time, asc 
 	}
 
 	bad := map[string]bool{}
-	for _, f := range failed {
+	for _, f := range in.failed {
 		bad[f] = true
 	}
 	var health []healthEntry
-	for _, a := range apps {
-		label := appLabels[a]
+	for _, a := range in.apps {
+		label := healthLabels[a]
 		if label == "" {
 			label = a
 		}
@@ -112,28 +128,37 @@ func buildPageData(items []core.Item, apps, failed []string, now time.Time, asc 
 		health = append(health, h)
 	}
 
-	cards := make([]cardData, 0, len(items))
-	for _, it := range items {
-		cards = append(cards, buildCard(it))
+	cards := make([]cardData, 0, len(in.items))
+	for _, it := range in.items {
+		// In the saved view every card is saved by definition; in the feed ask
+		// the store.
+		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
+		cards = append(cards, buildCard(it, starred))
+	}
+
+	savedCount := 0
+	if in.saved != nil {
+		savedCount = in.saved.count()
 	}
 
 	return pageData{
-		Unread:  len(items),
-		Clock:   now.Local().Format("15:04"),
-		XAuth:   xAuth,
-		XTab:    xTab,
-		Health:  health,
-		Asc:     asc,
-		Warn:    warn,
-		HasApps: len(apps) > 0,
+		Unread:    len(in.items),
+		Saved:     savedCount,
+		SavedView: in.savedView,
+		XAuth:     xAuth,
+		XTab:      in.xTab,
+		Health:    health,
+		Asc:       in.asc,
+		Warn:      in.warn,
+		HasApps:   len(in.apps) > 0,
 		// With x authed on Following and nothing left to read, give a direct
 		// way into For You right from the empty state.
-		OfferForYou: len(items) == 0 && xAuth && xTab == "following",
+		OfferForYou: len(in.items) == 0 && xAuth && in.xTab == "following",
 		Cards:       cards,
 	}
 }
 
-func buildCard(it core.Item) cardData {
+func buildCard(it core.Item, starred bool) cardData {
 	chip := appLabels[it.App]
 	if chip == "" {
 		chip = it.App
@@ -166,6 +191,7 @@ func buildCard(it core.Item) cardData {
 		Video:  it.Video,
 		Poster: it.Poster,
 		Expand: needsExpand(body, title),
+		Saved:  starred,
 	}
 	// Two content panels: a clipped preview and a full version the footer's
 	// expand toggle reveals. linkify escapes, so the HTML is safe as-is.

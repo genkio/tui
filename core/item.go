@@ -49,10 +49,48 @@ type Wire struct {
 	Poster string `json:"poster,omitempty"`
 }
 
-// ParseItems reads an app's --json output into Items, deriving each one's sort
-// time from its absolute ts when present, else from its relative age. now is
-// threaded in (not time.Now) so a whole fetch shares one clock and tests are
-// deterministic. Any noise around the JSON array (build chatter) is tolerated.
+// Item converts a wire item, deriving the sort time from the absolute ts when
+// present, else from the relative age. now is threaded in (not time.Now) so a
+// whole fetch shares one clock and tests are deterministic.
+func (w Wire) Item(now time.Time) Item {
+	return Item{
+		App:    w.App,
+		ID:     w.ID,
+		Title:  w.Title,
+		Body:   w.Body,
+		Source: w.Source,
+		Author: w.Author,
+		URL:    w.URL,
+		Age:    w.Age,
+		At:     SortTime(w.TS, w.Age, now),
+		Video:  w.Video,
+		Poster: w.Poster,
+	}
+}
+
+// Wire is the round trip back, for callers that persist an item (the web
+// page's saved list) and read it again later.
+func (it Item) Wire() Wire {
+	w := Wire{
+		App:    it.App,
+		ID:     it.ID,
+		Title:  it.Title,
+		Body:   it.Body,
+		Source: it.Source,
+		Author: it.Author,
+		URL:    it.URL,
+		Age:    it.Age,
+		Video:  it.Video,
+		Poster: it.Poster,
+	}
+	if !it.At.IsZero() {
+		w.TS = it.At.UTC().Format(time.RFC3339)
+	}
+	return w
+}
+
+// ParseItems reads an app's --json output into Items. Any noise around the JSON
+// array (build chatter) is tolerated.
 func ParseItems(out []byte, now time.Time) ([]Item, error) {
 	raw := extractJSONArray(out)
 	if raw == nil {
@@ -64,19 +102,7 @@ func ParseItems(out []byte, now time.Time) ([]Item, error) {
 	}
 	items := make([]Item, 0, len(ws))
 	for _, w := range ws {
-		items = append(items, Item{
-			App:    w.App,
-			ID:     w.ID,
-			Title:  w.Title,
-			Body:   w.Body,
-			Source: w.Source,
-			Author: w.Author,
-			URL:    w.URL,
-			Age:    w.Age,
-			At:     SortTime(w.TS, w.Age, now),
-			Video:  w.Video,
-			Poster: w.Poster,
-		})
+		items = append(items, w.Item(now))
 	}
 	return items, nil
 }

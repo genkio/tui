@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +23,28 @@ func renderPage(t *testing.T, items []core.Item, apps, failed []string, asc bool
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	if err := tmpl.Execute(&b, buildPageData(items, apps, failed, time.Now(), asc, xTab, warn)); err != nil {
+	in := pageInput{items: items, apps: apps, failed: failed, now: time.Now(), asc: asc, xTab: xTab, warn: warn}
+	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// renderSavedPage renders the saved list the way the ?saved=1 route does.
+func renderSavedPage(t *testing.T, store *savedStore) string {
+	t.Helper()
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	var b strings.Builder
+	in := pageInput{items: store.list(now), now: now, asc: true, saved: store, savedView: true}
+	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
 	return b.String()
@@ -38,7 +61,7 @@ func renderCard(t *testing.T, it core.Item) string {
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	if err := tmpl.ExecuteTemplate(&b, "card", buildCard(it)); err != nil {
+	if err := tmpl.ExecuteTemplate(&b, "card", buildCard(it, false)); err != nil {
 		t.Fatal(err)
 	}
 	return b.String()
@@ -253,5 +276,118 @@ func TestDownloadGuards(t *testing.T) {
 	}
 	if got := dlName(""); got != "video.mp4" {
 		t.Errorf("empty name should default, got %q", got)
+	}
+}
+
+func TestSavedStoreRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "saved.json")
+	s := loadSaved(path)
+	if s.count() != 0 {
+		t.Fatalf("fresh store should be empty, got %d", s.count())
+	}
+
+	it := core.Item{
+		App: "x", ID: "1", Title: "a post", Body: "body text",
+		Source: "@alice", URL: "https://x.com/alice/status/1",
+		At:    time.Now().Add(-72 * time.Hour),
+		Video: "https://video.twimg.com/a.mp4",
+	}
+	if err := s.add(it, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.add(it, time.Now()); err != nil { // saving twice must not duplicate
+		t.Fatal(err)
+	}
+	if s.count() != 1 || !s.has("x", "1") {
+		t.Fatalf("expected exactly one saved item, got %d", s.count())
+	}
+
+	// A second process (or a restart) sees the same list from disk.
+	reloaded := loadSaved(path)
+	if reloaded.count() != 1 || !reloaded.has("x", "1") {
+		t.Fatalf("store did not persist: %d items", reloaded.count())
+	}
+	got := reloaded.list(time.Now())[0]
+	if got.Title != "a post" || got.Video != "https://video.twimg.com/a.mp4" {
+		t.Errorf("item lost fields in the round trip: %+v", got)
+	}
+	// Age is recomputed from the publish time, not frozen at save time.
+	if got.Age != "3d ago" {
+		t.Errorf("age = %q, want it recomputed to 3d ago", got.Age)
+	}
+
+	if err := reloaded.remove("x", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.count() != 0 || loadSaved(path).count() != 0 {
+		t.Fatal("unsave should persist too")
+	}
+}
+
+func TestSavedPageAndButton(t *testing.T) {
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	empty := renderSavedPage(t, store)
+	if !strings.Contains(empty, "Nothing saved yet") {
+		t.Fatalf("expected an empty-state note: %s", empty)
+	}
+	// The saved view never offers to mark things read.
+	if strings.Contains(empty, "mark all read") {
+		t.Fatal("mark-all-read must not appear in the saved view")
+	}
+	if !strings.Contains(empty, `data-savedview="true"`) {
+		t.Fatal("saved view should flag itself so scroll-to-read stays off")
+	}
+
+	if err := store.add(core.Item{App: "reddit", ID: "7", Title: "kept", Source: "r/go"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	page := renderSavedPage(t, store)
+	if !strings.Contains(page, "kept") {
+		t.Fatalf("saved item missing from the saved view: %s", page)
+	}
+	// Cards in the saved view render as already saved.
+	if !strings.Contains(page, `data-saved="1"`) || !strings.Contains(page, ">saved</button>") {
+		t.Fatalf("expected an unsave-able button: %s", page)
+	}
+
+	// The feed view links to the saved list and shows its count.
+	feed := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
+	if !strings.Contains(feed, `href="/?saved=1"`) {
+		t.Fatalf("expected a saved link in the header: %s", feed)
+	}
+	if !strings.Contains(feed, `<span id="unreadn">`) {
+		t.Fatal("unread count needs its own span so the saved link survives updates")
+	}
+}
+
+func TestHealthLabelsAreShort(t *testing.T) {
+	p := renderPage(t, nil, []string{"inoreader", "reddit", "douban", "folo"}, nil, true, "following", "")
+	for _, want := range []string{">in<", ">rd<", ">db<", ">fo<"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("expected two-letter health label %q: %s", want, p)
+		}
+	}
+}
+
+func TestRenderedItemsEviction(t *testing.T) {
+	r := newRenderedItems()
+	r.put([]core.Item{{App: "x", ID: "1", Title: "one"}})
+	if _, ok := r.get("x", "1"); !ok {
+		t.Fatal("rendered item should be retrievable")
+	}
+	if _, ok := r.get("x", "nope"); ok {
+		t.Fatal("unknown item should miss")
+	}
+	// Overflowing the cap drops the oldest entries, not the newest.
+	many := make([]core.Item, 0, maxRendered+10)
+	for i := 0; i < maxRendered+10; i++ {
+		many = append(many, core.Item{App: "reddit", ID: strconv.Itoa(i)})
+	}
+	r.put(many)
+	if _, ok := r.get("x", "1"); ok {
+		t.Error("oldest entry should have been evicted")
+	}
+	if _, ok := r.get("reddit", strconv.Itoa(maxRendered+9)); !ok {
+		t.Error("newest entry should survive")
 	}
 }

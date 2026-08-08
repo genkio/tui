@@ -62,7 +62,9 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall:disabled{opacity:.5;cursor:default}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.save[data-saved="1"]{color:var(--accent)}
+.viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
 .hid{display:none}
 .empty{color:var(--muted);font-style:italic}
 .dlg{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:16px;padding:20px;max-width:360px;width:calc(100vw - 48px)}
@@ -122,19 +124,20 @@ video.ffs{object-fit:cover !important}
 .vid{display:block;width:100%;max-height:70vh;border-radius:12px;margin:10px 0 2px;background:#000}
 </style>
 </head><body>
-<div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" hidden></div>
+<div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" hidden></div>
 <div class="wrap">
 <header>
-  <div class="sub" id="sub">{{if .HasApps}}{{.Unread}} unread {{end}}at {{.Clock}}</div>
+  <div class="sub" id="sub">{{if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<span id="unreadn">{{.Unread}}</span> unread {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{end}}</div>
 {{if .Health}}<div class="health">{{range .Health}}<span class="svc" title="{{.Title}}"><span class="hdot {{if .OK}}ok{{else}}bad{{end}}"></span>{{.Label}}</span>{{end}}</div>
 {{end}}</header>
 <div class="sortbar"><span class="slabel">sort</span>{{if .Asc}}<span class="sort on">oldest</span><a class="sort" href="?order=desc">newest</a>{{else}}<a class="sort" href="?order=asc">oldest</a><span class="sort on">newest</span>{{end}}</div>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
+{{end}}{{if .SavedView}}{{if not .Cards}}<div class="note">Nothing saved yet. Tap <b>save</b> on any item to keep it here.</div>
+{{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">Inbox zero across every timeline.</div>
 {{if .OfferForYou}}<div class="note offer">All caught up. <a href="/?x=foryou">Continue with For You from x →</a></div>
 {{end}}{{end}}{{range .Cards}}{{template "card" .}}
-{{end}}{{if .Cards}}<button id="markAll" class="markall" type="button">✓ mark all read</button>
+{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall" type="button">✓ mark all read</button>
 {{end}}<div id="toast" class="toast"></div>
 <dialog id="forYou" class="dlg">
   <div class="dlg-body">
@@ -170,10 +173,9 @@ function flushPending(){
   });
 }
 function decCount(n){
-  var s = document.getElementById('sub'); if(!s) return;
-  var m = s.textContent.match(/^(\d+)/);
-  var c = (m ? parseInt(m[1],10) : 0) - n; if(c < 0) c = 0;
-  s.textContent = s.textContent.replace(/^\d+/, c);
+  var s = document.getElementById('unreadn'); if(!s) return;
+  var c = (parseInt(s.textContent, 10) || 0) - n; if(c < 0) c = 0;
+  s.textContent = c;
   if(c === 0) maybeOfferForYou();   // whole list read
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
@@ -194,7 +196,36 @@ var obs = new IntersectionObserver(function(entries){
   });
   if(dirty && !flushTimer) flushTimer = setTimeout(flushPending, 400);
 },{threshold:0});
-document.querySelectorAll('article.card').forEach(function(c){ obs.observe(c); });
+// The saved list is for re-reading, so scrolling through it must not mark
+// anything read.
+if (document.getElementById('state').getAttribute('data-savedview') !== 'true') {
+  document.querySelectorAll('article.card').forEach(function(c){ obs.observe(c); });
+}
+
+// Save / unsave one item. The button posts just app+id; the server pairs that
+// with the item it last rendered and persists the whole thing, so a saved item
+// survives the feed moving on.
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.save') : null;
+  if (!b) return;
+  var card = b.closest('article.card');
+  var on = b.dataset.saved !== '1';
+  var fd = new FormData();
+  fd.append('app', card.dataset.app);
+  fd.append('id', card.dataset.id);
+  fd.append('save', on ? '1' : '0');
+  b.disabled = true;
+  fetch('/save', {method:'POST', body:fd})
+    .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'reload the page and try again' : 'could not save'); return res.json(); })
+    .then(function(d){
+      b.dataset.saved = on ? '1' : '0';
+      b.textContent = on ? 'saved' : 'save';
+      var n = document.getElementById('savedn');
+      if (n) n.textContent = d.saved;
+    })
+    .catch(function(err){ toast(err.message || 'could not save'); })
+    .then(function(){ b.disabled = false; });
+});
 
 // YouTube links get an inline click-to-play embed: a lazy thumbnail per video
 // that swaps on tap to the official IFrame-API player, so the global speed and
@@ -445,4 +476,4 @@ document.getElementById('forYouGo').addEventListener('click', function(){ locati
 document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .Video}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button><a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>save</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button>{{if .Video}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button><a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>save</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}

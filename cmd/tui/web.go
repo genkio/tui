@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"html/template"
 	"io"
 	"net"
 	"net/http"
@@ -39,6 +40,17 @@ var appLabels = map[string]string{
 	"douban":    "dou",
 }
 
+// healthLabels are the header's per-service dot labels, kept to two characters
+// so the strip stays narrow next to the unread/saved counts. Cards use the
+// roomier appLabels for their chips.
+var healthLabels = map[string]string{
+	"x":         "𝕏",
+	"inoreader": "in",
+	"folo":      "fo",
+	"reddit":    "rd",
+	"douban":    "db",
+}
+
 // runWeb serves the merged "all" timeline over HTTP, bound to addr (default
 // 0.0.0.0:8080) so other devices on the tailnet can reach it. It reuses the
 // same subprocess contract as the terminal all view — each authed app's
@@ -59,6 +71,8 @@ func runWeb(root, addr string, dev bool) error {
 	if dev {
 		cache = &fetchCache{}
 	}
+	saved := loadSaved("")
+	rendered := newRenderedItems()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +80,7 @@ func runWeb(root, addr string, dev bool) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache)
+		handleAll(w, r, root, loader, cache, saved, rendered)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -75,6 +89,14 @@ func runWeb(root, addr string, dev bool) error {
 			return
 		}
 		handleMark(w, r, root)
+	})
+	mux.HandleFunc("/save", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSave(w, r, saved, rendered)
 	})
 	mux.HandleFunc("/dl", handleDownload)
 
@@ -212,7 +234,7 @@ func (c *fetchCache) put(xTab string, now time.Time, items []core.Item, failed [
 // with ?json=1). Default order is oldest-first; ?order=desc flips to newest-first.
 // ?x=foryou serves x's For You timeline instead of the Following default (used
 // only ephemerally; the page resets to following on reload).
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *fetchCache) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *fetchCache, saved *savedStore, rendered *renderedItems) {
 	// In --dev a template typo should show up immediately, not after a full
 	// fetch, so load (and in dev, re-parse) the template first.
 	tmpl, err := loader.load()
@@ -222,6 +244,22 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	}
 
 	now := time.Now()
+	asc := r.URL.Query().Get("order") != "desc" // oldest first by default
+
+	// The saved view reads straight from the store: no fetch, so it loads
+	// instantly and still works when a service (or the network) is down.
+	if r.URL.Query().Get("saved") == "1" {
+		items := saved.list(now)
+		sortItems(items, asc)
+		if r.URL.Query().Get("json") == "1" {
+			w.Header().Set("Content-Type", "application/json")
+			writeJSONItems(w, items, nil)
+			return
+		}
+		writePage(w, tmpl, pageInput{items: items, now: now, asc: asc, saved: saved, savedView: true})
+		return
+	}
+
 	apps := authedFeedApps(root)
 
 	xTab := r.URL.Query().Get("x")
@@ -246,7 +284,6 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 			}
 		}
 	}
-	asc := r.URL.Query().Get("order") != "desc" // oldest first by default
 	sortItems(items, asc)
 
 	if r.URL.Query().Get("json") == "1" {
@@ -255,15 +292,54 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		return
 	}
 
-	// Render to a buffer first so a template error mid-page becomes a clean
-	// 500 instead of half a document.
+	// Remember what this page showed so its save buttons can post back just an
+	// app+id and still persist the whole item.
+	rendered.put(items)
+
+	writePage(w, tmpl, pageInput{
+		items: items, apps: apps, failed: failed, now: now,
+		asc: asc, xTab: xTab, warn: warn, saved: saved,
+	})
+}
+
+// writePage renders to a buffer first, so a template error mid-page becomes a
+// clean 500 instead of half a document.
+func writePage(w http.ResponseWriter, tmpl *template.Template, in pageInput) {
 	var page bytes.Buffer
-	if err := tmpl.Execute(&page, buildPageData(items, apps, failed, now, asc, xTab, warn)); err != nil {
+	if err := tmpl.Execute(&page, buildPageData(in)); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(page.Bytes())
+}
+
+// handleSave stars or unstars one item. Saving needs the whole item, which the
+// button doesn't carry, so it comes from what this process last rendered; a
+// miss means the page predates a restart and the client is told to reload.
+func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, rendered *renderedItems) {
+	app, id := r.FormValue("app"), r.FormValue("id")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	var err error
+	if r.FormValue("save") == "1" {
+		it, ok := rendered.get(app, id)
+		if !ok {
+			http.Error(w, "item is no longer in view; reload the page", http.StatusConflict)
+			return
+		}
+		err = saved.add(it, time.Now())
+	} else {
+		err = saved.remove(app, id)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"saved":%d}`, saved.count())
 }
 
 // sortItems orders the feed by publish time: oldest first when asc is true,
