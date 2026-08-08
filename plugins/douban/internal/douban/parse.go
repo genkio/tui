@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"golang.org/x/net/html"
+
+	"github.com/genkio/tui/core"
 )
 
 // cst is Douban's wall-clock zone: created_at titles come as a bare
@@ -37,6 +39,7 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 			continue
 		}
 		parts := p.textParts()
+		images := p.images
 		// a reshare carries the original status in a sibling wrapper; quote it
 		if real := findFirst(wrapper, func(n *html.Node) bool {
 			return n.Data == "div" && hasClass(n, "status-real-wrapper")
@@ -60,6 +63,7 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 				if o.cardDesc != "" {
 					parts = append(parts, o.cardDesc)
 				}
+				images = append(images, o.images...) // the reshared post's pictures
 			}
 		}
 		s := Status{
@@ -68,6 +72,7 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 			Activity: p.activity,
 			Text:     strings.Join(parts, "\n\n"),
 			URL:      stripQuery(p.url),
+			Images:   images,
 		}
 		if t, err := time.ParseInLocation("2006-01-02 15:04:05", p.created, cst); err == nil {
 			s.CreatedAt = t.UTC()
@@ -90,6 +95,8 @@ type item struct {
 	cardTitle string // subject/topic block: linked title,
 	cardURL   string // its URL,
 	cardDesc  string // and the preview paragraph
+
+	images []string // attached pictures / card cover
 }
 
 // textParts assembles the item's own content lines (saying, then card).
@@ -173,7 +180,38 @@ func parseItem(n *html.Node) item {
 		}
 	}
 	p.cardURL = stripTracking(p.cardURL)
+	p.images = photos(n)
 	return p
+}
+
+// photos collects what a status attached: uploaded pictures, a subject card's
+// cover. The header carries the poster's avatar, which is the row's chrome
+// rather than its content, so that subtree is skipped. Douban lazy-loads, so
+// the real URL is usually in data-src with a placeholder left in src.
+func photos(n *html.Node) []string {
+	var out []string
+	seen := map[string]bool{}
+	var walk func(*html.Node)
+	walk = func(c *html.Node) {
+		if c.Type == html.ElementNode && (hasClass(c, "hd") || hasClass(c, "usr-pic")) {
+			return
+		}
+		if c.Type == html.ElementNode && c.Data == "img" {
+			u := core.ImageURL(attr(c, "data-src"))
+			if u == "" {
+				u = core.ImageURL(attr(c, "src"))
+			}
+			if u != "" && !seen[u] {
+				seen[u] = true
+				out = append(out, u)
+			}
+		}
+		for ch := c.FirstChild; ch != nil; ch = ch.NextSibling {
+			walk(ch)
+		}
+	}
+	walk(n)
+	return out
 }
 
 // stripTracking drops douban's _spm_id tracking query from a URL, leaving real

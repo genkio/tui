@@ -138,40 +138,18 @@ func printCount(ctx context.Context, client *inoreader.Client, cfg config.Config
 	return nil
 }
 
-// dumpItem is the normalized shape the launcher's "all" timeline consumes from
-// every app's --json output.
-type dumpItem struct {
-	App    string `json:"app"`
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Body   string `json:"body,omitempty"`
-	Source string `json:"source,omitempty"`
-	Author string `json:"author,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Age    string `json:"age,omitempty"`
-	TS     string `json:"ts,omitempty"`
-}
-
 // printJSON dumps the unread articles as a JSON array for the launcher's "all"
 // view. Inoreader gives no absolute publish time (only a relative age string),
-// so ts is left empty and the launcher derives a sort key from age.
+// so ts is left empty and the launcher derives a sort key from age. It emits
+// the same normalization the in-process feed uses, so the two can't drift.
 func printJSON(ctx context.Context, client *inoreader.Client, cfg config.Config) error {
 	arts, err := client.Unreads(ctx, true, cfg.MaxArticles)
 	if err != nil {
 		return err
 	}
-	items := make([]dumpItem, 0, len(arts))
-	for _, a := range arts {
-		items = append(items, dumpItem{
-			App:    "inoreader",
-			ID:     a.ID,
-			Title:  a.Title,
-			Body:   a.Content,
-			Source: a.Feed,
-			Author: a.Author,
-			URL:    a.URL,
-			Age:    a.Age,
-		})
+	items := make([]core.Wire, 0, len(arts))
+	for _, it := range inoreader.ToItems(arts) {
+		items = append(items, it.Wire())
 	}
 	return json.NewEncoder(os.Stdout).Encode(items)
 }

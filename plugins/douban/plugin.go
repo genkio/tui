@@ -16,7 +16,6 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/douban/internal/config"
@@ -140,45 +139,20 @@ func printCount(ctx context.Context, client *douban.Client, cfg config.Config) e
 	return nil
 }
 
-// dumpItem is the normalized shape the launcher's "all" timeline consumes from
-// every app's --json output. Each app maps its own model onto these fields.
-type dumpItem struct {
-	App    string `json:"app"`
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Body   string `json:"body,omitempty"`
-	Source string `json:"source,omitempty"` // author name (+ activity) here
-	Author string `json:"author,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Age    string `json:"age,omitempty"`
-	TS     string `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
-}
-
 // printJSON dumps the unread statuses of the following timeline as a JSON
 // array for the launcher's "all" view, applying the same local read filter as
-// --count so the two stay consistent.
+// --count so the two stay consistent. core.Wire is the shape every app emits,
+// so a field added there (images, video) reaches the merged view without
+// touching this.
 func printJSON(ctx context.Context, client *douban.Client, cfg config.Config) error {
 	src := douban.NewSource(client, readstore.Load(""), cfg.MaxStatuses)
 	items, err := src.Fetch(ctx)
 	if err != nil {
 		return err
 	}
-	out := make([]dumpItem, 0, len(items))
+	out := make([]core.Wire, 0, len(items))
 	for _, it := range items {
-		d := dumpItem{
-			App:    it.App,
-			ID:     it.ID,
-			Title:  it.Title,
-			Body:   it.Body,
-			Source: it.Source,
-			Author: it.Author,
-			URL:    it.URL,
-			Age:    it.Age,
-		}
-		if !it.At.IsZero() {
-			d.TS = it.At.UTC().Format(time.RFC3339)
-		}
-		out = append(out, d)
+		out = append(out, it.Wire())
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)
 }

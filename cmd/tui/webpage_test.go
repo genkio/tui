@@ -339,6 +339,49 @@ func TestRenderCardQuoteVideo(t *testing.T) {
 	}
 }
 
+func TestRenderCardImages(t *testing.T) {
+	it := core.Item{
+		App: "x", ID: "60", Title: "two shots", Body: "two shots",
+		Source: "@alice", URL: "https://x.com/alice/status/60",
+		Images: []string{"https://pbs.twimg.com/media/one.jpg", "https://pbs.twimg.com/media/two.jpg"},
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `<button class="img"`) {
+		t.Fatalf("expected an image toggle in the footer: %s", out)
+	}
+	// Collapsed by default, and unopened images cost no bandwidth: the URL sits
+	// in data-src until the toggle promotes it.
+	if !strings.Contains(out, `<div class="imgbox hid">`) {
+		t.Errorf("images should start collapsed: %s", out)
+	}
+	if strings.Contains(out, `<img src=`) {
+		t.Errorf("images must not load before the toggle: %s", out)
+	}
+	for _, u := range it.Images {
+		if !strings.Contains(out, `data-src="`+u+`"`) {
+			t.Errorf("missing image %s: %s", u, out)
+		}
+	}
+
+	// A quoted post's images get the same treatment, and one toggle covers both.
+	it.Images = nil
+	it.Quote = &core.Quote{Source: "@eve", Text: "look", Images: []string{"https://pbs.twimg.com/media/q.jpg"}}
+	out = renderCard(t, it)
+	if !strings.Contains(out, `<button class="img"`) {
+		t.Errorf("a quote-only image should still offer the toggle: %s", out)
+	}
+	if !strings.Contains(out, `data-src="https://pbs.twimg.com/media/q.jpg"`) {
+		t.Errorf("expected the quoted post's image: %s", out)
+	}
+
+	// No images anywhere -> no toggle, no image block.
+	it.Quote = nil
+	out = renderCard(t, it)
+	if strings.Contains(out, `class="img"`) || strings.Contains(out, "imgbox") {
+		t.Errorf("image toggle should be absent without images: %s", out)
+	}
+}
+
 func TestSavedQuoteRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "saved.json")
 	s := loadSaved(path)

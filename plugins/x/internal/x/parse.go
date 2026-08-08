@@ -106,6 +106,7 @@ func (t *tweetResult) toTweet() Tweet {
 	}
 	tw.Quoted = src.quoted()
 	tw.VideoURL, tw.VideoPoster = lg.video()
+	tw.Images = lg.photos()
 	return tw
 }
 
@@ -130,7 +131,20 @@ func (t *tweetResult) quoted() *QuotedTweet {
 		qt.URL = "https://x.com/" + handle + "/status/" + q.RestID
 	}
 	qt.VideoURL, qt.VideoPoster = q.Legacy.video()
+	qt.Images = q.Legacy.photos()
 	return qt
+}
+
+// photos returns every attached still image, in the order x lists them. A video
+// or GIF post carries no photo entity, so the two never both fill.
+func (lg *legacyTweet) photos() []string {
+	var out []string
+	for _, m := range lg.ExtendedEntities.Media {
+		if m.Type == "photo" && m.MediaURLHTTPS != "" {
+			out = append(out, m.MediaURLHTTPS)
+		}
+	}
+	return out
 }
 
 // video returns the best mp4 (highest bitrate) of the first attached video or

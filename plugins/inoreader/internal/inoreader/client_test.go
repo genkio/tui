@@ -14,7 +14,9 @@ const frag1001 = `<div class="article_title mb-2">` +
 	`<a class="ajaxed" id="article_feed_info_link_1001" href="/feed/x"> Feed One </a>` +
 	`<span class="article-author-1001">alice</span>` +
 	`<span class="article_subtitle_date_wrapper"><span title="Date received">3h</span></span>` +
-	`<div class="article_content" id="article_contents_inner_1001"><p>Hello <b>world</b></p><p>line two</p></div>`
+	`<div class="article_content" id="article_contents_inner_1001">` +
+	`<p>Hello <b>world</b></p><img src="https://ex.com/hero.jpg"><p>line two</p>` +
+	`<img src="https://ex.com/px.gif" width="1" height="1"></div>`
 
 const frag1002 = `<a class="article_title_link" id="article_title_link_1002" href="https://ex.com/2">Second</a>` +
 	`<a id="article_feed_info_link_1002" href="/feed/y">Feed Two</a>` +
@@ -82,6 +84,17 @@ func TestUnreadsScrapesAndOrders(t *testing.T) {
 	}
 	if a.Content != "Hello world\nline two" {
 		t.Errorf("content: %q", a.Content)
+	}
+	// The body's image is kept even though the text flattening drops the tag;
+	// the tracking beacon next to it is not an attachment.
+	if len(a.Images) != 1 || a.Images[0] != "https://ex.com/hero.jpg" {
+		t.Errorf("images = %v, want just the hero image", a.Images)
+	}
+	if len(arts[0].Images) != 0 {
+		t.Errorf("an image-free article should carry none: %v", arts[0].Images)
+	}
+	if got := ToItems(arts)[1].Images; len(got) != 1 {
+		t.Errorf("ToItems dropped the image: %v", got)
 	}
 }
 

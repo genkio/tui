@@ -63,6 +63,7 @@ func ToItems(arts []Article) []core.Item {
 			URL:    a.URL,
 			Age:    a.Age,
 			At:     a.Published.UTC(),
+			Images: a.Images,
 		}
 	}
 	return items

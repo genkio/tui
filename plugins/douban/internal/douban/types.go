@@ -17,5 +17,6 @@ type Status struct {
 	Text      string // status text, with any reshared original / card appended
 	URL       string // canonical web URL for the status
 	CreatedAt time.Time
-	Age       string // relative time derived from CreatedAt, e.g. "2h"
+	Age       string   // relative time derived from CreatedAt, e.g. "2h"
+	Images    []string // attached pictures, including a reshared original's
 }

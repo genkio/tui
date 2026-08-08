@@ -88,6 +88,79 @@ func TestParseHomeFloatCreatedUTC(t *testing.T) {
 	}
 }
 
+func TestParseHomeImages(t *testing.T) {
+	// A gallery: media_metadata is a map, so gallery_data carries the only
+	// ordering. The ids are listed out of map order on purpose.
+	gallery := `{"kind":"t3","data":{"id":"g1","subreddit":"pics","title":"album",
+	  "gallery_data":{"items":[{"media_id":"bbb"},{"media_id":"aaa"}]},
+	  "media_metadata":{
+	    "aaa":{"s":{"u":"https://preview.redd.it/aaa.jpg?width=1080&s=sig"}},
+	    "bbb":{"s":{"u":"https://preview.redd.it/bbb.jpg?width=1080&s=sig"}}}}}`
+	// A direct image link wins over the preview reddit also renders for it.
+	direct := `{"kind":"t3","data":{"id":"d1","subreddit":"pics","title":"shot",
+	  "url":"https://i.redd.it/abc.png",
+	  "preview":{"images":[{"source":{"url":"https://preview.redd.it/abc.png?s=sig"}}]}}}`
+	// A link post has no image of its own, so reddit's preview stands in.
+	link := `{"kind":"t3","data":{"id":"l1","subreddit":"programming","title":"article",
+	  "url":"https://example.com/post",
+	  "preview":{"images":[{"source":{"url":"https://external-preview.redd.it/xyz.jpg?s=sig"}}]}}}`
+	text := `{"kind":"t3","data":{"id":"t1","subreddit":"golang","title":"words","is_self":true,
+	  "url":"https://www.reddit.com/r/golang/comments/t1/words/"}}`
+
+	body := `{"kind":"Listing","data":{"children":[` + gallery + `,` + direct + `,` + link + `,` + text + `]}}`
+	posts, err := parseHome([]byte(body))
+	if err != nil {
+		t.Fatalf("parseHome: %v", err)
+	}
+	if len(posts) != 4 {
+		t.Fatalf("got %d posts, want 4", len(posts))
+	}
+
+	want := [][]string{
+		{"https://preview.redd.it/bbb.jpg?width=1080&s=sig", "https://preview.redd.it/aaa.jpg?width=1080&s=sig"},
+		{"https://i.redd.it/abc.png"},
+		{"https://external-preview.redd.it/xyz.jpg?s=sig"},
+		nil,
+	}
+	for i, w := range want {
+		got := posts[i].Images
+		if len(got) != len(w) {
+			t.Errorf("post %s images = %v, want %v", posts[i].ID, got, w)
+			continue
+		}
+		for j := range w {
+			if got[j] != w[j] {
+				t.Errorf("post %s images = %v, want %v", posts[i].ID, got, w)
+				break
+			}
+		}
+	}
+	// The images reach the shared item shape the web card reads.
+	if got := ToItem(posts[1]).Images; len(got) != 1 || got[0] != "https://i.redd.it/abc.png" {
+		t.Errorf("ToItem dropped images: %v", got)
+	}
+}
+
+func TestIsImageURL(t *testing.T) {
+	for _, u := range []string{
+		"https://i.redd.it/a.jpg", "https://i.redd.it/a.JPEG",
+		"https://x.com/a.png", "https://x.com/a.gif", "https://x.com/a.webp",
+		"https://i.redd.it/a.jpg?width=1", "https://i.redd.it/a.png#frag",
+	} {
+		if !isImageURL(u) {
+			t.Errorf("isImageURL(%q) = false, want true", u)
+		}
+	}
+	for _, u := range []string{
+		"", "https://example.com/post", "https://example.com/a.jpg.html",
+		"https://v.redd.it/abc", "https://example.com/gallery?img=a.jpg",
+	} {
+		if isImageURL(u) {
+			t.Errorf("isImageURL(%q) = true, want false", u)
+		}
+	}
+}
+
 func TestRelAge(t *testing.T) {
 	now := time.Now()
 	cases := []struct {

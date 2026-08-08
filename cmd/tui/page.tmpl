@@ -57,6 +57,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .quote{margin:10px 0 2px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(128,128,128,.07)}
 .qmeta{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 .qsrc{color:var(--muted);font-weight:600;text-decoration:none}
+/* attached stills stay collapsed until the footer's image toggle asks for them,
+   so a feed of photo posts is scannable and costs no bandwidth unopened */
+.imgbox{margin:10px 0 2px;display:flex;flex-direction:column;gap:8px}
+.imgbox img{display:block;width:100%;border-radius:12px;background:var(--line)}
+.img[data-on="1"]{color:var(--accent)}
 .quote .body{margin:6px 0 0;font-size:14px;color:var(--muted)}
 .quote .vid{max-height:50vh;margin-bottom:0}
 .quote .open{font-size:13px;min-height:32px}
@@ -70,7 +75,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall:disabled{opacity:.5;cursor:default}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save,.img{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 .save[data-saved="1"]{color:var(--accent)}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
 .hid{display:none}
@@ -233,6 +238,24 @@ document.addEventListener('click', function(e){
     })
     .catch(function(err){ toast(err.message || 'could not save'); })
     .then(function(){ b.disabled = false; });
+});
+
+// Attached stills render only when asked for: the footer's image toggle reveals
+// every image block on the card (the post's own and its quoted post's) and
+// swaps data-src to src the first time, so an unopened card downloads nothing.
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.img') : null;
+  if (!b) return;
+  var on = b.dataset.on !== '1';
+  b.closest('article.card').querySelectorAll('.imgbox').forEach(function(box){
+    box.classList.toggle('hid', !on);
+    if (!on) return;
+    box.querySelectorAll('img[data-src]').forEach(function(img){
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    });
+  });
+  b.dataset.on = on ? '1' : '0';
 });
 
 // YouTube links get an inline click-to-play embed: a lazy thumbnail per video
@@ -484,4 +507,4 @@ document.getElementById('forYouGo').addEventListener('click', function(){ locati
 document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}

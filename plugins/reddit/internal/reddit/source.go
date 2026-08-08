@@ -74,6 +74,7 @@ func ToItem(p Post) core.Item {
 		Author: p.Author,
 		URL:    itemURL(p),
 		Age:    p.Age,
+		Images: p.Images,
 	}
 	if !p.CreatedAt.IsZero() {
 		it.At = p.CreatedAt.UTC()

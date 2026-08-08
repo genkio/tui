@@ -76,6 +76,7 @@ func ToItem(t Tweet) core.Item {
 		Age:    t.Age,
 		Video:  t.VideoURL,
 		Poster: t.VideoPoster,
+		Images: t.Images,
 		Quote:  tweetQuote(t),
 	}
 	if !t.CreatedAt.IsZero() {
@@ -116,5 +117,6 @@ func tweetQuote(t Tweet) *core.Quote {
 		URL:    t.Quoted.URL,
 		Video:  t.Quoted.VideoURL,
 		Poster: t.Quoted.VideoPoster,
+		Images: t.Quoted.Images,
 	}
 }

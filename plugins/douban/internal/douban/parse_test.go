@@ -252,6 +252,73 @@ func TestParseHomeLoggedOut(t *testing.T) {
 	}
 }
 
+// Douban lazy-loads pictures, leaving the real file in data-src. The poster's
+// avatar is chrome, not content, so it must not turn up as an attachment; a
+// reshare contributes the original's pictures.
+func TestParseHomePhotos(t *testing.T) {
+	fixture := `<html><body>
+<div class="new-status status-wrapper" data-uid="1" data-sid="900" data-atype="photo">
+  <div class="status-item" data-uid="1" data-sid="900" data-atype="photo">
+    <div class="usr-pic"><a href="/people/alice/"><img src="https://img1.doubanio.com/icon/u1-1.jpg"></a></div>
+    <div class="mod">
+      <div class="hd" data-status-url="https://www.douban.com/people/alice/status/900/">
+        <div class="text"><a href="/people/alice/" class="lnk-people">alice</a><span>说</span></div>
+      </div>
+      <div class="bd">
+        <blockquote><p>看图</p></blockquote>
+        <div class="block-photo mode-2"><div class="pic">
+          <img src="https://img1.doubanio.com/blank.gif" data-src="https://img9.doubanio.com/view/status/l/public/one.jpg">
+          <img data-src="https://img9.doubanio.com/view/status/l/public/two.jpg">
+        </div></div>
+        <div class="actions"><span class="created_at" title="2026-08-08 00:05:52">今天</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="status-real-wrapper">
+    <div class="status-item" data-uid="2" data-sid="901">
+      <div class="usr-pic"><img src="https://img1.doubanio.com/icon/u2-1.jpg"></div>
+      <div class="mod">
+        <div class="hd"><div class="text"><a class="lnk-people">bob</a></div></div>
+        <div class="bd"><div class="block-photo"><div class="pic">
+          <img data-src="https://img9.doubanio.com/view/status/l/public/orig.jpg">
+        </div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>`
+
+	statuses, err := parseHome([]byte(fixture), time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("parseHome: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	want := []string{
+		"https://img9.doubanio.com/view/status/l/public/one.jpg",
+		"https://img9.doubanio.com/view/status/l/public/two.jpg",
+		"https://img9.doubanio.com/view/status/l/public/orig.jpg",
+	}
+	got := statuses[0].Images
+	if len(got) != len(want) {
+		t.Fatalf("images = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("images = %v, want %v", got, want)
+		}
+	}
+	for _, u := range got {
+		if strings.Contains(u, "/icon/") {
+			t.Errorf("an avatar leaked into the attachments: %q", u)
+		}
+	}
+	if len(ToItem(statuses[0]).Images) != 3 {
+		t.Error("ToItem dropped the pictures")
+	}
+}
+
 func TestToItem(t *testing.T) {
 	st := Status{
 		ID:       "42",

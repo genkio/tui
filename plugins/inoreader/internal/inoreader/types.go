@@ -11,6 +11,7 @@ type Article struct {
 	URL     string // article link, opened by the 'o' key
 	Feed    string // source feed title, e.g. "Hacker News: Best"
 	Author  string
-	Age     string // server-rendered relative time, e.g. "2h"; "" if absent
-	Content string // body flattened to plain text; shown on expand
+	Age     string   // server-rendered relative time, e.g. "2h"; "" if absent
+	Content string   // body flattened to plain text; shown on expand
+	Images  []string // images from the body HTML, before it was flattened
 }

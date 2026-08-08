@@ -18,5 +18,6 @@ type Post struct {
 	Permalink string // "/r/<sub>/comments/<id>/<slug>/"
 	URL       string // external link for link posts; a reddit URL otherwise
 	CreatedAt time.Time
-	Age       string // relative time derived from CreatedAt, e.g. "2h"
+	Age       string   // relative time derived from CreatedAt, e.g. "2h"
+	Images    []string // gallery, direct image link, or reddit's link preview
 }

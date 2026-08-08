@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/net/html"
+
+	"github.com/genkio/tui/core"
 )
 
 // Client talks to one Inoreader account through the web app's "xajax" RPC
@@ -309,7 +311,9 @@ func scrapeArticle(id, fragment string) Article {
 		for ch := content.FirstChild; ch != nil; ch = ch.NextSibling {
 			html.Render(&sb, ch)
 		}
-		a.Content = HTMLToText(sb.String())
+		body := sb.String()
+		a.Content = HTMLToText(body)
+		a.Images = core.ImagesFromHTML(body)
 	}
 	return a
 }

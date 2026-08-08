@@ -13,7 +13,7 @@ import (
 const entriesJSON = `{"code":0,"data":[
 	{"read":false,"feeds":{"title":"Feed One","siteUrl":"https://one.example.com"},
 	 "entries":{"id":"e1","title":"First &amp; Title","url":"https://ex.com/1","author":"alice",
-	            "description":"<p>summary text</p>","publishedAt":"2026-06-25T00:00:00.000Z"}},
+	            "description":"<p>summary text</p><img src=\"https://ex.com/hero.jpg\">","publishedAt":"2026-06-25T00:00:00.000Z"}},
 	{"read":false,"feeds":{"title":"","siteUrl":"https://www.two.example.com/path"},
 	 "entries":{"id":"e2","title":"Second","url":"https://ex.com/2","publishedAt":"2026-06-24T00:00:00Z"}}
 ]}`
@@ -75,9 +75,19 @@ func TestUnreadsParsesEntries(t *testing.T) {
 	if a.Published.IsZero() || a.Age == "" {
 		t.Errorf("published/age not parsed: %v %q", a.Published, a.Age)
 	}
+	// The description's image survives the flattening that produced Summary.
+	if len(a.Images) != 1 || a.Images[0] != "https://ex.com/hero.jpg" {
+		t.Errorf("images = %v, want the description's image", a.Images)
+	}
+	if got := ToItems(arts)[0].Images; len(got) != 1 {
+		t.Errorf("ToItems dropped the image: %v", got)
+	}
 	// No feed title -> falls back to the site host, sans www.
 	if arts[1].Feed != "two.example.com" {
 		t.Errorf("feed host fallback: %q", arts[1].Feed)
+	}
+	if len(arts[1].Images) != 0 {
+		t.Errorf("an image-free entry should carry none: %v", arts[1].Images)
 	}
 }
 

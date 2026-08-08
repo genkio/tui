@@ -262,4 +262,50 @@ func TestParseTimelineVideo(t *testing.T) {
 	if tweets[2].VideoURL != "" || tweets[2].VideoPoster != "" {
 		t.Errorf("plain tweet video = %q/%q, want empty", tweets[2].VideoURL, tweets[2].VideoPoster)
 	}
+	// The photo entity sitting next to the video is a thumbnail of neither: it is
+	// its own attachment, and belongs in Images.
+	if got := tweets[0].Images; len(got) != 1 || got[0] != "https://pbs.twimg.com/media/photo.jpg" {
+		t.Errorf("images = %v, want the one photo entity", got)
+	}
+	if len(tweets[1].Images) != 0 || len(tweets[2].Images) != 0 {
+		t.Errorf("a GIF and a text post carry no photos: %v / %v", tweets[1].Images, tweets[2].Images)
+	}
+}
+
+func TestParseTimelinePhotos(t *testing.T) {
+	shot := func(u string) map[string]any {
+		return map[string]any{"type": "photo", "media_url_https": u}
+	}
+	post := userResult("Pia", "pia", legacy("70", "album https://t.co/xyz", map[string]any{
+		"extended_entities": map[string]any{"media": []any{
+			shot("https://pbs.twimg.com/media/one.jpg"),
+			shot("https://pbs.twimg.com/media/two.jpg"),
+		}},
+	}))
+	quoted := userResult("Quinn", "quinn", legacy("71", "mine too", map[string]any{
+		"extended_entities": map[string]any{"media": []any{shot("https://pbs.twimg.com/media/q.jpg")}},
+	}))
+	post["quoted_status_result"] = map[string]any{"result": quoted}
+
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{item("tweet-70", post)}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	got := tweets[0].Images
+	if len(got) != 2 || got[0] != "https://pbs.twimg.com/media/one.jpg" || got[1] != "https://pbs.twimg.com/media/two.jpg" {
+		t.Errorf("images = %v, want both photos in x's order", got)
+	}
+	if q := tweets[0].Quoted; q == nil || len(q.Images) != 1 || q.Images[0] != "https://pbs.twimg.com/media/q.jpg" {
+		t.Errorf("quoted images = %+v, want the quoted post's own photo", q)
+	}
+	// The photos travel to the shared item shape, parent and quote alike.
+	it := ToItem(tweets[0])
+	if len(it.Images) != 2 || it.Quote == nil || len(it.Quote.Images) != 1 {
+		t.Errorf("ToItem lost photos: %v / %+v", it.Images, it.Quote)
+	}
 }

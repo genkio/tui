@@ -6,6 +6,8 @@ import (
 	"html"
 	"strings"
 	"time"
+
+	"github.com/genkio/tui/core"
 )
 
 // parseHome reads the Listing returned by old.reddit.com/.json (the logged-in
@@ -32,6 +34,7 @@ func parseHome(body []byte) ([]Post, error) {
 			Author:    d.Author,
 			Permalink: d.Permalink,
 			URL:       d.URL,
+			Images:    d.photos(),
 		}
 		if d.CreatedUTC > 0 {
 			p.CreatedAt = time.Unix(int64(d.CreatedUTC), 0).UTC()
@@ -89,4 +92,66 @@ type postRaw struct {
 	Permalink  string  `json:"permalink"`
 	URL        string  `json:"url"`
 	CreatedUTC float64 `json:"created_utc"` // Reddit sends this as a float (e.g. 1786017121.0)
+
+	// Image sources, richest first. The request sets raw_json=1, so these come
+	// back unescaped and are usable as-is.
+	GalleryData *struct {
+		Items []struct {
+			MediaID string `json:"media_id"`
+		} `json:"items"`
+	} `json:"gallery_data"`
+	MediaMetadata map[string]struct {
+		S struct {
+			U string `json:"u"`
+		} `json:"s"`
+	} `json:"media_metadata"`
+	Preview struct {
+		Images []struct {
+			Source struct {
+				URL string `json:"url"`
+			} `json:"source"`
+		} `json:"images"`
+	} `json:"preview"`
+}
+
+// photos lists a post's images: a gallery in the order reddit lays it out, else
+// a direct image link, else the preview reddit renders for a link post.
+func (d postRaw) photos() []string {
+	if d.GalleryData != nil {
+		var out []string
+		for _, g := range d.GalleryData.Items {
+			// media_metadata is a map, so gallery_data carries the only ordering
+			if u := core.ImageURL(d.MediaMetadata[g.MediaID].S.U); u != "" {
+				out = append(out, u)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if isImageURL(d.URL) {
+		return []string{d.URL}
+	}
+	var out []string
+	for _, p := range d.Preview.Images {
+		if u := core.ImageURL(p.Source.URL); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// isImageURL reports whether a link post points straight at an image, which
+// i.redd.it and image hosts do.
+func isImageURL(u string) bool {
+	if i := strings.IndexAny(u, "?#"); i >= 0 {
+		u = u[:i]
+	}
+	u = strings.ToLower(u)
+	for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp"} {
+		if strings.HasSuffix(u, ext) {
+			return true
+		}
+	}
+	return false
 }

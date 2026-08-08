@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/folo/internal/config"
@@ -139,44 +138,18 @@ func printCount(ctx context.Context, client *folo.Client, cfg config.Config) err
 	return nil
 }
 
-// dumpItem is the normalized shape the launcher's "all" timeline consumes from
-// every app's --json output.
-type dumpItem struct {
-	App    string `json:"app"`
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Body   string `json:"body,omitempty"`
-	Source string `json:"source,omitempty"`
-	Author string `json:"author,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Age    string `json:"age,omitempty"`
-	TS     string `json:"ts,omitempty"`
-}
-
 // printJSON dumps the pending (unread) articles as a JSON array for the
 // launcher's "all" view. The list response carries only the short summary (the
-// full body is a lazy per-entry fetch), so body is the summary here.
+// full body is a lazy per-entry fetch), so body is the summary here. It emits
+// the same normalization the in-process feed uses, so the two can't drift.
 func printJSON(ctx context.Context, client *folo.Client, cfg config.Config) error {
 	arts, err := client.Unreads(ctx, true, cfg.MaxArticles)
 	if err != nil {
 		return err
 	}
-	items := make([]dumpItem, 0, len(arts))
-	for _, a := range arts {
-		item := dumpItem{
-			App:    "folo",
-			ID:     a.ID,
-			Title:  a.Title,
-			Body:   a.Summary,
-			Source: a.Feed,
-			Author: a.Author,
-			URL:    a.URL,
-			Age:    a.Age,
-		}
-		if !a.Published.IsZero() {
-			item.TS = a.Published.UTC().Format(time.RFC3339)
-		}
-		items = append(items, item)
+	items := make([]core.Wire, 0, len(arts))
+	for _, it := range folo.ToItems(arts) {
+		items = append(items, it.Wire())
 	}
 	return json.NewEncoder(os.Stdout).Encode(items)
 }

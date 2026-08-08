@@ -16,4 +16,5 @@ type Article struct {
 	Published time.Time // publish time; zero if the entry had none
 	Age       string    // relative time derived from Published, e.g. "2h"
 	Summary   string    // short description from the list response; body fallback
+	Images    []string  // images from the description HTML, before it was flattened
 }

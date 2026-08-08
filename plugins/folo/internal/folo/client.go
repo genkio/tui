@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/genkio/tui/core"
 )
 
 // viewArticles is Folo's numeric id for the "Articles" timeline (the view at
@@ -291,6 +293,7 @@ func (e entryWithFeed) toArticle() Article {
 		Feed:    feedTitle(e.Feeds),
 		Author:  clean(e.Entries.Author),
 		Summary: squish(HTMLToText(e.Entries.Description)),
+		Images:  core.ImagesFromHTML(e.Entries.Description),
 	}
 	if t, err := time.Parse(time.RFC3339, e.Entries.PublishedAt); err == nil {
 		a.Published = t

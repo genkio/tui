@@ -97,6 +97,8 @@ type cardData struct {
 	Video       string // direct mp4; the card shows an inline player
 	Poster      string
 	HasVideo    bool // this card or its quote has a player, so show the shared controls
+	Images      []string
+	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
 	Expand      bool
 	Saved       bool // starred: the footer button offers to unsave it
@@ -111,6 +113,7 @@ type quoteData struct {
 	URL         string
 	Video       string
 	Poster      string
+	Images      []string
 }
 
 // buildPageData shapes the items into what page.tmpl renders: header counts,
@@ -203,6 +206,7 @@ func buildCard(it core.Item, starred bool) cardData {
 		URL:    it.URL,
 		Video:  it.Video,
 		Poster: it.Poster,
+		Images: it.Images,
 		Saved:  starred,
 	}
 	// Two content panels: a clipped preview and a full version the footer's
@@ -215,6 +219,7 @@ func buildCard(it core.Item, starred bool) cardData {
 		c.Quote = buildQuote(*it.Quote)
 	}
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
+	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
 	c.Expand = needsExpand(body, title) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	return c
 }
@@ -232,6 +237,7 @@ func buildQuote(q core.Quote) *quoteData {
 		URL:    q.URL,
 		Video:  q.Video,
 		Poster: q.Poster,
+		Images: q.Images,
 	}
 	if q.Text != "" {
 		d.PreviewBody = template.HTML(linkify(clip(q.Text, quoteClip)))
@@ -308,6 +314,7 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 		TS     string      `json:"ts,omitempty"`
 		Video  string      `json:"video,omitempty"`
 		Poster string      `json:"poster,omitempty"`
+		Images []string    `json:"images,omitempty"`
 		Quote  *core.Quote `json:"quote,omitempty"`
 	}
 	out := make([]wireItem, 0, len(items))
@@ -323,6 +330,7 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 			Age:    it.Age,
 			Video:  it.Video,
 			Poster: it.Poster,
+			Images: it.Images,
 			Quote:  it.Quote,
 		}
 		if !it.At.IsZero() {
