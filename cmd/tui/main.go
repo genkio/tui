@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -148,6 +149,7 @@ type (
 		name  string
 		token string // "12", "75+", "0"; empty when the count failed
 		err   bool
+		stale bool // the failure is an expired session, fixable by --auth
 	}
 )
 
@@ -166,7 +168,9 @@ func scheduleClock() tea.Cmd {
 // fetchCount runs the app's `make count` (which sources its .env and prints one
 // unread-count token) and reports the parsed token. It shells out per poll
 // rather than importing each app, keeping the launcher decoupled from their
-// clients and honoring whatever session each app already has.
+// clients and honoring whatever session each app already has. Each poll doubles
+// as a liveness check: an error flips the app's badge to a red dot, and a
+// stale-session marker on stderr labels it as fixable by re-auth.
 func fetchCount(a app) tea.Cmd {
 	name, dir := a.name, a.dir
 	return func() tea.Msg {
@@ -174,9 +178,11 @@ func fetchCount(a app) tea.Cmd {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, self(), name, "--count")
 		cmd.Env = appEnv(dir)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			return countMsg{name: name, err: true}
+			return countMsg{name: name, err: true, stale: strings.Contains(stderr.String(), "session is stale")}
 		}
 		tok := parseCountToken(string(out))
 		if tok == "" {
@@ -222,20 +228,22 @@ type model struct {
 	screen screen
 	all    allModel // the "all" timeline screen; active when screen == screenAll
 
-	pollEvery time.Duration     // unread-count poll interval; 0 disables polling
-	counts    map[string]string // app name -> last count token
-	countErr  map[string]bool   // app name -> last poll failed
+	pollEvery  time.Duration     // unread-count poll interval; 0 disables polling
+	counts     map[string]string // app name -> last count token
+	countErr   map[string]bool   // app name -> last poll failed
+	countStale map[string]bool   // app name -> last poll failed on an expired session
 	running   bool              // a child TUI/auth flow is active; pause polling
 	lastFetch time.Time         // when the most recent count landed, for the freshness label
 }
 
 func newModel(root string, pollEvery time.Duration) model {
 	m := model{
-		apps:      appsIn(root),
-		pollEvery: pollEvery,
-		counts:    map[string]string{},
-		countErr:  map[string]bool{},
-		all:       newAllModel(root),
+		apps:       appsIn(root),
+		pollEvery:  pollEvery,
+		counts:     map[string]string{},
+		countErr:   map[string]bool{},
+		countStale: map[string]bool{},
+		all:        newAllModel(root),
 	}
 	m.authed = make([]bool, len(m.apps))
 	m.refreshAuth()
@@ -440,9 +448,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err {
 			m.countErr[msg.name] = true
+			m.countStale[msg.name] = msg.stale
 		} else {
 			m.counts[msg.name] = msg.token
 			m.countErr[msg.name] = false
+			m.countStale[msg.name] = false
 			m.lastFetch = time.Now()
 		}
 		return m, nil
@@ -550,20 +560,27 @@ func (m model) View() tea.View {
 	return v
 }
 
-// badge renders the right-hand status for app i: login state, or its unread
-// count once a poll has landed.
+// badge renders the right-hand status for app i: login state, a red dot when
+// the last poll couldn't reach the service (health check), or its unread count
+// once a poll has landed.
 func (m model) badge(i int) string {
 	if !m.authed[i] {
 		return dimStyle.Render("○ needs login")
 	}
 	name := m.apps[i].name
+	if m.countErr[name] {
+		if m.countStale[name] {
+			return badStyle.Render("● session stale · re-auth")
+		}
+		return badStyle.Render("● unreachable")
+	}
 	tok, ok := m.counts[name]
 	switch {
 	case ok && tok == "0":
 		return dimStyle.Render("● all read")
 	case ok:
 		return okStyle.Render("● ") + countStyle.Render(tok) + dimStyle.Render(" unread")
-	case m.pollEvery > 0 && !m.countErr[name]:
+	case m.pollEvery > 0:
 		return dimStyle.Render("● checking…")
 	default:
 		return okStyle.Render("● ready")
@@ -627,6 +644,7 @@ var (
 	itemStyle       = lipgloss.NewStyle()
 	dimStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	okStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	badStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	countStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 	statusInfoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	statusErrStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))

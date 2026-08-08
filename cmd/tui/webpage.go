@@ -26,17 +26,9 @@ func renderPage(items []core.Item, apps, failed []string, now time.Time, asc boo
 		}
 	}
 
-	refreshHref := "/"
-	if !asc {
-		refreshHref = "/?order=desc"
-	}
-
 	var meta []string
 	if len(apps) > 0 {
 		meta = append(meta, fmt.Sprintf("%d unread", len(items)))
-	}
-	if len(failed) > 0 {
-		meta = append(meta, "unavailable: "+strings.Join(failed, ", "))
 	}
 	meta = append(meta, "updated "+now.Local().Format("15:04"))
 
@@ -52,10 +44,10 @@ func renderPage(items []core.Item, apps, failed []string, now time.Time, asc boo
 <style>
 :root{
   --bg:#111318; --card:#181c23; --line:#262b34; --fg:#e6e9ee;
-  --muted:#949ba8; --accent:#4a9eff; --ok:#3fb950;
+  --muted:#949ba8; --accent:#4a9eff; --ok:#3fb950; --bad:#f85149;
 }
 @media (prefers-color-scheme: light){
-  :root{ --bg:#f6f7f9; --card:#ffffff; --line:#e3e6eb; --fg:#1b1f26; --muted:#6b7280; --accent:#1a73e8; }
+  :root{ --bg:#f6f7f9; --card:#ffffff; --line:#e3e6eb; --fg:#1b1f26; --muted:#6b7280; --accent:#1a73e8; --bad:#d64545; }
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -77,10 +69,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .sortbar a{color:var(--muted);text-decoration:none}
 .sortbar .on{font-weight:700;color:var(--fg)}
 .warn{background:rgba(214,69,69,.12);border:1px solid rgba(214,69,69,.5);color:var(--fg);border-radius:10px;padding:10px 12px;margin:-4px 0 12px;font-size:14px}
-.refresh{
-  margin-left:auto;border:1px solid var(--line);background:var(--card);color:var(--fg);
-  border-radius:10px;padding:8px 14px;font-size:14px;cursor:pointer;text-decoration:none;
-}
+.health{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted);white-space:nowrap}
+.svc{display:inline-flex;align-items:center;gap:5px}
+.hdot{width:8px;height:8px;border-radius:50%;flex:none}
+.hdot.ok{background:var(--ok)}
+.hdot.bad{background:var(--bad)}
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:14px;
   padding:14px 16px;margin-bottom:12px;
@@ -126,8 +119,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 <div class="wrap">
 <header>
   <div class="sub" id="sub">` + escape(strings.Join(meta, " · ")) + `</div>
-  <a class="refresh" href="` + refreshHref + `">↻</a>
-</header>
+` + renderHealth(apps, failed) + `</header>
 ` + renderSortbar(asc) + `
 ` + renderWarn(warn) + `
 `)
@@ -263,6 +255,36 @@ document.getElementById('forYouGo').addEventListener('click', function(){ locati
 document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>`)
+	return b.String()
+}
+
+// renderHealth draws one labeled dot per logged-in service in the header:
+// green when this page load fetched it fine, red when it failed. It replaces
+// the refresh button (reload the page to refresh), so the health of every
+// source is visible on each load instead of a source dying silently.
+func renderHealth(apps, failed []string) string {
+	if len(apps) == 0 {
+		return ""
+	}
+	bad := map[string]bool{}
+	for _, f := range failed {
+		bad[f] = true
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="health">`)
+	for _, a := range apps {
+		label := appLabels[a]
+		if label == "" {
+			label = a
+		}
+		cls, title := "ok", a+": live"
+		if bad[a] {
+			cls, title = "bad", a+": failed to load"
+		}
+		b.WriteString(`<span class="svc" title="` + escape(title) + `"><span class="hdot ` + cls + `"></span>` + escape(label) + `</span>`)
+	}
+	b.WriteString(`</div>
+`)
 	return b.String()
 }
 

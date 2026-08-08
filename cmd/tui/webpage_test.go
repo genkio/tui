@@ -146,9 +146,23 @@ func TestRenderPageEmptyAndNote(t *testing.T) {
 	if !strings.Contains(p2, "Inbox zero") {
 		t.Fatal("expected inbox-zero message")
 	}
-	// One failing app is reported in the header.
-	p3 := renderPage(nil, []string{"x", "reddit"}, []string{"reddit"}, time.Now(), true, "following", "")
-	if !strings.Contains(p3, "unavailable: reddit") {
-		t.Fatal("expected failure note")
+}
+
+func TestRenderPageHealthDots(t *testing.T) {
+	// Every logged-in service gets a labeled dot: green when it loaded, red
+	// when its fetch failed. The dots replace the refresh button.
+	p := renderPage(nil, []string{"x", "reddit"}, []string{"reddit"}, time.Now(), true, "following", "")
+	if !strings.Contains(p, `title="x: live"`) || !strings.Contains(p, `hdot ok`) {
+		t.Fatal("expected a green dot for the healthy service")
+	}
+	if !strings.Contains(p, `title="reddit: failed to load"`) || !strings.Contains(p, `hdot bad`) {
+		t.Fatal("expected a red dot for the failed service")
+	}
+	if strings.Contains(p, `class="refresh"`) {
+		t.Fatal("refresh button should be replaced by the health dots")
+	}
+	// No logged-in services: no health strip at all.
+	if strings.Contains(renderPage(nil, nil, nil, time.Now(), true, "following", ""), `class="health"`) {
+		t.Fatal("health strip should be absent with no logged-in services")
 	}
 }

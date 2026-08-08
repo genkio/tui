@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,7 +65,29 @@ func TestBadgeStates(t *testing.T) {
 	}
 
 	m.counts["x"] = "9"
-	if m.badge(0) == allRead {
+	unread := m.badge(0)
+	if unread == allRead {
 		t.Fatal("a nonzero count should differ from the all-read badge")
+	}
+
+	// A failed poll is a failed health check: red dot wins over the last count.
+	m.countErr["x"] = true
+	down := m.badge(0)
+	if down == unread || !strings.Contains(down, "unreachable") {
+		t.Fatalf("a failed poll should show the service as unreachable, got %q", down)
+	}
+
+	// A stale session is called out specifically, pointing at re-auth.
+	m.countStale["x"] = true
+	stale := m.badge(0)
+	if !strings.Contains(stale, "stale") {
+		t.Fatalf("a stale session should be labeled, got %q", stale)
+	}
+
+	// A later successful poll clears the red dot.
+	m.countErr["x"] = false
+	m.countStale["x"] = false
+	if got := m.badge(0); got != unread {
+		t.Fatalf("recovery should restore the count badge, got %q", got)
 	}
 }
