@@ -138,21 +138,15 @@ the old "allow incoming connections?" popup, and allow rules don't stick until
 the binary is signed. Go builds are unsigned on Intel Macs (Apple Silicon
 ad-hoc signs automatically), so a source-built `./tui` is exactly that.
 
-After **every** `make build` / `go build` (rebuilding wipes the signature):
+`make launcher` / `make build` re-sign the binary automatically after every
+build (rebuilding wipes the signature). Once per checkout path — or whenever
+another device can't connect after a rebuild — register it with the firewall:
 
 ```sh
-codesign -f -s - ./tui
+make firewall   # asks for sudo
 ```
 
-and once per checkout path, register it with the firewall:
-
-```sh
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PWD/tui"
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PWD/tui"
-```
-
-then restart `tui --web`. If another device still can't connect after a
-rebuild, re-run the two `socketfilterfw` lines.
+then restart `tui --web`.
 
 ## Layout
 

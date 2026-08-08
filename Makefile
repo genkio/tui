@@ -1,12 +1,17 @@
 APPS := x inoreader slack folo reddit
 
 .DEFAULT_GOAL := build
-.PHONY: build run launcher apps clean help $(APPS)
+.PHONY: build run launcher apps firewall clean help $(APPS)
 
 build: launcher apps ## Build the launcher and every TUI
 
 launcher: ## Build the launcher binary into ./tui
 	go build -o ./tui ./cmd/tui
+	@if [ "$$(uname)" = Darwin ]; then codesign -f -s - ./tui; fi # rebuild wipes the signature; unsigned = firewall silently blocks --web
+
+firewall: launcher ## Allow ./tui through the macOS firewall so other devices reach --web (asks for sudo)
+	sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$(CURDIR)/tui"
+	sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$(CURDIR)/tui"
 
 apps: $(APPS) ## Build each TUI binary
 
