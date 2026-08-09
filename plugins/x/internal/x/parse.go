@@ -59,16 +59,19 @@ func (t *tweetResult) author() (name, handle string) {
 	return c.Name, c.ScreenName
 }
 
-func (t *tweetResult) text() string {
+// text is the post body together with the URL entities belonging to it: a
+// long-form note carries its own set, and pairing a body with the wrong set
+// would leave its t.co links unexpanded.
+func (t *tweetResult) text() (string, []urlEntity) {
 	if t.NoteTweet != nil {
-		if s := t.NoteTweet.NoteTweetResults.Result.Text; s != "" {
-			return s // long-form post; legacy.full_text would be truncated
+		if r := t.NoteTweet.NoteTweetResults.Result; r.Text != "" {
+			return r.Text, r.EntitySet.URLs // long-form; legacy.full_text is truncated
 		}
 	}
 	if t.Legacy != nil {
-		return t.Legacy.FullText
+		return t.Legacy.FullText, t.Legacy.Entities.URLs
 	}
-	return ""
+	return "", nil
 }
 
 func (t *tweetResult) toTweet() Tweet {
@@ -123,10 +126,10 @@ func (t *tweetResult) article() *Article {
 	if res == nil || res.Title == "" {
 		return nil
 	}
-	a := &Article{Title: cleanText(res.Title), Cover: res.cover()}
+	a := &Article{Title: cleanText(res.Title, nil), Cover: res.cover()}
 	if body := res.ContentState.text(); body != "" {
 		a.Text = body
-	} else if p := cleanText(res.PreviewText); p != "" {
+	} else if p := cleanText(res.PreviewText, nil); p != "" {
 		a.Text = p + "…" // a preview, not the whole piece: don't pretend otherwise
 	}
 	a.Images = res.images()
@@ -233,15 +236,31 @@ func (lg *legacyTweet) video() (url, poster string) {
 }
 
 // reTrailingTco strips the t.co link x.com appends for attached media or a
-// quoted post; it is noise in a text-only view.
+// quoted post; the card renders those itself, so the link is noise.
 var reTrailingTco = regexp.MustCompile(`\s*https://t\.co/\w+\s*$`)
 
-func cleanText(s string) string {
-	s = html.UnescapeString(s)
+// cleanText renders a post body as text: entities decoded, every t.co the
+// author actually wrote swapped back to the URL it points at, and only then the
+// trailing shortlink dropped. Expanding first is what keeps a link the author
+// ended their post with, since after expansion it is no longer a t.co and the
+// only ones left are x's own for media and quotes.
+func cleanText(s string, urls []urlEntity) string {
+	s = expandLinks(html.UnescapeString(s), urls)
 	for reTrailingTco.MatchString(s) {
 		s = reTrailingTco.ReplaceAllString(s, "")
 	}
 	return strings.TrimSpace(s)
+}
+
+// expandLinks swaps the t.co shortlinks x rewrites into a body for the URLs
+// they stand for, so a link reads as itself and points somewhere on its own.
+func expandLinks(s string, urls []urlEntity) string {
+	for _, u := range urls {
+		if u.URL != "" && u.ExpandedURL != "" {
+			s = strings.ReplaceAll(s, u.URL, u.ExpandedURL)
+		}
+	}
+	return s
 }
 
 func relAge(d time.Duration) string {
@@ -310,7 +329,10 @@ type tweetResult struct {
 	NoteTweet *struct {
 		NoteTweetResults struct {
 			Result struct {
-				Text string `json:"text"`
+				Text      string `json:"text"`
+				EntitySet struct {
+					URLs []urlEntity `json:"urls"`
+				} `json:"entity_set"`
 			} `json:"result"`
 		} `json:"note_tweet_results"`
 	} `json:"note_tweet"`
@@ -362,9 +384,19 @@ type legacyTweet struct {
 	QuoteCount            int           `json:"quote_count"`
 	RetweetedStatusResult *statusResult `json:"retweeted_status_result"`
 	QuotedStatusResult    *statusResult `json:"quoted_status_result"`
-	ExtendedEntities      struct {
+	// entities holds the links the author wrote; media and quote shortlinks are
+	// not in here, which is what makes them safe to strip from the end.
+	Entities struct {
+		URLs []urlEntity `json:"urls"`
+	} `json:"entities"`
+	ExtendedEntities struct {
 		Media []mediaEntity `json:"media"`
 	} `json:"extended_entities"`
+}
+
+type urlEntity struct {
+	URL         string `json:"url"` // the t.co shortlink as it appears in the body
+	ExpandedURL string `json:"expanded_url"`
 }
 
 type mediaEntity struct {

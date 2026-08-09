@@ -208,6 +208,84 @@ func TestParseTimelineError(t *testing.T) {
 	}
 }
 
+func urlEnt(short, full string) map[string]any {
+	return map[string]any{"url": short, "expanded_url": full}
+}
+
+// x rewrites every link an author types into a t.co shortlink. Left alone, one
+// at the end of a post looks exactly like the shortlink x appends for media,
+// and the post loses the link it was written to share.
+func TestParseTimelineExpandsLinks(t *testing.T) {
+	// the shape of https://x.com/badlogicgames/status/2086189428012093655
+	article := "https://blog.senko.net/code-was-never-the-hard-part-is-an-insult-to-all-programmers"
+	link := userResult("Mario", "badlogicgames", legacy("80", "recommended reading.\n\nhttps://t.co/igyB7oofie", map[string]any{
+		"entities": map[string]any{"urls": []any{urlEnt("https://t.co/igyB7oofie", article)}},
+	}))
+
+	// A link plus attached media: the author's link expands, x's own media
+	// shortlink still goes.
+	both := userResult("Ann", "ann", legacy("81", "see https://t.co/aaa https://t.co/bbb", map[string]any{
+		"entities": map[string]any{"urls": []any{urlEnt("https://t.co/aaa", "https://real.example/post")}},
+		"extended_entities": map[string]any{"media": []any{
+			map[string]any{"type": "photo", "media_url_https": "https://pbs.twimg.com/media/p.jpg"},
+		}},
+	}))
+
+	// A long post keeps its links in its own entity set, not legacy's.
+	note := userResult("Nora", "nora", legacy("82", "truncated https://t.co/ccc", nil))
+	note["note_tweet"] = map[string]any{"note_tweet_results": map[string]any{"result": map[string]any{
+		"text":       "the whole essay, see https://t.co/ccc",
+		"entity_set": map[string]any{"urls": []any{urlEnt("https://t.co/ccc", "https://essay.example/full")}},
+	}}}
+
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{
+			item("tweet-80", link), item("tweet-81", both), item("tweet-82", note),
+		}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	if want := "recommended reading.\n\n" + article; tweets[0].Text != want {
+		t.Errorf("text = %q, want %q", tweets[0].Text, want)
+	}
+	if want := "see https://real.example/post"; tweets[1].Text != want {
+		t.Errorf("text = %q, want %q (author's link kept, media shortlink dropped)", tweets[1].Text, want)
+	}
+	if want := "the whole essay, see https://essay.example/full"; tweets[2].Text != want {
+		t.Errorf("note text = %q, want %q", tweets[2].Text, want)
+	}
+}
+
+// A quoted post's links are the quoting author's to read too.
+func TestParseTimelineExpandsQuotedLinks(t *testing.T) {
+	quoted := userResult("Eve", "eve", legacy("90", "my post https://t.co/qqq", map[string]any{
+		"entities": map[string]any{"urls": []any{urlEnt("https://t.co/qqq", "https://eve.example/thing")}},
+	}))
+	parent := userResult("Dave", "dave", legacy("91", "look https://t.co/perma", nil))
+	parent["quoted_status_result"] = map[string]any{"result": quoted}
+
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{item("tweet-91", parent)}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	// The parent's trailing shortlink is x's permalink to the quote; it goes.
+	if tweets[0].Text != "look" {
+		t.Errorf("parent text = %q, want the quote permalink dropped", tweets[0].Text)
+	}
+	if q := tweets[0].Quoted; q == nil || q.Text != "my post https://eve.example/thing" {
+		t.Errorf("quoted text = %+v, want its link expanded", q)
+	}
+}
+
 // block builds one Draft.js paragraph the way x lays an article out.
 func block(kind, text string) map[string]any {
 	return map[string]any{"type": kind, "text": text, "key": "k" + text}
