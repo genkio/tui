@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -372,6 +373,30 @@ func TestRenderCardImageProxy(t *testing.T) {
 	it.App, it.Images = "x", []string{"https://pbs.twimg.com/media/one.jpg"}
 	if out := renderCard(t, it); !strings.Contains(out, `data-src="https://pbs.twimg.com/media/one.jpg"`) {
 		t.Errorf("a host that serves the browser directly is not proxied: %s", out)
+	}
+}
+
+// The proxy exists to look like the page load it stands in for. doubanio
+// answers 418 to a request with no Referer, and 418 again to Go's own user
+// agent, so a picture that arrives with either missing never renders.
+func TestImageRequestHeaders(t *testing.T) {
+	u, err := parseImageURL("https://img9.doubanio.com/view/status/small/public/x.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := imageRequest(context.Background(), u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("Referer"); !strings.Contains(got, "douban.com") {
+		t.Errorf("Referer = %q, want a douban page", got)
+	}
+	ua := req.Header.Get("User-Agent")
+	if !strings.HasPrefix(ua, "Mozilla/") {
+		t.Errorf("User-Agent = %q, want a browser's", ua)
+	}
+	if strings.Contains(ua, "Go-http-client") {
+		t.Errorf("User-Agent = %q; douban turns Go's own away", ua)
 	}
 }
 

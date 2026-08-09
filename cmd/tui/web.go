@@ -436,6 +436,12 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
+// imageUA is the browser this server claims to be when fetching a picture.
+// doubanio turns away a bare Go client the same way it turns away a request
+// with no Referer, so both have to look like the page load they stand in for.
+const imageUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+	"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
 // handleImage fetches a picture the browser is not allowed to ask for itself.
 // doubanio answers only a request whose Referer is a douban page — a bare one
 // gets 418, this server's own origin gets 418 — and a page cannot forge a
@@ -447,13 +453,11 @@ func handleImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	req, err := imageRequest(r.Context(), u)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	req.Header.Set("Referer", "https://www.douban.com/")
-	req.Header.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		http.Error(w, "fetch image: "+err.Error(), http.StatusBadGateway)
@@ -473,6 +477,21 @@ func handleImage(w http.ResponseWriter, r *http.Request) {
 	// and spend no second round trip on a scroll back up
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// imageRequest builds the fetch that stands in for the page load the browser
+// would have made. Both headers are load-bearing: doubanio answers 418 to a
+// request with no Referer and 418 again to one wearing Go's own user agent, so
+// dropping either brings the pictures back down.
+func imageRequest(ctx context.Context, u *url.URL) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Referer", "https://www.douban.com/")
+	req.Header.Set("User-Agent", imageUA)
+	req.Header.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+	return req, nil
 }
 
 // parseImageURL admits only douban's image CDN, so /img can't be used as an
