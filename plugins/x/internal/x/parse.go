@@ -22,25 +22,58 @@ func parseTimeline(body []byte) ([]Tweet, error) {
 	}
 
 	var tweets []Tweet
-	for _, ins := range r.Data.Home.HomeTimelineURT.Instructions {
-		if ins.Type != "TimelineAddEntries" {
-			continue
+	seen := map[string]bool{} // a module can repeat a post that also stands alone
+	add := func(t *Tweet) {
+		if t == nil || seen[t.ID] {
+			return
 		}
-		for _, e := range ins.Entries {
-			if strings.HasPrefix(e.EntryID, "promoted") {
-				continue // skip ads
+		seen[t.ID] = true
+		tweets = append(tweets, *t)
+	}
+	for _, ins := range r.Data.Home.HomeTimelineURT.Instructions {
+		switch ins.Type {
+		case "TimelineAddEntries":
+			for _, e := range ins.Entries {
+				if strings.HasPrefix(e.EntryID, "promoted") {
+					continue // skip ads
+				}
+				if e.Content.ItemContent.ItemType == "TimelineTweet" {
+					add(e.Content.ItemContent.tweet())
+					continue
+				}
+				// a module: For You wraps conversations in these, so skipping
+				// them would drop much of a page
+				for _, mi := range e.Content.Items {
+					add(mi.tweet())
+				}
 			}
-			if e.Content.EntryType != "TimelineTimelineItem" || e.Content.ItemContent.ItemType != "TimelineTweet" {
-				continue
+		case "TimelineAddToModule":
+			// posts appended to a module already on the timeline
+			for _, mi := range ins.ModuleItems {
+				add(mi.tweet())
 			}
-			res := e.Content.ItemContent.TweetResults.Result.normalize()
-			if res == nil || res.Legacy == nil {
-				continue // tombstone / unavailable post
-			}
-			tweets = append(tweets, res.toTweet())
 		}
 	}
 	return tweets, nil
+}
+
+func (ic itemContent) tweet() *Tweet {
+	if ic.ItemType != "TimelineTweet" {
+		return nil // a module can also hold users (who-to-follow) or prompts
+	}
+	res := ic.TweetResults.Result.normalize()
+	if res == nil || res.Legacy == nil {
+		return nil // tombstone / unavailable post
+	}
+	tw := res.toTweet()
+	return &tw
+}
+
+func (mi moduleItem) tweet() *Tweet {
+	if strings.HasPrefix(mi.EntryID, "promoted") {
+		return nil
+	}
+	return mi.Item.ItemContent.tweet()
 }
 
 // normalize unwraps the TweetWithVisibilityResults envelope to the plain Tweet.
@@ -295,21 +328,34 @@ type apiResponse struct {
 }
 
 type instruction struct {
-	Type    string  `json:"type"`
-	Entries []entry `json:"entries"`
+	Type        string       `json:"type"`
+	Entries     []entry      `json:"entries"`
+	ModuleItems []moduleItem `json:"moduleItems"` // TimelineAddToModule only
 }
 
 type entry struct {
 	EntryID string `json:"entryId"`
 	Content struct {
-		EntryType   string `json:"entryType"`
-		ItemContent struct {
-			ItemType     string `json:"itemType"`
-			TweetResults struct {
-				Result *tweetResult `json:"result"`
-			} `json:"tweet_results"`
-		} `json:"itemContent"`
+		EntryType   string       `json:"entryType"`
+		ItemContent itemContent  `json:"itemContent"` // TimelineTimelineItem
+		Items       []moduleItem `json:"items"`       // TimelineTimelineModule
 	} `json:"content"`
+}
+
+// moduleItem is one post inside a module, e.g. a reply in a conversation the
+// For You feed groups together.
+type moduleItem struct {
+	EntryID string `json:"entryId"`
+	Item    struct {
+		ItemContent itemContent `json:"itemContent"`
+	} `json:"item"`
+}
+
+type itemContent struct {
+	ItemType     string `json:"itemType"`
+	TweetResults struct {
+		Result *tweetResult `json:"result"`
+	} `json:"tweet_results"`
 }
 
 type tweetResult struct {

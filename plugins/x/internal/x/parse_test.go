@@ -2,6 +2,7 @@ package x
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -198,6 +199,102 @@ func TestToItemCarriesQuote(t *testing.T) {
 	}
 	if ToItem(Tweet{ID: "4", Text: "no quote"}).Quote != nil {
 		t.Error("a post with no quote must carry no quote")
+	}
+}
+
+// module wraps posts the way For You groups a conversation: one entry whose
+// content is a list of items rather than a single post.
+func module(entryID string, results ...map[string]any) map[string]any {
+	items := make([]any, 0, len(results))
+	for i, r := range results {
+		items = append(items, map[string]any{
+			"entryId": fmt.Sprintf("%s-%d", entryID, i),
+			"item":    map[string]any{"itemContent": map[string]any{"itemType": "TimelineTweet", "tweet_results": map[string]any{"result": r}}},
+		})
+	}
+	return map[string]any{"entryId": entryID, "content": map[string]any{
+		"entryType": "TimelineTimelineModule",
+		"items":     items,
+	}}
+}
+
+// For You injects conversations as modules. Reading only the standalone entries
+// throws most of a page away, which is why that tab came back nearly empty.
+func TestParseTimelineReadsModules(t *testing.T) {
+	solo := userResult("Alice", "alice", legacy("1", "a standalone post", nil))
+	root := userResult("Bob", "bob", legacy("2", "conversation root", nil))
+	reply := userResult("Carol", "carol", legacy("3", "the reply", nil))
+	ad := userResult("Ad", "ad", legacy("4", "buy now", nil))
+	later := userResult("Dan", "dan", legacy("5", "appended later", nil))
+
+	// A module item can hold a user card rather than a post; it has no tweet.
+	whoToFollow := map[string]any{"entryId": "who-to-follow-1", "content": map[string]any{
+		"entryType": "TimelineTimelineModule",
+		"items": []any{map[string]any{
+			"entryId": "who-to-follow-1-0",
+			"item":    map[string]any{"itemContent": map[string]any{"itemType": "TimelineUser"}},
+		}},
+	}}
+
+	// A promoted post inside a module is still an ad.
+	promoModule := module("home-conversation-9", ad)
+	promoModule["content"].(map[string]any)["items"].([]any)[0].(map[string]any)["entryId"] = "promoted-tweet-4"
+
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{
+			map[string]any{"type": "TimelineAddEntries", "entries": []any{
+				item("tweet-1", solo),
+				module("home-conversation-2", root, reply),
+				whoToFollow,
+				promoModule,
+				map[string]any{"entryId": "cursor-bottom-x", "content": map[string]any{"entryType": "TimelineTimelineCursor"}},
+			}},
+			map[string]any{"type": "TimelineAddToModule", "moduleItems": []any{
+				map[string]any{
+					"entryId": "home-conversation-2-2",
+					"item":    map[string]any{"itemContent": map[string]any{"itemType": "TimelineTweet", "tweet_results": map[string]any{"result": later}}},
+				},
+			}},
+		},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	var got []string
+	for _, tw := range tweets {
+		got = append(got, tw.ID)
+	}
+	want := []string{"1", "2", "3", "5"} // the ad and the user card contribute nothing
+	if len(got) != len(want) {
+		t.Fatalf("ids = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", got, want)
+		}
+	}
+}
+
+// A post can appear both on its own and inside a module; it should show once.
+func TestParseTimelineDedupesAcrossModules(t *testing.T) {
+	post := userResult("Alice", "alice", legacy("1", "hello", nil))
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{
+			item("tweet-1", post),
+			module("home-conversation-1", post),
+		}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	if len(tweets) != 1 {
+		t.Errorf("got %d tweets, want the repeat collapsed into 1", len(tweets))
 	}
 }
 
