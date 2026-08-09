@@ -81,6 +81,7 @@ func ToItem(st Status) core.Item {
 		URL:    st.URL,
 		Age:    st.Age,
 		Images: st.Images,
+		Quote:  st.Embed,
 	}
 	if st.Activity != "" {
 		it.Source = st.Author + " " + st.Activity

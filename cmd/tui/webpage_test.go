@@ -309,6 +309,34 @@ func TestRenderCardQuote(t *testing.T) {
 	}
 }
 
+// A douban reshare embeds the discussion it passed along, so the box is not
+// x's alone: the headline links out and the cover hides behind the same toggle.
+func TestRenderCardEmbedNonX(t *testing.T) {
+	it := core.Item{
+		App: "douban", ID: "9457779094", Title: "。。。", Body: "。。。",
+		Source: "竹子哟竹子✨ 转发了 生活组 的讨论", Age: "1h",
+		URL: "https://www.douban.com/people/2298386/status/9457779094/",
+		Quote: &core.Quote{
+			Source: "好讨厌平台", Text: "我们在抖音上卖东西，平台抽佣8%，",
+			URL:    "https://douc.cc/8wFqXD",
+			Images: []string{"https://img9.doubanio.com/view/status/small/public/iLZUXK.jpg"},
+		},
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `class="quote"`) {
+		t.Fatalf("expected the embedded post block: %s", out)
+	}
+	if !strings.Contains(out, `href="https://douc.cc/8wFqXD"`) || !strings.Contains(out, "好讨厌平台 ↗") {
+		t.Errorf("the discussion headline should link out: %s", out)
+	}
+	if !strings.Contains(out, `data-src="https://img9.doubanio.com/view/status/small/public/iLZUXK.jpg"`) {
+		t.Errorf("the embedded cover should be lazy-loaded inside the box: %s", out)
+	}
+	if !strings.Contains(out, `<button class="img"`) {
+		t.Errorf("an embed-only image still needs the footer toggle: %s", out)
+	}
+}
+
 func TestRenderCardQuoteVideo(t *testing.T) {
 	it := core.Item{
 		App: "x", ID: "3", Title: "see this", Body: "see this",

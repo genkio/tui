@@ -187,6 +187,10 @@ func TestParseHome(t *testing.T) {
 	if mark.Age != "1h" {
 		t.Errorf("age wrong: %q", mark.Age)
 	}
+	// a subject the user marked is the status's own content, not an embed
+	if mark.Embed != nil {
+		t.Errorf("a 想读 mark should keep its book card in the text: %+v", mark.Embed)
+	}
 
 	say := statuses[1]
 	if say.Author != "阿北" || say.Activity != "说" || say.Text != "今天天气不错" {
@@ -197,14 +201,24 @@ func TestParseHome(t *testing.T) {
 	if re.ID != "9444407389" || re.Author != "NullPointer" || re.Activity != "转发" {
 		t.Errorf("reshare fields wrong: %+v", re)
 	}
-	if !strings.Contains(re.Text, "帮亲不帮理吧") {
-		t.Errorf("resharer's comment missing: %q", re.Text)
+	// the resharer's own comment is the status text; the original embeds
+	if re.Text != "帮亲不帮理吧" {
+		t.Errorf("resharer's comment should stand alone: %q", re.Text)
 	}
-	if !strings.Contains(re.Text, "↻ 原作者: 原帖内容") {
-		t.Errorf("original not quoted: %q", re.Text)
+	if re.Embed == nil {
+		t.Fatalf("the reshared original should embed: %+v", re)
 	}
-	if !strings.Contains(re.Text, "→ 为什么回应的往往是女作家") || !strings.Contains(re.Text, "https://douc.cc/f9P8dB") {
-		t.Errorf("original's topic card missing: %q", re.Text)
+	if re.Embed.Source != "原作者" {
+		t.Errorf("embed source wrong: %q", re.Embed.Source)
+	}
+	if re.Embed.URL != "https://www.douban.com/people/1011741/status/9444373658/" {
+		t.Errorf("embed url wrong: %q", re.Embed.URL)
+	}
+	if !strings.Contains(re.Embed.Text, "原帖内容") {
+		t.Errorf("original's words missing from the embed: %q", re.Embed.Text)
+	}
+	if !strings.Contains(re.Embed.Text, "→ 为什么回应的往往是女作家") || !strings.Contains(re.Embed.Text, "https://douc.cc/f9P8dB") {
+		t.Errorf("original's topic card missing from the embed: %q", re.Embed.Text)
 	}
 
 	// topic (动态) variant: saying lives in .bd .content, URL on the timestamp link
@@ -298,7 +312,6 @@ func TestParseHomePhotos(t *testing.T) {
 	want := []string{
 		"https://img9.doubanio.com/view/status/l/public/one.jpg",
 		"https://img9.doubanio.com/view/status/l/public/two.jpg",
-		"https://img9.doubanio.com/view/status/l/public/orig.jpg",
 	}
 	got := statuses[0].Images
 	if len(got) != len(want) {
@@ -314,8 +327,153 @@ func TestParseHomePhotos(t *testing.T) {
 			t.Errorf("an avatar leaked into the attachments: %q", u)
 		}
 	}
-	if len(ToItem(statuses[0]).Images) != 3 {
+	// the reshared post keeps its own picture, so the card can draw it inside
+	// the embedded block rather than among the resharer's stills
+	embed := statuses[0].Embed
+	if embed == nil || len(embed.Images) != 1 || embed.Images[0] != "https://img9.doubanio.com/view/status/l/public/orig.jpg" {
+		t.Fatalf("original's picture should ride with the embed: %+v", embed)
+	}
+	if strings.Contains(strings.Join(embed.Images, " "), "/icon/") {
+		t.Errorf("an avatar leaked into the embed: %v", embed.Images)
+	}
+	if len(ToItem(statuses[0]).Images) != 2 {
 		t.Error("ToItem dropped the pictures")
+	}
+}
+
+// Resharing a group discussion brings no original status wrapper: the
+// discussion rides along in a div.topic-card, whose title links through a
+// /link2/ bounce and whose pictures reach the page only as the gallery
+// script's JSON. Markup trimmed from the real homepage entry for
+// https://www.douban.com/people/2298386/status/9457779094/
+func TestParseHomeReshareDiscussion(t *testing.T) {
+	fixture := `<html><body>
+<div class="new-status status-wrapper" data-sid="9457779094" data-uid="2298386">
+  <div class="status-item" data-sid="9457779094" data-uid="2298386" data-target-type="rec">
+    <div class="mod" data-status-id="9457779094">
+      <div class="hd " data-status-url="https://www.douban.com/people/2298386/status/9457779094/?_spm_id=MjI5ODM4Ng">
+        <div class="usr-pic"><a href="https://www.douban.com/people/MoNoMilky/"><img src="https://img9.doubanio.com/icon/up2298386-156.jpg"></a></div>
+        <div class="text">
+          <a href="https://www.douban.com/people/MoNoMilky/" class="lnk-people">竹子哟竹子✨</a>
+          转发了 <a target="_blank" href="https://www.douban.com/group/586674/">生活组</a> 的讨论：
+          <blockquote><p>。。。</p></blockquote>
+        </div>
+      </div>
+      <div class="bd rec">
+        <div class="topic-card large-card" data-url="https://www.douban.com/link2/?url=https%3A%2F%2Fwww.douban.com%2Fgroup%2Ftopic%2F496184018%2F%3F_spm_id%3DMTk1MzUwMzQz">
+          <div class="topic-card-owner"><a href="https://www.douban.com/people/195350343/">momo</a> 说：</div>
+          <div class="topic-card-title">
+            <a href="https://www.douban.com/link2/?url=https%3A%2F%2Fwww.douban.com%2Fgroup%2Ftopic%2F496184018%2F%3F_spm_id%3DMTk1MzUwMzQz">好讨厌平台</a>
+          </div>
+          <blockquote><p style="white-space: pre-line;">我们在抖音上卖东西，平台抽佣8%，
+现在出了新规定，客人通过豆包搜索后，下单了我们的产品，豆包抽佣12%</p></blockquote>
+          <div class="pics-wrapper">
+            <script>
+              var photos = [{"image": {"normal": {"url": "https://img2.doubanio.com/view/group_topic/l/public/p742204311.jpg", "width": 500}, "large": {"url": "https://img2.doubanio.com/view/group_topic/l/public/p742204311.jpg", "width": 500}, "raw": null}, "uri": ""}, {"image": {"normal": {"url": "https://img3.doubanio.com/view/group_topic/l/public/p742204312.jpg", "width": 500}, "large": {"url": "https://img3.doubanio.com/view/group_topic/l/public/p742204312.jpg", "width": 500}, "raw": null}, "uri": ""}];
+              if (window.CREATE_HONRIZONTAL_PHOTOS) { window.CREATE_HONRIZONTAL_PHOTOS({photos: photos}) }
+            </script>
+          </div>
+        </div>
+        <div class="actions">
+          <span class="created_at" title="2026-08-09 18:58:17"><a href="#">1小时前</a></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>`
+
+	statuses, err := parseHome([]byte(fixture), time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("parseHome: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	s := statuses[0]
+	if s.Activity != "转发了 生活组 的讨论" {
+		t.Errorf("activity wrong: %q", s.Activity)
+	}
+	// the discussion's own blockquote must not be mistaken for the resharer's
+	if s.Text != "。。。" {
+		t.Errorf("only the resharer's comment belongs in the text: %q", s.Text)
+	}
+	if len(s.Images) != 0 {
+		t.Errorf("the discussion's pictures belong to the embed, not the status: %v", s.Images)
+	}
+	if s.Embed == nil {
+		t.Fatalf("the reshared discussion should embed: %+v", s)
+	}
+	if s.Embed.Source != "好讨厌平台" || s.Embed.Author != "momo" {
+		t.Errorf("embed headline/owner wrong: %+v", s.Embed)
+	}
+	// the /link2/ bounce is unwrapped, then its tracking query dropped
+	if s.Embed.URL != "https://www.douban.com/group/topic/496184018/" {
+		t.Errorf("embed link wrong: %q", s.Embed.URL)
+	}
+	if !strings.Contains(s.Embed.Text, "我们在抖音上卖东西") {
+		t.Errorf("embed body wrong: %q", s.Embed.Text)
+	}
+	want := []string{
+		"https://img2.doubanio.com/view/group_topic/l/public/p742204311.jpg",
+		"https://img3.doubanio.com/view/group_topic/l/public/p742204312.jpg",
+	}
+	if len(s.Embed.Images) != 2 || s.Embed.Images[0] != want[0] || s.Embed.Images[1] != want[1] {
+		t.Errorf("embed pictures = %v, want %v", s.Embed.Images, want)
+	}
+	if q := ToItem(s).Quote; q == nil || q.Source != "好讨厌平台" {
+		t.Errorf("ToItem should carry the embed through as the item's quote: %+v", q)
+	}
+}
+
+// Pictures attached to an ordinary status arrive the same way: a gallery script
+// rather than <img> tags, so reading tags alone loses them.
+func TestParseHomeScriptPhotos(t *testing.T) {
+	fixture := `<html><body>
+<div class="new-status status-wrapper" data-sid="9457641587" data-uid="1">
+  <div class="status-item" data-sid="9457641587" data-uid="1">
+    <div class="mod">
+      <div class="hd" data-status-url="https://www.douban.com/people/alice/status/9457641587/">
+        <div class="text"><a class="lnk-people" href="/people/alice/">alice</a>说<blockquote><p>看图</p></blockquote></div>
+      </div>
+      <div class="bd">
+        <div class="pics-wrapper"><script>
+          var photos = [{"image": {"normal": {"url": "https://img1.doubanio.com/view/group_topic/l/public/one.jpg"}, "large": {"url": "https://img1.doubanio.com/view/group_topic/l/public/one-large.jpg"}}}];
+        </script></div>
+        <div class="actions"><span class="created_at" title="2026-08-09 18:00:00">1小时前</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>`
+
+	statuses, err := parseHome([]byte(fixture), time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("parseHome: %v", err)
+	}
+	// the large variant wins: the card scales it down anyway
+	got := statuses[0].Images
+	if len(got) != 1 || got[0] != "https://img1.doubanio.com/view/group_topic/l/public/one-large.jpg" {
+		t.Errorf("images = %v, want the script's large url", got)
+	}
+}
+
+func TestUnwrapLink2(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{
+			"https://www.douban.com/link2/?url=https%3A%2F%2Fwww.douban.com%2Fgroup%2Ftopic%2F496184018%2F",
+			"https://www.douban.com/group/topic/496184018/",
+		},
+		// not a bounce: left alone, query and all
+		{"https://book.douban.com/subject/30295288/", "https://book.douban.com/subject/30295288/"},
+		// a bounce with nothing to unwrap stays as it is rather than becoming empty
+		{"https://www.douban.com/link2/", "https://www.douban.com/link2/"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := unwrapLink2(c.in); got != c.want {
+			t.Errorf("unwrapLink2(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

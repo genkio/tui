@@ -4,19 +4,24 @@
 // or stores those secrets.
 package douban
 
-import "time"
+import (
+	"time"
+
+	"github.com/genkio/tui/core"
+)
 
 // Status is one entry from the following timeline (友邻广播): something a
-// followed user said, reshared, or marked (看过/在读/...), flattened from the
-// rexxar home_timeline response. Reshared originals and link cards are folded
-// into Text so one string carries the whole story.
+// followed user said, reshared, or marked (看过/在读/...). A subject card the
+// status is about (a book, a movie) is folded into Text, since it is the
+// status's own content; what it passed along from someone else rides in Embed.
 type Status struct {
 	ID        string
 	Author    string // display name of the followed user
 	Activity  string // e.g. "说", "转发", "看过"; may be empty
-	Text      string // status text, with any reshared original / card appended
+	Text      string // status text, with any subject/topic card appended
 	URL       string // canonical web URL for the status
 	CreatedAt time.Time
-	Age       string   // relative time derived from CreatedAt, e.g. "2h"
-	Images    []string // attached pictures, including a reshared original's
+	Age       string      // relative time derived from CreatedAt, e.g. "2h"
+	Images    []string    // attached pictures; a reshared post keeps its own
+	Embed     *core.Quote // what a 转发 passed along: the original status, or the discussion it points at
 }

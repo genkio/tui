@@ -2,7 +2,10 @@ package douban
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,7 +21,9 @@ var cst = time.FixedZone("CST", 8*3600)
 // parseHome scrapes the 友邻广播 stream out of the logged-in desktop homepage.
 // Each div.new-status wrapper is one timeline entry: its first div.status-item
 // is the followed user's status, and a reshare nests the original inside a
-// div.status-real-wrapper sibling. now anchors the relative age strings.
+// div.status-real-wrapper sibling. What a status passed along comes out as its
+// Embed, so renderers can draw it apart from the words the resharer added.
+// now anchors the relative age strings.
 func parseHome(body []byte, now time.Time) ([]Status, error) {
 	doc, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
@@ -28,9 +33,7 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 	for _, wrapper := range findAll(doc, func(n *html.Node) bool {
 		return n.Data == "div" && hasClass(n, "new-status")
 	}) {
-		main := findFirst(wrapper, func(n *html.Node) bool {
-			return n.Data == "div" && hasClass(n, "status-item")
-		})
+		main := findFirst(wrapper, isStatusItem)
 		if main == nil {
 			continue
 		}
@@ -38,41 +41,39 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 		if p.sid == "" {
 			continue
 		}
-		parts := p.textParts()
-		images := p.images
-		// a reshare carries the original status in a sibling wrapper; quote it
+
+		var embed *core.Quote
+		// a reshare carries the original status in a sibling wrapper; embed it
 		if real := findFirst(wrapper, func(n *html.Node) bool {
 			return n.Data == "div" && hasClass(n, "status-real-wrapper")
 		}); real != nil {
-			if orig := findFirst(real, func(n *html.Node) bool {
-				return n.Data == "div" && hasClass(n, "status-item")
-			}); orig != nil {
-				o := parseItem(orig)
-				head := strings.TrimSpace(o.author + " " + o.activity)
-				quoted := o.saying
-				if quoted == "" && o.cardTitle != "" {
-					quoted = o.cardTitle
-				}
-				parts = append(parts, strings.TrimSpace("↻ "+head+": "+quoted))
-				if o.cardTitle != "" && quoted != o.cardTitle {
-					parts = append(parts, "→ "+o.cardTitle)
-				}
-				if o.cardURL != "" {
-					parts = append(parts, o.cardURL)
-				}
-				if o.cardDesc != "" {
-					parts = append(parts, o.cardDesc)
-				}
-				images = append(images, o.images...) // the reshared post's pictures
+			if orig := findFirst(real, isStatusItem); orig != nil {
+				embed = parseItem(orig).embed()
 			}
 		}
+		// resharing a discussion brings no original wrapper: the card itself is
+		// the post being passed along, so it embeds rather than joining the text
+		own := p.card
+		if embed == nil && isReshare(p.activity) {
+			if q := p.card.embed(); q != nil {
+				embed, own = q, nil
+			}
+		}
+
+		var parts []string
+		if p.saying != "" {
+			parts = append(parts, p.saying)
+		}
+		parts = append(parts, own.textParts()...)
+
 		s := Status{
 			ID:       p.sid,
 			Author:   p.author,
 			Activity: p.activity,
 			Text:     strings.Join(parts, "\n\n"),
 			URL:      stripQuery(p.url),
-			Images:   images,
+			Images:   append(p.images, own.images()...),
+			Embed:    embed,
 		}
 		if t, err := time.ParseInLocation("2006-01-02 15:04:05", p.created, cst); err == nil {
 			s.CreatedAt = t.UTC()
@@ -91,55 +92,120 @@ type item struct {
 	activity string // e.g. "说", "想读", "转发"; may be empty
 	saying   string // blockquote text (what the user wrote)
 	created  string // "2006-01-02 15:04:05" wall clock
-
-	cardTitle string // subject/topic block: linked title,
-	cardURL   string // its URL,
-	cardDesc  string // and the preview paragraph
-
-	images []string // attached pictures / card cover
+	card     *card  // the subject/topic block it points at, if any
+	images   []string
 }
 
-// textParts assembles the item's own content lines (saying, then card).
-func (p item) textParts() []string {
+// card is the block a status points at: a book, a movie, a group discussion.
+// Its pictures are held apart from the status's own so a reshared discussion
+// carries them into the embed instead of into the resharer's stills.
+type card struct {
+	title string
+	owner string // who wrote the discussion, when the card says
+	url   string
+	desc  string // the preview paragraph
+	pics  []string
+}
+
+// embed shapes a reshared original into the block a renderer nests inside the
+// card: who wrote it, what they said (their own card folded in), where it lives.
+func (p item) embed() *core.Quote {
 	var parts []string
 	if p.saying != "" {
 		parts = append(parts, p.saying)
 	}
-	if p.cardTitle != "" {
-		parts = append(parts, "→ "+p.cardTitle)
+	parts = append(parts, p.card.textParts()...)
+	q := &core.Quote{
+		Source: strings.TrimSpace(p.author + " " + p.activity),
+		Text:   strings.Join(parts, "\n\n"),
+		URL:    stripQuery(p.url),
+		Images: append(p.images, p.card.images()...),
 	}
-	if p.cardURL != "" {
-		parts = append(parts, p.cardURL)
+	if q.Source == "" && q.Text == "" && len(q.Images) == 0 {
+		return nil
 	}
-	if p.cardDesc != "" {
-		parts = append(parts, p.cardDesc)
+	return q
+}
+
+// embed draws a reshared discussion as that same nested block: its title is the
+// headline linking out, its preview paragraph the body. A card with no title
+// has no headline to lead with, so it stays text.
+func (c *card) embed() *core.Quote {
+	if c == nil || c.title == "" {
+		return nil
+	}
+	return &core.Quote{Source: c.title, Author: c.owner, Text: c.desc, URL: c.url, Images: c.pics}
+}
+
+// textParts is the card flattened into content lines, for when it is what the
+// status is itself about rather than something it passed along.
+func (c *card) textParts() []string {
+	if c == nil {
+		return nil
+	}
+	var parts []string
+	if c.title != "" {
+		parts = append(parts, "→ "+c.title)
+	}
+	if c.url != "" {
+		parts = append(parts, c.url)
+	}
+	if c.desc != "" {
+		parts = append(parts, c.desc)
 	}
 	return parts
 }
 
+func (c *card) images() []string {
+	if c == nil {
+		return nil
+	}
+	return c.pics
+}
+
+// isCardBlock matches either markup douban serves a card in: .block for a
+// subject (a book, a movie), .topic-card for a discussion passed along.
+func isCardBlock(n *html.Node) bool {
+	return n.Data == "div" && (hasClass(n, "block") || hasClass(n, "topic-card"))
+}
+
+// isReshare reports whether the status is passing along someone else's post:
+// douban words that activity 转发 ("转发", "转发了 X 的讨论"). A 想读/看过 mark
+// points at a subject instead, whose card is the status's own content.
+func isReshare(activity string) bool { return strings.Contains(activity, "转发") }
+
+func isStatusItem(n *html.Node) bool { return n.Data == "div" && hasClass(n, "status-item") }
+
 func parseItem(n *html.Node) item {
 	p := item{sid: attr(n, "data-sid")}
+	// the card a status points at, found first so nothing inside it is mistaken
+	// for the status's own words or pictures
+	block := findFirst(n, isCardBlock)
 
 	if hd := findFirst(n, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "hd") }); hd != nil {
 		p.url = attr(hd, "data-status-url")
 		if txt := findFirst(hd, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "text") }); txt != nil {
-			var who, quote *html.Node
+			var who, quote, when *html.Node
 			if who = findFirst(txt, func(c *html.Node) bool { return c.Data == "a" && hasClass(c, "lnk-people") }); who != nil {
 				p.author = textOf(who)
 			}
 			if quote = findFirst(txt, func(c *html.Node) bool { return c.Data == "blockquote" }); quote != nil {
 				p.saying = textOf(quote)
 			}
-			// the activity is the loose text left in .text: author link and
+			// newer statuses date themselves inside .text; that stamp is not part
+			// of what the user did, so it never belongs in the activity
+			when = findFirst(txt, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "pubtime") })
+			// the activity is the loose text left in .text: author link, stamp and
 			// blockquote excluded, trailing colon dropped ("转发：" -> "转发")
-			p.activity = strings.TrimRight(textExcluding(txt, who, quote), ":： ")
+			p.activity = strings.TrimRight(textExcluding(txt, who, quote, when), ":： ")
 		}
 	}
 
 	// the topic (动态) variant keeps the saying in .bd .content instead of
-	// .hd .text, so fall back to a blockquote anywhere in the item
+	// .hd .text, so fall back to a blockquote anywhere outside the card (a
+	// topic-card quotes the discussion, which is not what this user wrote)
 	if p.saying == "" {
-		if quote := findFirst(n, func(c *html.Node) bool { return c.Data == "blockquote" }); quote != nil {
+		if quote := findOutside(n, block, func(c *html.Node) bool { return c.Data == "blockquote" }); quote != nil {
 			p.saying = textOf(quote)
 		}
 	}
@@ -154,46 +220,71 @@ func parseItem(n *html.Node) item {
 		}
 	}
 
-	// subject/topic card: a movie/book/topic block with a linked title and a
-	// preview paragraph
-	if card := findFirst(n, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "block") }); card != nil {
-		if title := findFirst(card, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "title") }); title != nil {
+	if block != nil {
+		cd := &card{}
+		if title := findFirst(block, func(c *html.Node) bool {
+			return c.Data == "div" && (hasClass(c, "title") || hasClass(c, "topic-card-title"))
+		}); title != nil {
 			if a := findFirst(title, func(c *html.Node) bool { return c.Data == "a" }); a != nil {
-				p.cardTitle = textOf(a)
-				p.cardURL = attr(a, "href")
+				cd.title = textOf(a)
+				cd.url = attr(a, "href")
 			}
 		}
-		if p.cardURL == "" {
-			p.cardURL = strings.TrimSpace(attr(card, "data-url"))
+		// a discussion card names who wrote it ("momo 说：")
+		if owner := findFirst(block, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "topic-card-owner") }); owner != nil {
+			if a := findFirst(owner, func(c *html.Node) bool { return c.Data == "a" }); a != nil {
+				cd.owner = textOf(a)
+			}
 		}
-		if desc := findFirst(card, func(c *html.Node) bool { return c.Data == "p" }); desc != nil {
-			p.cardDesc = clip(textOf(desc), 200)
+		if cd.url == "" {
+			cd.url = strings.TrimSpace(attr(block, "data-url"))
 		}
+		if desc := findFirst(block, func(c *html.Node) bool { return c.Data == "p" }); desc != nil {
+			cd.desc = clip(textOf(desc), 200)
+		}
+		cd.pics = photos(block, nil)
+		cd.url = stripTracking(unwrapLink2(cd.url))
+		p.card = cd
 	} else if title := findFirst(n, func(c *html.Node) bool { return c.Data == "div" && hasClass(c, "title") }); title != nil {
 		// group topics have no block div: the linked title in .content is the
 		// content itself. A title link with no text (the 动态 variant) adds
 		// nothing, so it's dropped rather than emitting a bare tracking URL.
 		if a := findFirst(title, func(c *html.Node) bool { return c.Data == "a" }); a != nil {
-			if p.cardTitle = textOf(a); p.cardTitle != "" {
-				p.cardURL = attr(a, "href")
+			if t := textOf(a); t != "" {
+				p.card = &card{title: t, url: stripTracking(unwrapLink2(attr(a, "href")))}
 			}
 		}
 	}
-	p.cardURL = stripTracking(p.cardURL)
-	p.images = photos(n)
+	p.images = photos(n, block)
 	return p
 }
 
-// photos collects what a status attached: uploaded pictures, a subject card's
-// cover. The header carries the poster's avatar, which is the row's chrome
-// rather than its content, so that subtree is skipped. Douban lazy-loads, so
-// the real URL is usually in data-src with a placeholder left in src.
-func photos(n *html.Node) []string {
+// photos collects what a status attached: uploaded pictures, and a card's cover
+// unless that block is skipped (the card keeps its own cover). The header
+// carries the poster's avatar, which is the row's chrome rather than its
+// content, so that subtree is skipped too. Douban lazy-loads, so the real URL
+// is usually in data-src with a placeholder left in src.
+func photos(n, skip *html.Node) []string {
 	var out []string
 	seen := map[string]bool{}
 	var walk func(*html.Node)
+	add := func(u string) {
+		if u != "" && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
 	walk = func(c *html.Node) {
+		if c == skip {
+			return
+		}
 		if c.Type == html.ElementNode && (hasClass(c, "hd") || hasClass(c, "usr-pic")) {
+			return
+		}
+		if c.Type == html.ElementNode && c.Data == "script" {
+			for _, u := range scriptPhotos(textOf(c)) {
+				add(u)
+			}
 			return
 		}
 		if c.Type == html.ElementNode && c.Data == "img" {
@@ -201,10 +292,7 @@ func photos(n *html.Node) []string {
 			if u == "" {
 				u = core.ImageURL(attr(c, "src"))
 			}
-			if u != "" && !seen[u] {
-				seen[u] = true
-				out = append(out, u)
-			}
+			add(u)
 		}
 		for ch := c.FirstChild; ch != nil; ch = ch.NextSibling {
 			walk(ch)
@@ -212,6 +300,59 @@ func photos(n *html.Node) []string {
 	}
 	walk(n)
 	return out
+}
+
+// rePhotosJSON pulls the list douban hands its client-side gallery. Pictures
+// attached to a status (and to a reshared discussion) reach the page only as
+// that script's JSON, never as an <img>, so a scrape that reads tags alone
+// comes back empty-handed.
+var rePhotosJSON = regexp.MustCompile(`(?s)var\s+photos\s*=\s*(\[.*?\]);`)
+
+func scriptPhotos(js string) []string {
+	m := rePhotosJSON.FindStringSubmatch(js)
+	if m == nil {
+		return nil
+	}
+	var list []struct {
+		Image struct {
+			Normal struct {
+				URL string `json:"url"`
+			} `json:"normal"`
+			Large struct {
+				URL string `json:"url"`
+			} `json:"large"`
+		} `json:"image"`
+	}
+	if err := json.Unmarshal([]byte(m[1]), &list); err != nil {
+		return nil
+	}
+	var out []string
+	for _, ph := range list {
+		u := ph.Image.Large.URL
+		if u == "" {
+			u = ph.Image.Normal.URL
+		}
+		if u = core.ImageURL(u); u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// unwrapLink2 resolves douban's /link2/ redirect wrapper to the address it
+// hides, so a card links to the discussion rather than to the bounce.
+func unwrapLink2(raw string) string {
+	if !strings.Contains(raw, "/link2/") {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if target := u.Query().Get("url"); target != "" {
+		return target
+	}
+	return raw
 }
 
 // stripTracking drops douban's _spm_id tracking query from a URL, leaving real
@@ -279,11 +420,20 @@ func hasClass(n *html.Node, class string) bool {
 // findFirst returns the first element (document order) under n matching pred,
 // excluding n itself.
 func findFirst(n *html.Node, pred func(*html.Node) bool) *html.Node {
+	return findOutside(n, nil, pred)
+}
+
+// findOutside is findFirst with one subtree left out, for the pieces a card
+// owns rather than the status around it.
+func findOutside(n, skip *html.Node, pred func(*html.Node) bool) *html.Node {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c == skip {
+			continue
+		}
 		if c.Type == html.ElementNode && pred(c) {
 			return c
 		}
-		if hit := findFirst(c, pred); hit != nil {
+		if hit := findOutside(c, skip, pred); hit != nil {
 			return hit
 		}
 	}
