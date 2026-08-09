@@ -290,6 +290,21 @@ function ytId(href){
   var m = href.match(/(?:youtube\.com\/watch\?[^#]*v=|youtu\.be\/|youtube\.com\/shorts\/|youtube\.com\/embed\/)([\w-]{11})/);
   return m ? m[1] : null;
 }
+// The length badge a native video renders server-side: YouTube states it
+// nowhere the page can read, so the server looks it up and the badge lands on
+// the thumbnail when the answer arrives. A tap before then just plays it.
+function ytLen(thumb, id){
+  fetch('/ytlen?v=' + encodeURIComponent(id))
+    .then(function(res){ return res.json(); })
+    .then(function(d){
+      if (!d.len) return;
+      var s = document.createElement('span');
+      s.className = 'vlen';
+      s.textContent = d.len;
+      thumb.appendChild(s);
+    })
+    .catch(function(){}); // no badge is fine; it is a hint, not the content
+}
 function ytPlay(thumb, id){
   var wrap = document.createElement('div');
   wrap.className = 'yt-embed';
@@ -341,6 +356,7 @@ document.querySelectorAll('article.card').forEach(function(card){
     var play = document.createElement('span');
     play.className = 'yt-play'; play.textContent = '▶';
     d.appendChild(img); d.appendChild(play);
+    ytLen(d, id);
     d.addEventListener('click', function(){ ytPlay(d, id); });
     var foot = card.querySelector('.footer');
     foot.before(d);

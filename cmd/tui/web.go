@@ -100,6 +100,7 @@ func runWeb(root, addr string, dev bool) error {
 	})
 	mux.HandleFunc("/dl", handleDownload)
 	mux.HandleFunc("/img", handleImage)
+	mux.HandleFunc("/ytlen", newYTLens().handle)
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
