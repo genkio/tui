@@ -3,6 +3,7 @@ package x
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,11 @@ const (
 	homeTimelineQueryID       = "yXkXiX5sZhWEsOjz4u9dSQ"
 	homeLatestTimelineQueryID = "3EReKHnXX2ebBZP1afZnXw"
 )
+
+// timelineFieldToggles asks for a long post's rich body. Without
+// withArticleRichContentState the timeline carries only an article's title and
+// preview_text, so a long post reads as two truncated lines.
+const timelineFieldToggles = `{"withArticlePlainText":false,"withArticleRichContentState":true}`
 
 const timelineFeatures = `{"rweb_video_screen_enabled":false,"rweb_cashtags_enabled":true,"profile_label_improvements_pcf_label_in_post_enabled":true,"responsive_web_profile_redirect_enabled":false,"rweb_tipjar_consumption_enabled":false,"verified_phone_label_enabled":false,"creator_subscriptions_tweet_preview_api_enabled":true,"responsive_web_graphql_timeline_navigation_enabled":true,"responsive_web_graphql_skip_user_profile_image_extensions_enabled":false,"premium_content_api_read_enabled":false,"communities_web_enable_tweet_community_results_fetch":true,"c9s_tweet_anatomy_moderator_badge_enabled":true,"responsive_web_grok_analyze_button_fetch_trends_enabled":false,"responsive_web_grok_analyze_post_followups_enabled":true,"rweb_cashtags_composer_attachment_enabled":true,"responsive_web_jetfuel_frame":true,"responsive_web_grok_share_attachment_enabled":true,"responsive_web_grok_annotations_enabled":true,"articles_preview_enabled":true,"responsive_web_edit_tweet_api_enabled":true,"rweb_conversational_replies_downvote_enabled":false,"graphql_is_translatable_rweb_tweet_is_translatable_enabled":true,"view_counts_everywhere_api_enabled":true,"longform_notetweets_consumption_enabled":true,"responsive_web_twitter_article_tweet_consumption_enabled":true,"content_disclosure_indicator_enabled":true,"content_disclosure_ai_generated_indicator_enabled":true,"responsive_web_grok_show_grok_translated_post":true,"responsive_web_grok_analysis_button_from_backend":true,"post_ctas_fetch_enabled":true,"freedom_of_speech_not_reach_fetch_enabled":true,"standardized_nudges_misinfo":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true,"longform_notetweets_rich_text_read_enabled":true,"longform_notetweets_inline_media_enabled":false,"responsive_web_grok_image_annotation_enabled":true,"responsive_web_grok_imagine_annotation_enabled":true,"responsive_web_grok_community_note_auto_translation_is_enabled":true,"responsive_web_enhance_cards_enabled":false}`
 
@@ -93,9 +99,30 @@ func (c *Client) Timeline(ctx context.Context, tab Tab, count int) ([]Tweet, err
 	if err != nil {
 		return nil, err
 	}
-	endpoint := fmt.Sprintf("%s/%s/%s?variables=%s&features=%s",
-		c.base, qid, op, url.QueryEscape(string(varsJSON)), url.QueryEscape(timelineFeatures))
+	endpoint := func(toggles string) string {
+		u := fmt.Sprintf("%s/%s/%s?variables=%s&features=%s",
+			c.base, qid, op, url.QueryEscape(string(varsJSON)), url.QueryEscape(timelineFeatures))
+		if toggles != "" {
+			u += "&fieldToggles=" + url.QueryEscape(toggles)
+		}
+		return u
+	}
 
+	tweets, err := c.timeline(ctx, endpoint(timelineFieldToggles))
+	if errors.Is(err, errBadRequest) {
+		// The toggles only enrich long posts. x answers 400 for a fieldToggle an
+		// endpoint doesn't know, and losing the whole timeline over that is a
+		// far worse trade than showing articles as their preview.
+		return c.timeline(ctx, endpoint(""))
+	}
+	return tweets, err
+}
+
+// errBadRequest marks a request x refused outright, which is how it reports a
+// parameter it doesn't recognize.
+var errBadRequest = errors.New("x.com rejected the request")
+
+func (c *Client) timeline(ctx context.Context, endpoint string) ([]Tweet, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -117,6 +144,8 @@ func (c *Client) Timeline(ctx context.Context, tab Tab, count int) ([]Tweet, err
 		return nil, fmt.Errorf("x.com rejected the session (HTTP %d); re-run make auth", resp.StatusCode)
 	case resp.StatusCode == http.StatusTooManyRequests:
 		return nil, fmt.Errorf("x.com rate limit hit (HTTP 429); wait a bit before refreshing")
+	case resp.StatusCode == http.StatusBadRequest:
+		return nil, fmt.Errorf("%w: %s", errBadRequest, snippet(body))
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("x.com returned HTTP %d: %s", resp.StatusCode, snippet(body))
 	}

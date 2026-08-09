@@ -208,6 +208,148 @@ func TestParseTimelineError(t *testing.T) {
 	}
 }
 
+// block builds one Draft.js paragraph the way x lays an article out.
+func block(kind, text string) map[string]any {
+	return map[string]any{"type": kind, "text": text, "key": "k" + text}
+}
+
+// A long post's own text is just the t.co link back to itself, which cleanText
+// strips to nothing: everything readable has to come from the article.
+func TestParseTimelineArticle(t *testing.T) {
+	art := map[string]any{
+		"rest_id":      "700",
+		"title":        "DeepSeek &amp; the Responses API",
+		"preview_text": "the preview x shows in a timeline card",
+		"cover_media": map[string]any{
+			"media_info": map[string]any{"original_img_url": "https://pbs.twimg.com/media/cover.jpg"},
+		},
+		"content_state": map[string]any{"blocks": []any{
+			block("unstyled", "First paragraph."),
+			block("header-two", "A section"),
+			block("unordered-list-item", "a bullet"),
+			block("atomic", ""), // an inline image: no text of its own
+			block("unstyled", "Last paragraph."),
+		}},
+		"media_entities": []any{
+			map[string]any{"media_info": map[string]any{"original_img_url": "https://pbs.twimg.com/media/inline.jpg"}},
+			map[string]any{"media_info": map[string]any{"media_url_https": "https://video.twimg.com/x.mp4"}}, // a video: no still
+		},
+	}
+	post := userResult("Sal", "saladdayyy", legacy("70", "https://t.co/abc", nil))
+	post["article"] = map[string]any{"article_results": map[string]any{"result": art}}
+
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{item("tweet-70", post)}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	if len(tweets) != 1 {
+		t.Fatalf("got %d tweets, want 1", len(tweets))
+	}
+	tw := tweets[0]
+	if tw.Text != "" {
+		t.Errorf("post text = %q, want empty (it held only the t.co link)", tw.Text)
+	}
+	if tw.Article == nil {
+		t.Fatal("expected an article")
+	}
+	if tw.Article.Title != "DeepSeek & the Responses API" {
+		t.Errorf("title = %q, want the entity decoded", tw.Article.Title)
+	}
+	want := "First paragraph.\n\nA section\n\n- a bullet\n\nLast paragraph."
+	if tw.Article.Text != want {
+		t.Errorf("body = %q, want %q", tw.Article.Text, want)
+	}
+	if tw.Article.Cover != "https://pbs.twimg.com/media/cover.jpg" {
+		t.Errorf("cover = %q", tw.Article.Cover)
+	}
+	if got := tw.Article.Images; len(got) != 1 || got[0] != "https://pbs.twimg.com/media/inline.jpg" {
+		t.Errorf("images = %v, want just the still (a video entity has no image url)", got)
+	}
+
+	// The headline and body stay distinct, which is what makes the card render a
+	// headline at all, and the cover leads the images.
+	it := ToItem(tw)
+	if it.Title != tw.Article.Title || it.Body != tw.Article.Text {
+		t.Errorf("item title/body = %q / %q", it.Title, it.Body)
+	}
+	if len(it.Images) != 2 || it.Images[0] != "https://pbs.twimg.com/media/cover.jpg" {
+		t.Errorf("item images = %v, want the cover first", it.Images)
+	}
+}
+
+// When the timeline answers without content_state there is only the preview, and
+// it must not read as if it were the whole piece.
+func TestParseTimelineArticlePreviewOnly(t *testing.T) {
+	art := map[string]any{
+		"rest_id":      "701",
+		"title":        "A long read",
+		"preview_text": "only the opening lines",
+	}
+	post := userResult("Sal", "saladdayyy", legacy("71", "https://t.co/abc", nil))
+	post["article"] = map[string]any{"article_results": map[string]any{"result": art}}
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{item("tweet-71", post)}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	a := tweets[0].Article
+	if a == nil || a.Title != "A long read" {
+		t.Fatalf("article = %+v", a)
+	}
+	if a.Text != "only the opening lines…" {
+		t.Errorf("text = %q, want the preview marked as cut short", a.Text)
+	}
+}
+
+// A titleless article envelope carries nothing to show, so the post falls back
+// to its ordinary text rather than rendering an empty headline.
+func TestParseTimelineArticleWithoutTitle(t *testing.T) {
+	post := userResult("Sal", "saladdayyy", legacy("72", "still a normal post", nil))
+	post["article"] = map[string]any{"article_results": map[string]any{"result": map[string]any{"rest_id": "702"}}}
+	resp := map[string]any{"data": map[string]any{"home": map[string]any{"home_timeline_urt": map[string]any{
+		"instructions": []any{map[string]any{"type": "TimelineAddEntries", "entries": []any{item("tweet-72", post)}}},
+	}}}}
+	b, _ := json.Marshal(resp)
+
+	tweets, err := parseTimeline(b)
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	if tweets[0].Article != nil {
+		t.Errorf("article = %+v, want none", tweets[0].Article)
+	}
+	if it := ToItem(tweets[0]); it.Title != "still a normal post" {
+		t.Errorf("title = %q, want the post's own text", it.Title)
+	}
+}
+
+func TestParseTimelineNoArticle(t *testing.T) {
+	tweets, err := parseTimeline(buildSample())
+	if err != nil {
+		t.Fatalf("parseTimeline: %v", err)
+	}
+	for _, tw := range tweets {
+		if tw.Article != nil {
+			t.Errorf("%s: ordinary posts must carry no article", tw.ID)
+		}
+	}
+	// An ordinary post still puts its text in both title and body, so the card
+	// collapses them into one block.
+	it := ToItem(tweets[0])
+	if it.Title != it.Body || it.Title == "" {
+		t.Errorf("title/body = %q / %q, want the same text", it.Title, it.Body)
+	}
+}
+
 func TestParseTimelineVideo(t *testing.T) {
 	video := userResult("Vera", "vera", legacy("50", "watch this https://t.co/xyz", map[string]any{
 		"extended_entities": map[string]any{"media": []any{

@@ -107,7 +107,72 @@ func (t *tweetResult) toTweet() Tweet {
 	tw.Quoted = src.quoted()
 	tw.VideoURL, tw.VideoPoster = lg.video()
 	tw.Images = lg.photos()
+	tw.Article = src.article()
 	return tw
+}
+
+// article flattens a long post. Its body lives outside the 280-char text (which
+// carries only a t.co link back to it), so without this the post reads as blank.
+// The timeline only carries content_state when the request asks for it; when it
+// doesn't, preview_text is all there is and the text is marked as cut short.
+func (t *tweetResult) article() *Article {
+	if t.Article == nil {
+		return nil
+	}
+	res := t.Article.ArticleResults.Result
+	if res == nil || res.Title == "" {
+		return nil
+	}
+	a := &Article{Title: cleanText(res.Title), Cover: res.cover()}
+	if body := res.ContentState.text(); body != "" {
+		a.Text = body
+	} else if p := cleanText(res.PreviewText); p != "" {
+		a.Text = p + "…" // a preview, not the whole piece: don't pretend otherwise
+	}
+	a.Images = res.images()
+	return a
+}
+
+// text joins an article's Draft.js blocks into paragraphs. Media blocks
+// ("atomic") carry no text and are dropped; their images come from
+// media_entities instead.
+func (cs *articleContentState) text() string {
+	var parts []string
+	for _, b := range cs.Blocks {
+		s := strings.TrimSpace(html.UnescapeString(b.Text))
+		if s == "" {
+			continue
+		}
+		if strings.HasSuffix(b.Type, "list-item") {
+			s = "- " + s
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// cover reads the header image. x returns it bare on some responses and wrapped
+// in a result envelope on others, so both spellings are tried.
+func (r *articleResult) cover() string {
+	if r.CoverMedia != nil && r.CoverMedia.MediaInfo.OriginalImgURL != "" {
+		return r.CoverMedia.MediaInfo.OriginalImgURL
+	}
+	if r.CoverMediaResults != nil && r.CoverMediaResults.Result != nil {
+		return r.CoverMediaResults.Result.MediaInfo.OriginalImgURL
+	}
+	return ""
+}
+
+// images are the stills laid out through the body. Video entities carry no
+// original_img_url, so they fall away here.
+func (r *articleResult) images() []string {
+	var out []string
+	for _, m := range r.MediaEntities {
+		if u := m.MediaInfo.OriginalImgURL; u != "" {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // quoted flattens the post this one quotes. x.com hangs quoted_status_result off
@@ -250,11 +315,42 @@ type tweetResult struct {
 		} `json:"note_tweet_results"`
 	} `json:"note_tweet"`
 	QuotedStatusResult *statusResult `json:"quoted_status_result"`
-	Legacy             *legacyTweet  `json:"legacy"`
+	Article            *struct {
+		ArticleResults struct {
+			Result *articleResult `json:"result"`
+		} `json:"article_results"`
+	} `json:"article"`
+	Legacy *legacyTweet `json:"legacy"`
 }
 
 type statusResult struct {
 	Result *tweetResult `json:"result"`
+}
+
+type articleResult struct {
+	Title       string    `json:"title"`
+	PreviewText string    `json:"preview_text"`
+	CoverMedia  *apiMedia `json:"cover_media"`
+	// the same image, wrapped, on the responses that spell it this way
+	CoverMediaResults *struct {
+		Result *apiMedia `json:"result"`
+	} `json:"cover_media_results"`
+	ContentState  articleContentState `json:"content_state"`
+	MediaEntities []apiMedia          `json:"media_entities"`
+}
+
+// articleContentState is Draft.js: the body as a flat list of blocks.
+type articleContentState struct {
+	Blocks []struct {
+		Text string `json:"text"`
+		Type string `json:"type"` // unstyled, header-one…, ordered-list-item, atomic
+	} `json:"blocks"`
+}
+
+type apiMedia struct {
+	MediaInfo struct {
+		OriginalImgURL string `json:"original_img_url"` // images only; a video has none
+	} `json:"media_info"`
 }
 
 type legacyTweet struct {

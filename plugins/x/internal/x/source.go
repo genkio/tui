@@ -65,18 +65,26 @@ var _ core.Source = (*Source)(nil)
 // ToItem normalizes a tweet into a core.Item for the feed widget. Read
 // filtering (x tracks read locally, not on the server) stays with the caller.
 func ToItem(t Tweet) core.Item {
+	title, body, images := t.Text, t.Text, t.Images
+	// A long post's text is only the t.co link back to itself, so the headline
+	// and body come from the article. Keeping them distinct is what gives the
+	// card its headline: equal title and body collapse into one block.
+	if a := t.Article; a != nil {
+		title, body = a.Title, a.Text
+		images = append(append([]string{}, coverFirst(a)...), t.Images...)
+	}
 	it := core.Item{
 		App:    "x",
 		ID:     t.ID,
-		Title:  t.Text,
-		Body:   t.Text,
+		Title:  title,
+		Body:   body,
 		Source: tweetSource(t),
 		Author: t.Name,
 		URL:    t.URL,
 		Age:    t.Age,
 		Video:  t.VideoURL,
 		Poster: t.VideoPoster,
-		Images: t.Images,
+		Images: images,
 		Quote:  tweetQuote(t),
 	}
 	if !t.CreatedAt.IsZero() {
@@ -102,6 +110,15 @@ func tweetSource(t Tweet) string {
 		return "🔁 @" + t.Handle
 	}
 	return "@" + t.Handle
+}
+
+// coverFirst lists an article's images with the cover leading, so the toggle
+// opens on the header image rather than something from halfway down the piece.
+func coverFirst(a *Article) []string {
+	if a.Cover == "" {
+		return a.Images
+	}
+	return append([]string{a.Cover}, a.Images...)
 }
 
 // tweetQuote maps a quoted post onto the shared embed shape, so renderers can
