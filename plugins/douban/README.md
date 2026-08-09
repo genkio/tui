@@ -2,10 +2,11 @@
 
 A terminal UI for reading your Douban following timeline (友邻广播) — the
 stream of statuses, reshares, and 看过/在读/想看 marks from the people you
-follow on [douban.com](https://www.douban.com). Statuses expand inline, and `o`
-renders one in carbonyl (`b` opens the browser). It talks to the same rexxar
-JSON API the mobile web client uses, authenticated with your logged-in browser
-session, so there is no app to register and no API key to apply for.
+follow on [douban.com](https://www.douban.com), with the weekly 榜单 charts
+mixed in. Statuses expand inline, and `o` renders one in carbonyl (`b` opens
+the browser). The timeline is read off the logged-in desktop homepage the way a
+browser sees it and the charts off the mobile JSON API, both with your existing
+browser session, so there is no app to register and no API key to apply for.
 
 ```
 douban-tui   unread · 21                       updated 14:32:07
@@ -70,9 +71,34 @@ variables (shell exports win over `config.toml`):
 | `DBTUI_UNREAD_ONLY`   | `true`     | hide read statuses on refresh; `false` keeps them greyed |
 | `DBTUI_THEME`         | `auto`     | `auto` (match terminal), `light`, `dark`   |
 | `DBTUI_REFRESH`       | off        | auto-refresh interval, e.g. `2m`; keep it slow |
+| `DBTUI_CHARTS`        | the three below | comma-separated 榜单 to mix in; set it empty for none |
 | `DBTUI_UA`            | (built-in) | User-Agent override, to match the cookie's browser |
 
 See `.env.sample` for a copy-paste template.
+
+## Charts
+
+Douban's weekly 榜单 ride in the same feed as the timeline, one entry per
+ranked title, dated by the list's own update time so they land where they were
+published. Out of the box:
+
+| Chart                     | 榜单           |
+| ------------------------- | -------------- |
+| `movie_weekly_best`       | 一周口碑电影榜 |
+| `tv_global_best_weekly`   | 全球口碑剧集榜 |
+| `show_global_best_weekly` | 国外口碑综艺榜 |
+
+Any subject collection works — the id is the tail of its address, so
+`m.douban.com/subject_collection/book_weekly_best` is `book_weekly_best`:
+
+```toml
+charts = ["movie_weekly_best", "book_weekly_best"]   # or [] for none
+```
+
+A title read once stays read, so after the first load only titles new to a
+chart come back unread. The lists turn over weekly, so a fetched chart is
+cached for six hours in `charts.json` beside the read store; deleting that file
+costs one refetch.
 
 ## Authentication
 

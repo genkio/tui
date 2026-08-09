@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/genkio/tui/core"
+	"github.com/genkio/tui/plugins/douban/internal/config"
 	"github.com/genkio/tui/plugins/douban/internal/douban"
 	"github.com/genkio/tui/plugins/douban/internal/readstore"
 )
@@ -27,9 +28,9 @@ type (
 	errMsg            struct{ err error }
 )
 
-func fetchHome(ctx context.Context, c *douban.Client, max int, reset bool) tea.Cmd {
+func fetchHome(ctx context.Context, c *douban.Client, cfg config.Config, reset bool) tea.Cmd {
 	return func() tea.Msg {
-		statuses, err := c.Home(ctx, max)
+		statuses, err := c.Feed(ctx, cfg.MaxStatuses, cfg.Charts)
 		if err != nil {
 			return errMsg{err}
 		}

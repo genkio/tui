@@ -99,6 +99,7 @@ func runWeb(root, addr string, dev bool) error {
 		handleSave(w, r, saved, rendered)
 	})
 	mux.HandleFunc("/dl", handleDownload)
+	mux.HandleFunc("/img", handleImage)
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -432,6 +433,55 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+dlName(r.URL.Query().Get("n"))+`"`)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// handleImage fetches a picture the browser is not allowed to ask for itself.
+// doubanio answers only a request whose Referer is a douban page — a bare one
+// gets 418, this server's own origin gets 418 — and a page cannot forge a
+// Referer, so the fetch happens here and the bytes are passed on. No session
+// cookie goes with it: these files are public.
+func handleImage(w http.ResponseWriter, r *http.Request) {
+	u, err := parseImageURL(r.URL.Query().Get("u"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Header.Set("Referer", "https://www.douban.com/")
+	req.Header.Set("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "fetch image: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "image source: "+resp.Status, http.StatusBadGateway)
+		return
+	}
+	for _, h := range []string{"Content-Type", "Content-Length"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	// these files never change under their URL, so let the browser keep them
+	// and spend no second round trip on a scroll back up
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.Copy(w, resp.Body)
+}
+
+// parseImageURL admits only douban's image CDN, so /img can't be used as an
+// open proxy.
+func parseImageURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || !strings.HasSuffix(u.Host, ".doubanio.com") {
+		return nil, errors.New("u must be an https://*.doubanio.com/... URL")
+	}
+	return u, nil
 }
 
 // parseVideoURL admits only x's video CDN, so /dl can't be used as an open proxy.

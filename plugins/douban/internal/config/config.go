@@ -16,12 +16,23 @@ import (
 	"github.com/genkio/tui/core"
 )
 
+// DefaultCharts are the douban 榜单 mixed into the feed out of the box: the
+// weekly best films, series and shows. Each id is a subject_collection, the
+// tail of an m.douban.com/subject_collection/<id> address. Setting
+// `charts = []` in the config file turns them off.
+var DefaultCharts = []string{
+	"movie_weekly_best",
+	"tv_global_best_weekly",
+	"show_global_best_weekly",
+}
+
 // Config is the fully resolved configuration the app runs with.
 type Config struct {
-	Theme       string `toml:"theme"`        // auto | light | dark
-	Refresh     string `toml:"refresh"`      // auto-refresh interval, e.g. "2m"; empty = off
-	MaxStatuses int    `toml:"max_statuses"` // statuses to fetch per refresh
-	UnreadOnly  bool   `toml:"unread_only"`  // hide statuses already marked read (vs grey them in place)
+	Theme       string   `toml:"theme"`        // auto | light | dark
+	Refresh     string   `toml:"refresh"`      // auto-refresh interval, e.g. "2m"; empty = off
+	MaxStatuses int      `toml:"max_statuses"` // statuses to fetch per refresh
+	UnreadOnly  bool     `toml:"unread_only"`  // hide statuses already marked read (vs grey them in place)
+	Charts      []string `toml:"charts"`       // subject_collection ids mixed into the feed; empty list = none
 }
 
 // Default returns the built-in configuration.
@@ -30,6 +41,7 @@ func Default() Config {
 		Theme:       "auto",
 		MaxStatuses: 50,
 		UnreadOnly:  true,
+		Charts:      append([]string{}, DefaultCharts...),
 	}
 }
 
@@ -85,6 +97,22 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("DBTUI_UNREAD_ONLY"); v != "" {
 		cfg.UnreadOnly = truthy(v)
 	}
+	// set-but-empty is meaningful here: DBTUI_CHARTS= turns the charts off
+	if v, ok := os.LookupEnv("DBTUI_CHARTS"); ok {
+		cfg.Charts = splitList(v)
+	}
+}
+
+// splitList reads a comma-separated env override into a list, dropping blanks
+// so a stray comma cannot ask for a chart with no name.
+func splitList(v string) []string {
+	out := []string{}
+	for _, f := range strings.Split(v, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func truthy(v string) bool {

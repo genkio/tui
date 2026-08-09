@@ -14,14 +14,15 @@ type Source struct {
 	client *Client
 	read   *readstore.Store
 	max    int
+	charts []string
 }
 
-func NewSource(client *Client, read *readstore.Store, max int) *Source {
-	return &Source{client: client, read: read, max: max}
+func NewSource(client *Client, read *readstore.Store, max int, charts []string) *Source {
+	return &Source{client: client, read: read, max: max, charts: charts}
 }
 
 func (s *Source) Fetch(ctx context.Context) ([]core.Item, error) {
-	statuses, err := s.client.Home(ctx, s.max)
+	statuses, err := s.client.Feed(ctx, s.max, s.charts)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +37,7 @@ func (s *Source) Fetch(ctx context.Context) ([]core.Item, error) {
 }
 
 func (s *Source) Count(ctx context.Context) (int, bool, error) {
-	statuses, err := s.client.Home(ctx, s.max)
+	statuses, err := s.client.Feed(ctx, s.max, s.charts)
 	if err != nil {
 		return 0, false, err
 	}
@@ -63,7 +64,9 @@ var _ core.Source = (*Source)(nil)
 
 // ToItem normalizes a status into a core.Item for the feed widget. Like x,
 // the full text rides in both Title and Body: the row clips it to one line and
-// the expanded/web views show it whole. Read filtering stays with the caller.
+// the expanded/web views show it whole. A chart entry is the exception, leading
+// with its own headline so the card draws a title above the body. Read
+// filtering stays with the caller.
 func ToItem(st Status) core.Item {
 	text := st.Text
 	if text == "" {
@@ -71,10 +74,14 @@ func ToItem(st Status) core.Item {
 		// ("上传照片到 <album>") so the row isn't blank
 		text = st.Activity
 	}
+	title := text
+	if st.Title != "" {
+		title = st.Title
+	}
 	it := core.Item{
 		App:    "douban",
 		ID:     st.ID,
-		Title:  text,
+		Title:  title,
 		Body:   text,
 		Source: st.Author,
 		Author: st.Author,

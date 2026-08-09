@@ -39,6 +39,20 @@ func New(cookie, ua string) *Client {
 	}
 }
 
+// Feed is what the app shows: the following timeline with the configured 榜单
+// charts mixed in by publish time, newest first. The timeline is the feed's
+// spine, so its failure is the call's failure, while a chart that will not load
+// is simply left out.
+func (c *Client) Feed(ctx context.Context, limit int, charts []string) ([]Status, error) {
+	statuses, err := c.Home(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	statuses = append(statuses, c.Charts(ctx, charts, time.Now())...)
+	sortByRecency(statuses)
+	return statuses, nil
+}
+
 // Home fetches up to limit statuses from the following timeline. The session
 // cookie is what makes the homepage personal; without one douban serves the
 // logged-out landing page, which is reported as a stale session.

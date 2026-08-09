@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/genkio/tui/core"
 	"github.com/genkio/tui/plugins/douban/internal/config"
@@ -87,7 +88,7 @@ func run() error {
 	client := douban.New(config.Cookie(), config.UserAgent())
 
 	if *check {
-		return printCheck(ctx, client)
+		return printCheck(ctx, client, cfg)
 	}
 	if *count {
 		return printCount(ctx, client, cfg)
@@ -103,8 +104,9 @@ func run() error {
 	return ui.Run(ctx, client, cfg, interval)
 }
 
-// printCheck verifies the session works against the following timeline.
-func printCheck(ctx context.Context, client *douban.Client) error {
+// printCheck verifies the session works against the following timeline, and
+// that the configured charts still answer.
+func printCheck(ctx context.Context, client *douban.Client, cfg config.Config) error {
 	fmt.Println("douban-tui " + versionString())
 	fmt.Println("\nReadiness:")
 	statuses, err := client.Home(ctx, 5)
@@ -116,6 +118,14 @@ func printCheck(ctx context.Context, client *douban.Client) error {
 	if len(statuses) > 0 {
 		fmt.Printf("       top: %s — %s\n", statuses[0].Author, firstLine(statuses[0].Text, 60))
 	}
+	for _, id := range cfg.Charts {
+		entries := client.Charts(ctx, []string{id}, time.Now())
+		if len(entries) == 0 {
+			fmt.Printf("  [--] chart %-22s no entries\n", id)
+			continue
+		}
+		fmt.Printf("  [ok] chart %-22s %d entries — %s\n", id, len(entries), entries[0].Title)
+	}
 	return nil
 }
 
@@ -126,7 +136,7 @@ func printCheck(ctx context.Context, client *douban.Client) error {
 // read status in the window marks where you left off, so a partial count is
 // treated as complete.
 func printCount(ctx context.Context, client *douban.Client, cfg config.Config) error {
-	src := douban.NewSource(client, readstore.Load(""), cfg.MaxStatuses)
+	src := douban.NewSource(client, readstore.Load(""), cfg.MaxStatuses, cfg.Charts)
 	n, capped, err := src.Count(ctx)
 	if err != nil {
 		return err
@@ -145,7 +155,7 @@ func printCount(ctx context.Context, client *douban.Client, cfg config.Config) e
 // so a field added there (images, video) reaches the merged view without
 // touching this.
 func printJSON(ctx context.Context, client *douban.Client, cfg config.Config) error {
-	src := douban.NewSource(client, readstore.Load(""), cfg.MaxStatuses)
+	src := douban.NewSource(client, readstore.Load(""), cfg.MaxStatuses, cfg.Charts)
 	items, err := src.Fetch(ctx)
 	if err != nil {
 		return err

@@ -414,9 +414,10 @@ func TestParseHomeReshareDiscussion(t *testing.T) {
 	if !strings.Contains(s.Embed.Text, "我们在抖音上卖东西") {
 		t.Errorf("embed body wrong: %q", s.Embed.Text)
 	}
+	// img2/img3 in the fixture: the mainland CDNs are swapped for the global one
 	want := []string{
-		"https://img2.doubanio.com/view/group_topic/l/public/p742204311.jpg",
-		"https://img3.doubanio.com/view/group_topic/l/public/p742204312.jpg",
+		"https://img9.doubanio.com/view/group_topic/l/public/p742204311.jpg",
+		"https://img9.doubanio.com/view/group_topic/l/public/p742204312.jpg",
 	}
 	if len(s.Embed.Images) != 2 || s.Embed.Images[0] != want[0] || s.Embed.Images[1] != want[1] {
 		t.Errorf("embed pictures = %v, want %v", s.Embed.Images, want)
@@ -453,8 +454,30 @@ func TestParseHomeScriptPhotos(t *testing.T) {
 	}
 	// the large variant wins: the card scales it down anyway
 	got := statuses[0].Images
-	if len(got) != 1 || got[0] != "https://img1.doubanio.com/view/group_topic/l/public/one-large.jpg" {
+	if len(got) != 1 || got[0] != "https://img9.doubanio.com/view/group_topic/l/public/one-large.jpg" {
 		t.Errorf("images = %v, want the script's large url", got)
+	}
+}
+
+// douban spreads its pictures over four CDNs behind img1/img2/img3/img9. Only
+// img9 answers from outside China, and the digit means nothing else, so every
+// picture is asked of that one.
+func TestImageURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://img1.doubanio.com/view/photo/m/public/p1.jpg", "https://img9.doubanio.com/view/photo/m/public/p1.jpg"},
+		{"https://img3.doubanio.com/view/status/small/public/x.jpg", "https://img9.doubanio.com/view/status/small/public/x.jpg"},
+		{"https://img9.doubanio.com/view/photo/m/public/p1.jpg", "https://img9.doubanio.com/view/photo/m/public/p1.jpg"},
+		// protocol-relative first becomes absolute, then normalizes
+		{"//img2.doubanio.com/view/photo/m/public/p1.jpg", "https://img9.doubanio.com/view/photo/m/public/p1.jpg"},
+		// only the numbered image hosts are douban's CDN shards
+		{"https://www.douban.com/img1.doubanio.com/nope.jpg", "https://www.douban.com/img1.doubanio.com/nope.jpg"},
+		{"https://example.com/p.jpg", "https://example.com/p.jpg"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := imageURL(c.in); got != c.want {
+			t.Errorf("imageURL(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

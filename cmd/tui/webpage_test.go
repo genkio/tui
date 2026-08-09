@@ -349,6 +349,59 @@ func TestRenderCardQuote(t *testing.T) {
 	}
 }
 
+// doubanio serves a picture only to a request whose Referer is a douban page,
+// which the browser cannot produce, so those images load through /img while
+// every other host is fetched straight from the source.
+func TestRenderCardImageProxy(t *testing.T) {
+	it := core.Item{
+		App: "douban", ID: "chart:36808876", Title: "#1 ↑ 奥德赛", Body: "8.3 ★",
+		Source: "一周口碑电影榜",
+		Images: []string{"https://img9.doubanio.com/view/photo/m/public/p2933569626.jpg"},
+		Quote:  &core.Quote{Source: "好讨厌平台", Images: []string{"https://img9.doubanio.com/view/group_topic/l/public/p742204311.jpg"}},
+	}
+	out := renderCard(t, it)
+	// the card's own picture and the embed's both route through the server
+	if strings.Count(out, `data-src="/img?u=https%3A%2F%2Fimg9.doubanio.com`) != 2 {
+		t.Errorf("douban images should load through /img: %s", out)
+	}
+	if strings.Contains(out, `data-src="https://img9.doubanio.com`) {
+		t.Errorf("no douban image should be requested by the browser: %s", out)
+	}
+
+	it.Quote = nil
+	it.App, it.Images = "x", []string{"https://pbs.twimg.com/media/one.jpg"}
+	if out := renderCard(t, it); !strings.Contains(out, `data-src="https://pbs.twimg.com/media/one.jpg"`) {
+		t.Errorf("a host that serves the browser directly is not proxied: %s", out)
+	}
+}
+
+// /img must not become an open proxy for anything on the internet.
+func TestParseImageURL(t *testing.T) {
+	ok := []string{
+		"https://img9.doubanio.com/view/photo/m/public/p1.jpg",
+		"https://img3.doubanio.com/view/status/small/public/x.jpg",
+	}
+	for _, u := range ok {
+		if _, err := parseImageURL(u); err != nil {
+			t.Errorf("parseImageURL(%q) = %v, want it admitted", u, err)
+		}
+	}
+	bad := []string{
+		"",
+		"http://img9.doubanio.com/p.jpg", // plaintext
+		"https://evil.com/p.jpg",         // another host
+		"https://img9.doubanio.com.evil.com/p.jpg",            // suffix lookalike
+		"https://evil.com/?x=https://img9.doubanio.com/p.jpg", // the real host in a query
+		"file:///etc/passwd",
+		"https://127.0.0.1/p.jpg",
+	}
+	for _, u := range bad {
+		if _, err := parseImageURL(u); err == nil {
+			t.Errorf("parseImageURL(%q) was admitted; it must be refused", u)
+		}
+	}
+}
+
 // A douban reshare embeds the discussion it passed along, so the box is not
 // x's alone: the headline links out and the cover hides behind the same toggle.
 func TestRenderCardEmbedNonX(t *testing.T) {
@@ -369,7 +422,7 @@ func TestRenderCardEmbedNonX(t *testing.T) {
 	if !strings.Contains(out, `href="https://douc.cc/8wFqXD"`) || !strings.Contains(out, "好讨厌平台 ↗") {
 		t.Errorf("the discussion headline should link out: %s", out)
 	}
-	if !strings.Contains(out, `data-src="https://img9.doubanio.com/view/status/small/public/iLZUXK.jpg"`) {
+	if !strings.Contains(out, `data-src="/img?u=https%3A%2F%2Fimg9.doubanio.com%2Fview%2Fstatus%2Fsmall%2Fpublic%2FiLZUXK.jpg"`) {
 		t.Errorf("the embedded cover should be lazy-loaded inside the box: %s", out)
 	}
 	if !strings.Contains(out, `<button class="img"`) {

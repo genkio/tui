@@ -288,9 +288,9 @@ func photos(n, skip *html.Node) []string {
 			return
 		}
 		if c.Type == html.ElementNode && c.Data == "img" {
-			u := core.ImageURL(attr(c, "data-src"))
+			u := imageURL(attr(c, "data-src"))
 			if u == "" {
-				u = core.ImageURL(attr(c, "src"))
+				u = imageURL(attr(c, "src"))
 			}
 			add(u)
 		}
@@ -332,7 +332,7 @@ func scriptPhotos(js string) []string {
 		if u == "" {
 			u = ph.Image.Normal.URL
 		}
-		if u = core.ImageURL(u); u != "" {
+		if u = imageURL(u); u != "" {
 			out = append(out, u)
 		}
 	}
@@ -353,6 +353,18 @@ func unwrapLink2(raw string) string {
 		return target
 	}
 	return raw
+}
+
+// reImageShard matches the numbered hosts douban spreads its pictures over.
+var reImageShard = regexp.MustCompile(`^https://img\d+\.doubanio\.com/`)
+
+// imageURL normalizes a douban picture. The img1/img2/img3/img9 hosts are not
+// mirrors of one CDN but four: the low-numbered ones resolve to mainland edges
+// (UPYUN, Alibaba) that answer 403 Forbidden to a request from outside China,
+// while img9 is the global edge and serves the same path anywhere. The digit
+// carries no meaning beyond which CDN, so every picture is asked of img9.
+func imageURL(raw string) string {
+	return reImageShard.ReplaceAllString(core.ImageURL(raw), "https://img9.doubanio.com/")
 }
 
 // stripTracking drops douban's _spm_id tracking query from a URL, leaving real

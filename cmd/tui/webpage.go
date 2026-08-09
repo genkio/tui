@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -103,6 +104,27 @@ type cardData struct {
 	Quote       *quoteData
 	Expand      bool
 	Saved       bool // starred: the footer button offers to unsave it
+}
+
+// cardImages prepares an app's stills for the card, sending the ones the
+// browser cannot fetch itself through this server instead.
+func cardImages(urls []string) []string {
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		out = append(out, proxied(u))
+	}
+	return out
+}
+
+// proxied routes an image via /img when its host will not serve the page
+// directly. doubanio wants a Referer naming a douban page, which no page here
+// can produce, so the server fetches those on the browser's behalf. Everything
+// else is loaded straight from its source.
+func proxied(u string) string {
+	if !strings.Contains(u, ".doubanio.com/") {
+		return u
+	}
+	return "/img?u=" + url.QueryEscape(u)
 }
 
 // quoteData is the embedded post drawn inside a card: x's quote box.
@@ -209,7 +231,7 @@ func buildCard(it core.Item, starred bool) cardData {
 		Video:  it.Video,
 		Poster: it.Poster,
 		VidLen: vidLen(it.VidSecs),
-		Images: it.Images,
+		Images: cardImages(it.Images),
 		Saved:  starred,
 	}
 	// Two content panels: a clipped preview and a full version the footer's
@@ -241,7 +263,7 @@ func buildQuote(q core.Quote) *quoteData {
 		Video:  q.Video,
 		Poster: q.Poster,
 		VidLen: vidLen(q.VidSecs),
-		Images: q.Images,
+		Images: cardImages(q.Images),
 	}
 	if q.Text != "" {
 		d.PreviewBody = template.HTML(linkify(clip(q.Text, quoteClip)))

@@ -99,7 +99,7 @@ func initialTheme(pref string) (core.Theme, bool) {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, fetchHome(m.ctx, m.client, m.cfg.MaxStatuses, true)}
+	cmds := []tea.Cmd{m.spinner.Tick, fetchHome(m.ctx, m.client, m.cfg, true)}
 	if m.themeAuto {
 		cmds = append(cmds, tea.RequestBackgroundColor)
 	}
@@ -174,7 +174,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, scheduleRefresh(m.refreshInterval))
 		}
 		if !m.loading { // don't pile onto an in-flight manual refresh
-			cmds = append(cmds, fetchHome(m.ctx, m.client, m.cfg.MaxStatuses, false))
+			cmds = append(cmds, fetchHome(m.ctx, m.client, m.cfg, false))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -242,7 +242,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cache = nil
 		m.loading = true
 		m.loadingNote = "Refreshing…"
-		return m, tea.Batch(m.spinner.Tick, fetchHome(m.ctx, m.client, m.cfg.MaxStatuses, true))
+		return m, tea.Batch(m.spinner.Tick, fetchHome(m.ctx, m.client, m.cfg, true))
 
 	case key.Matches(msg, m.keys.ShowSource):
 		m.feed.ToggleSource()
