@@ -74,18 +74,19 @@ func ToItem(t Tweet) core.Item {
 		images = append(append([]string{}, coverFirst(a)...), t.Images...)
 	}
 	it := core.Item{
-		App:    "x",
-		ID:     t.ID,
-		Title:  title,
-		Body:   body,
-		Source: tweetSource(t),
-		Author: t.Name,
-		URL:    t.URL,
-		Age:    t.Age,
-		Video:  t.VideoURL,
-		Poster: t.VideoPoster,
-		Images: images,
-		Quote:  tweetQuote(t),
+		App:     "x",
+		ID:      t.ID,
+		Title:   title,
+		Body:    body,
+		Source:  tweetSource(t),
+		Author:  t.Name,
+		URL:     t.URL,
+		Age:     t.Age,
+		Video:   t.VideoURL,
+		Poster:  t.VideoPoster,
+		VidSecs: t.VideoSecs,
+		Images:  images,
+		Quote:   tweetQuote(t),
 	}
 	if !t.CreatedAt.IsZero() {
 		it.At = t.CreatedAt.UTC()
@@ -128,12 +129,13 @@ func tweetQuote(t Tweet) *core.Quote {
 		return nil
 	}
 	return &core.Quote{
-		Source: "@" + t.Quoted.Handle,
-		Author: t.Quoted.Name,
-		Text:   t.Quoted.Text,
-		URL:    t.Quoted.URL,
-		Video:  t.Quoted.VideoURL,
-		Poster: t.Quoted.VideoPoster,
-		Images: t.Quoted.Images,
+		Source:  "@" + t.Quoted.Handle,
+		Author:  t.Quoted.Name,
+		Text:    t.Quoted.Text,
+		URL:     t.Quoted.URL,
+		Video:   t.Quoted.VideoURL,
+		Poster:  t.Quoted.VideoPoster,
+		VidSecs: t.Quoted.VideoSecs,
+		Images:  t.Quoted.Images,
 	}
 }

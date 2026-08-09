@@ -96,7 +96,8 @@ type cardData struct {
 	URL         string
 	Video       string // direct mp4; the card shows an inline player
 	Poster      string
-	HasVideo    bool // this card or its quote has a player, so show the shared controls
+	VidLen      string // "1:23" badge over the poster; blank when the length is unknown
+	HasVideo    bool   // this card or its quote has a player, so show the shared controls
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
@@ -113,6 +114,7 @@ type quoteData struct {
 	URL         string
 	Video       string
 	Poster      string
+	VidLen      string
 	Images      []string
 }
 
@@ -206,6 +208,7 @@ func buildCard(it core.Item, starred bool) cardData {
 		URL:    it.URL,
 		Video:  it.Video,
 		Poster: it.Poster,
+		VidLen: vidLen(it.VidSecs),
 		Images: it.Images,
 		Saved:  starred,
 	}
@@ -237,6 +240,7 @@ func buildQuote(q core.Quote) *quoteData {
 		URL:    q.URL,
 		Video:  q.Video,
 		Poster: q.Poster,
+		VidLen: vidLen(q.VidSecs),
 		Images: q.Images,
 	}
 	if q.Text != "" {
@@ -244,6 +248,19 @@ func buildQuote(q core.Quote) *quoteData {
 		d.FullBody = template.HTML(linkify(q.Text))
 	}
 	return d
+}
+
+// vidLen formats a clip's length for the badge over its poster ("0:42",
+// "1:05:03"), so the cost of a tap is visible before anything downloads. Blank
+// when the app reported no duration: no badge is better than a wrong one.
+func vidLen(secs int) string {
+	if secs <= 0 {
+		return ""
+	}
+	if h := secs / 3600; h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, secs/60%60, secs%60)
+	}
+	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
 
 // How much of a body survives into the clipped preview panel, in runes.
@@ -303,35 +320,37 @@ func linkLabel(u string) string {
 // writeJSONItems writes the merged feed as JSON, for API clients.
 func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 	type wireItem struct {
-		App    string      `json:"app"`
-		ID     string      `json:"id"`
-		Title  string      `json:"title"`
-		Body   string      `json:"body,omitempty"`
-		Source string      `json:"source,omitempty"`
-		Author string      `json:"author,omitempty"`
-		URL    string      `json:"url,omitempty"`
-		Age    string      `json:"age,omitempty"`
-		TS     string      `json:"ts,omitempty"`
-		Video  string      `json:"video,omitempty"`
-		Poster string      `json:"poster,omitempty"`
-		Images []string    `json:"images,omitempty"`
-		Quote  *core.Quote `json:"quote,omitempty"`
+		App     string      `json:"app"`
+		ID      string      `json:"id"`
+		Title   string      `json:"title"`
+		Body    string      `json:"body,omitempty"`
+		Source  string      `json:"source,omitempty"`
+		Author  string      `json:"author,omitempty"`
+		URL     string      `json:"url,omitempty"`
+		Age     string      `json:"age,omitempty"`
+		TS      string      `json:"ts,omitempty"`
+		Video   string      `json:"video,omitempty"`
+		Poster  string      `json:"poster,omitempty"`
+		VidSecs int         `json:"vidsecs,omitempty"`
+		Images  []string    `json:"images,omitempty"`
+		Quote   *core.Quote `json:"quote,omitempty"`
 	}
 	out := make([]wireItem, 0, len(items))
 	for _, it := range items {
 		wi := wireItem{
-			App:    it.App,
-			ID:     it.ID,
-			Title:  it.Title,
-			Body:   it.Body,
-			Source: it.Source,
-			Author: it.Author,
-			URL:    it.URL,
-			Age:    it.Age,
-			Video:  it.Video,
-			Poster: it.Poster,
-			Images: it.Images,
-			Quote:  it.Quote,
+			App:     it.App,
+			ID:      it.ID,
+			Title:   it.Title,
+			Body:    it.Body,
+			Source:  it.Source,
+			Author:  it.Author,
+			URL:     it.URL,
+			Age:     it.Age,
+			Video:   it.Video,
+			Poster:  it.Poster,
+			VidSecs: it.VidSecs,
+			Images:  it.Images,
+			Quote:   it.Quote,
 		}
 		if !it.At.IsZero() {
 			wi.TS = it.At.UTC().Format(time.RFC3339)

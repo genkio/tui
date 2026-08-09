@@ -56,7 +56,7 @@ func buildSample() []byte {
 		"extended_entities": map[string]any{"media": []any{map[string]any{
 			"type":            "video",
 			"media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/30/poster.jpg",
-			"video_info": map[string]any{"variants": []any{
+			"video_info": map[string]any{"duration_millis": 12000, "variants": []any{
 				map[string]any{"content_type": "video/mp4", "bitrate": 832000, "url": "https://video.twimg.com/ext_tw_video/30/quoted.mp4"},
 			}},
 		}}},
@@ -143,6 +143,9 @@ func TestParseTimeline(t *testing.T) {
 	}
 	if note.Quoted.VideoPoster != "https://pbs.twimg.com/ext_tw_video_thumb/30/poster.jpg" {
 		t.Errorf("quoted poster = %q", note.Quoted.VideoPoster)
+	}
+	if note.Quoted.VideoSecs != 12 {
+		t.Errorf("quoted video secs = %d, want 12", note.Quoted.VideoSecs)
 	}
 	// The parent keeps its own (absent) media: the quote's video is not adopted.
 	if note.VideoURL != "" {
@@ -532,7 +535,7 @@ func TestParseTimelineVideo(t *testing.T) {
 			map[string]any{
 				"type":            "video",
 				"media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg",
-				"video_info": map[string]any{"variants": []any{
+				"video_info": map[string]any{"duration_millis": 30983, "variants": []any{
 					map[string]any{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/ext_tw_video/50/pu/pl/list.m3u8"},
 					map[string]any{"content_type": "video/mp4", "bitrate": 632000, "url": "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/320x568/low.mp4"},
 					map[string]any{"content_type": "video/mp4", "bitrate": 2176000, "url": "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4"},
@@ -573,8 +576,15 @@ func TestParseTimelineVideo(t *testing.T) {
 	if got, want := tweets[0].VideoPoster, "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg"; got != want {
 		t.Errorf("video poster = %q, want %q", got, want)
 	}
+	if got, want := tweets[0].VideoSecs, 31; got != want {
+		t.Errorf("video secs = %d, want %d (30983ms rounded)", got, want)
+	}
 	if got, want := tweets[1].VideoURL, "https://video.twimg.com/tweet_video/51.mp4"; got != want {
 		t.Errorf("gif url = %q, want %q (bitrate-0 variant still picked)", got, want)
+	}
+	// No duration_millis on the GIF: length unknown rather than zero-length.
+	if got := tweets[1].VideoSecs; got != 0 {
+		t.Errorf("gif secs = %d, want 0 when x reports no duration", got)
 	}
 	if tweets[2].VideoURL != "" || tweets[2].VideoPoster != "" {
 		t.Errorf("plain tweet video = %q/%q, want empty", tweets[2].VideoURL, tweets[2].VideoPoster)

@@ -14,32 +14,34 @@ import (
 // identifies it across apps, since ids collide between services (a numeric
 // inoreader id and an x tweet id).
 type Item struct {
-	App    string
-	ID     string
-	Title  string
-	Body   string
-	Source string // @handle for x; a feed title in the readers
-	Author string
-	URL    string
-	Age    string
-	At     time.Time // publish time for the merged sort; zero sinks to the bottom
-	Video  string    // direct mp4 of an attached video, when the app provides one
-	Poster string    // still frame shown before Video plays
-	Images []string  // attached still images; the web card reveals them on demand
-	Quote  *Quote    // the post this one embeds (an x quote), if any
+	App     string
+	ID      string
+	Title   string
+	Body    string
+	Source  string // @handle for x; a feed title in the readers
+	Author  string
+	URL     string
+	Age     string
+	At      time.Time // publish time for the merged sort; zero sinks to the bottom
+	Video   string    // direct mp4 of an attached video, when the app provides one
+	Poster  string    // still frame shown before Video plays
+	VidSecs int       // Video's length in seconds; 0 when the app reported none
+	Images  []string  // attached still images; the web card reveals them on demand
+	Quote   *Quote    // the post this one embeds (an x quote), if any
 }
 
 // Quote is the post an item embeds. It stays structured rather than folded into
 // Body so the web page can draw it as a nested card; the terminal feed flattens
 // it back to text with Inline.
 type Quote struct {
-	Source string   `json:"source,omitempty"` // @handle
-	Author string   `json:"author,omitempty"` // display name
-	Text   string   `json:"text,omitempty"`
-	URL    string   `json:"url,omitempty"`
-	Video  string   `json:"video,omitempty"`
-	Poster string   `json:"poster,omitempty"`
-	Images []string `json:"images,omitempty"`
+	Source  string   `json:"source,omitempty"` // @handle
+	Author  string   `json:"author,omitempty"` // display name
+	Text    string   `json:"text,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	Video   string   `json:"video,omitempty"`
+	Poster  string   `json:"poster,omitempty"`
+	VidSecs int      `json:"vidsecs,omitempty"`
+	Images  []string `json:"images,omitempty"`
 }
 
 // Inline renders the quote as plain text, for renderers that draw a single body
@@ -61,19 +63,20 @@ func Key(app, id string) string { return app + "\x00" + id }
 // Wire mirrors the JSON an app prints for --json; the launcher parses it back
 // into Items when it aggregates a plugin's output.
 type Wire struct {
-	App    string   `json:"app"`
-	ID     string   `json:"id"`
-	Title  string   `json:"title"`
-	Body   string   `json:"body,omitempty"`
-	Source string   `json:"source,omitempty"`
-	Author string   `json:"author,omitempty"`
-	URL    string   `json:"url,omitempty"`
-	Age    string   `json:"age,omitempty"`
-	TS     string   `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
-	Video  string   `json:"video,omitempty"`
-	Poster string   `json:"poster,omitempty"`
-	Images []string `json:"images,omitempty"`
-	Quote  *Quote   `json:"quote,omitempty"`
+	App     string   `json:"app"`
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Body    string   `json:"body,omitempty"`
+	Source  string   `json:"source,omitempty"`
+	Author  string   `json:"author,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	Age     string   `json:"age,omitempty"`
+	TS      string   `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
+	Video   string   `json:"video,omitempty"`
+	Poster  string   `json:"poster,omitempty"`
+	VidSecs int      `json:"vidsecs,omitempty"`
+	Images  []string `json:"images,omitempty"`
+	Quote   *Quote   `json:"quote,omitempty"`
 }
 
 // Item converts a wire item, deriving the sort time from the absolute ts when
@@ -81,19 +84,20 @@ type Wire struct {
 // whole fetch shares one clock and tests are deterministic.
 func (w Wire) Item(now time.Time) Item {
 	return Item{
-		App:    w.App,
-		ID:     w.ID,
-		Title:  w.Title,
-		Body:   w.Body,
-		Source: w.Source,
-		Author: w.Author,
-		URL:    w.URL,
-		Age:    w.Age,
-		At:     SortTime(w.TS, w.Age, now),
-		Video:  w.Video,
-		Poster: w.Poster,
-		Images: w.Images,
-		Quote:  w.Quote,
+		App:     w.App,
+		ID:      w.ID,
+		Title:   w.Title,
+		Body:    w.Body,
+		Source:  w.Source,
+		Author:  w.Author,
+		URL:     w.URL,
+		Age:     w.Age,
+		At:      SortTime(w.TS, w.Age, now),
+		Video:   w.Video,
+		Poster:  w.Poster,
+		VidSecs: w.VidSecs,
+		Images:  w.Images,
+		Quote:   w.Quote,
 	}
 }
 
@@ -101,18 +105,19 @@ func (w Wire) Item(now time.Time) Item {
 // page's saved list) and read it again later.
 func (it Item) Wire() Wire {
 	w := Wire{
-		App:    it.App,
-		ID:     it.ID,
-		Title:  it.Title,
-		Body:   it.Body,
-		Source: it.Source,
-		Author: it.Author,
-		URL:    it.URL,
-		Age:    it.Age,
-		Video:  it.Video,
-		Poster: it.Poster,
-		Images: it.Images,
-		Quote:  it.Quote,
+		App:     it.App,
+		ID:      it.ID,
+		Title:   it.Title,
+		Body:    it.Body,
+		Source:  it.Source,
+		Author:  it.Author,
+		URL:     it.URL,
+		Age:     it.Age,
+		Video:   it.Video,
+		Poster:  it.Poster,
+		VidSecs: it.VidSecs,
+		Images:  it.Images,
+		Quote:   it.Quote,
 	}
 	if !it.At.IsZero() {
 		w.TS = it.At.UTC().Format(time.RFC3339)

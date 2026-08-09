@@ -230,8 +230,9 @@ func TestRenderCardVideo(t *testing.T) {
 	it := core.Item{
 		App: "x", ID: "50", Title: "watch this", Body: "watch this",
 		Source: "@vera", URL: "https://x.com/vera/status/50",
-		Video:  "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4",
-		Poster: "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg",
+		Video:   "https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4",
+		Poster:  "https://pbs.twimg.com/ext_tw_video_thumb/50/pu/img/poster.jpg",
+		VidSecs: 95,
 	}
 	out := renderCard(t, it)
 	if !strings.Contains(out, `<video class="vid"`) || !strings.Contains(out, `src="https://video.twimg.com/ext_tw_video/50/pu/vid/avc1/720x1280/high.mp4"`) {
@@ -257,6 +258,45 @@ func TestRenderCardVideo(t *testing.T) {
 	out = renderCard(t, it)
 	if strings.Contains(out, "<video") || strings.Contains(out, `class="speed"`) || strings.Contains(out, "/dl?") {
 		t.Fatal("player and controls should be absent without a video")
+	}
+}
+
+func TestRenderCardVideoLength(t *testing.T) {
+	it := core.Item{
+		App: "x", ID: "50", Title: "watch this", Body: "watch this", Source: "@vera",
+		Video:   "https://video.twimg.com/ext_tw_video/50/high.mp4",
+		Poster:  "https://pbs.twimg.com/ext_tw_video_thumb/50/poster.jpg",
+		VidSecs: 95,
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `<span class="vlen">1:35</span>`) {
+		t.Fatalf("expected a length badge over the poster: %s", out)
+	}
+	// A quoted post's player carries its own badge.
+	it.Quote = &core.Quote{Source: "@eve", Video: "https://video.twimg.com/ext_tw_video/30/q.mp4", VidSecs: 12}
+	if out := renderCard(t, it); !strings.Contains(out, `<span class="vlen">0:12</span>`) {
+		t.Errorf("expected a badge on the quoted video too: %s", out)
+	}
+
+	// Unknown length -> no badge at all, rather than a wrong 0:00.
+	it.Quote, it.VidSecs = nil, 0
+	if out := renderCard(t, it); strings.Contains(out, "vlen") {
+		t.Errorf("no duration should mean no badge: %s", out)
+	}
+}
+
+func TestVidLen(t *testing.T) {
+	cases := []struct {
+		secs int
+		want string
+	}{
+		{0, ""}, {-3, ""}, {7, "0:07"}, {60, "1:00"}, {95, "1:35"},
+		{600, "10:00"}, {3600, "1:00:00"}, {3903, "1:05:03"},
+	}
+	for _, c := range cases {
+		if got := vidLen(c.secs); got != c.want {
+			t.Errorf("vidLen(%d) = %q, want %q", c.secs, got, c.want)
+		}
 	}
 }
 

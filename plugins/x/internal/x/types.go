@@ -22,6 +22,7 @@ type Tweet struct {
 	URL         string       // https://x.com/<handle>/status/<id>
 	VideoURL    string       // best mp4 of the attached video or GIF; "" when none
 	VideoPoster string       // still frame shown before the video plays
+	VideoSecs   int          // clip length in seconds; 0 when x reported none
 	Images      []string     // attached still photos, in x's order
 	Article     *Article     // x's long-form post, when this is one
 }
@@ -43,5 +44,6 @@ type QuotedTweet struct {
 	URL         string // https://x.com/<handle>/status/<id>
 	VideoURL    string // best mp4 of the quoted post's video or GIF; "" when none
 	VideoPoster string
+	VideoSecs   int
 	Images      []string
 }

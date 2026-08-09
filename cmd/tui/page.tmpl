@@ -63,7 +63,8 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .imgbox img{display:block;width:100%;border-radius:12px;background:var(--line)}
 .img[data-on="1"]{color:var(--accent)}
 .quote .body{margin:6px 0 0;font-size:14px;color:var(--muted)}
-.quote .vid{max-height:50vh;margin-bottom:0}
+.quote .vidbox{margin-bottom:0}
+.quote .vid{max-height:50vh}
 .quote .open{font-size:13px;min-height:32px}
 .card.read{opacity:.45}
 .footer{display:flex;align-items:center;gap:18px;margin-top:12px}
@@ -134,7 +135,15 @@ video.ffs{object-fit:cover !important}
   font:24px/44px -apple-system,system-ui,sans-serif;text-align:center;cursor:pointer;
   z-index:2147483647;transform:rotate(-90deg);-webkit-tap-highlight-color:transparent;
 }
-.vid{display:block;width:100%;max-height:70vh;border-radius:12px;margin:10px 0 2px;background:#000}
+.vidbox{position:relative;margin:10px 0 2px}
+.vid{display:block;width:100%;max-height:70vh;border-radius:12px;background:#000}
+/* how long the clip runs, over the poster: enough to judge a tap before any of
+   it downloads (preload="none" means nothing has yet) */
+.vlen{
+  position:absolute;top:8px;left:8px;pointer-events:none;
+  background:rgba(0,0,0,.72);color:#fff;font-size:12px;font-weight:700;
+  padding:2px 7px;border-radius:6px;font-variant-numeric:tabular-nums;
+}
 </style>
 </head><body>
 <div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" hidden></div>
@@ -158,7 +167,7 @@ video.ffs{object-fit:cover !important}
     <p class="dlg-hint">Everything's clear. Want to keep going on x's For You timeline?</p>
   </div>
   <div class="dlg-actions">
-    <button id="forYouGo" class="dlg-go" type="button">Continue on For You</button>
+    <button id="forYouGo" class="dlg-go" type="button">For You</button>
     <button id="forYouNo" class="dlg-no" type="button">Not now</button>
   </div>
 </dialog>
@@ -507,4 +516,4 @@ document.getElementById('forYouGo').addEventListener('click', function(){ locati
 document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}

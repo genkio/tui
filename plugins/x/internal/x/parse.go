@@ -141,7 +141,7 @@ func (t *tweetResult) toTweet() Tweet {
 		tw.URL = "https://x.com/" + handle + "/status/" + src.RestID
 	}
 	tw.Quoted = src.quoted()
-	tw.VideoURL, tw.VideoPoster = lg.video()
+	tw.VideoURL, tw.VideoPoster, tw.VideoSecs = lg.video()
 	tw.Images = lg.photos()
 	tw.Article = src.article()
 	return tw
@@ -231,7 +231,7 @@ func (t *tweetResult) quoted() *QuotedTweet {
 	if handle != "" && q.RestID != "" {
 		qt.URL = "https://x.com/" + handle + "/status/" + q.RestID
 	}
-	qt.VideoURL, qt.VideoPoster = q.Legacy.video()
+	qt.VideoURL, qt.VideoPoster, qt.VideoSecs = q.Legacy.video()
 	qt.Images = q.Legacy.photos()
 	return qt
 }
@@ -249,8 +249,9 @@ func (lg *legacyTweet) photos() []string {
 }
 
 // video returns the best mp4 (highest bitrate) of the first attached video or
-// animated GIF, plus its poster frame; empty strings when the post has none.
-func (lg *legacyTweet) video() (url, poster string) {
+// animated GIF, its poster frame, and its length rounded to whole seconds; zero
+// values when the post has none.
+func (lg *legacyTweet) video() (url, poster string, secs int) {
 	for _, m := range lg.ExtendedEntities.Media {
 		if m.VideoInfo == nil || (m.Type != "video" && m.Type != "animated_gif") {
 			continue
@@ -262,10 +263,10 @@ func (lg *legacyTweet) video() (url, poster string) {
 			}
 		}
 		if url != "" {
-			return url, m.MediaURLHTTPS
+			return url, m.MediaURLHTTPS, (m.VideoInfo.DurationMillis + 500) / 1000
 		}
 	}
-	return "", ""
+	return "", "", 0
 }
 
 // reTrailingTco strips the t.co link x.com appends for attached media or a
@@ -449,7 +450,8 @@ type mediaEntity struct {
 	Type          string `json:"type"` // photo, video, animated_gif
 	MediaURLHTTPS string `json:"media_url_https"`
 	VideoInfo     *struct {
-		Variants []struct {
+		DurationMillis int `json:"duration_millis"` // absent on some GIF entities
+		Variants       []struct {
 			Bitrate     int    `json:"bitrate"`
 			ContentType string `json:"content_type"`
 			URL         string `json:"url"`
