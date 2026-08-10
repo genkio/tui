@@ -13,7 +13,7 @@ import (
 
 // renderPage / renderCard execute the embedded page template the way handleAll
 // does, so the tests cover the real markup.
-func renderPage(t *testing.T, items []core.Item, apps, failed []string, asc bool, xTab, warn string) string {
+func renderPage(t *testing.T, items []core.Item, apps, failed []string, xTab, warn string) string {
 	t.Helper()
 	loader, err := newPageLoader("")
 	if err != nil {
@@ -24,7 +24,7 @@ func renderPage(t *testing.T, items []core.Item, apps, failed []string, asc bool
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	in := pageInput{items: items, apps: apps, failed: failed, now: time.Now(), asc: asc, xTab: xTab, warn: warn}
+	in := pageInput{items: items, apps: apps, failed: failed, now: time.Now(), xTab: xTab, warn: warn}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,26 @@ func renderSavedPage(t *testing.T, store *savedStore) string {
 	}
 	now := time.Now()
 	var b strings.Builder
-	in := pageInput{items: store.list(now), now: now, asc: true, saved: store, savedView: true}
+	in := pageInput{items: store.list(now), now: now, saved: store, savedView: true}
+	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// renderSwipePage renders the feed the way --swipe serves it.
+func renderSwipePage(t *testing.T, items []core.Item) string {
+	t.Helper()
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	in := pageInput{items: items, apps: []string{"x", "reddit"}, now: time.Now(), xTab: "following", swipe: true}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +81,7 @@ func renderCard(t *testing.T, it core.Item) string {
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	if err := tmpl.ExecuteTemplate(&b, "card", buildCard(it, false)); err != nil {
+	if err := tmpl.ExecuteTemplate(&b, "card", buildCard(it, false, listClips)); err != nil {
 		t.Fatal(err)
 	}
 	return b.String()
@@ -178,6 +197,62 @@ func TestCountWords(t *testing.T) {
 	}
 }
 
+// Swipe mode deals one card at a time, so a body that the feed would have
+// clipped often fits whole — but the cap still exists.
+func TestSwipeClipsLater(t *testing.T) {
+	body := strings.Repeat("word ", 60) // 300 runes: past the feed's clip, inside the deck's
+	if !strings.Contains(renderCard(t, core.Item{App: "reddit", ID: "1", Title: "T", Body: body}), `class="rest"`) {
+		t.Fatal("the feed should still clip a 300-rune body")
+	}
+	deck := buildCard(core.Item{App: "reddit", ID: "1", Title: "T", Body: body}, false, swipeClips)
+	if strings.Contains(string(deck.PreviewBody), `class="rest"`) {
+		t.Errorf("a swiped card has room for this whole body: %s", deck.PreviewBody)
+	}
+	if deck.Expand {
+		t.Error("nothing is clipped, so the card needs no expand control")
+	}
+	long := buildCard(core.Item{App: "reddit", ID: "2", Title: "T", Body: strings.Repeat("word ", 200)}, false, swipeClips)
+	if !strings.Contains(string(long.PreviewBody), `class="rest"`) {
+		t.Errorf("1000 runes is past even the deck's cap: %s", long.PreviewBody)
+	}
+}
+
+// The deck wraps the cards and keeps the footer actions; the feed does neither.
+func TestRenderPageSwipeDeck(t *testing.T) {
+	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}
+	deck := renderSwipePage(t, items)
+	if !strings.Contains(deck, `<div class="deckwrap"><div class="deck" id="deck">`) {
+		t.Fatalf("expected the cards wrapped in a centered deck: %s", deck)
+	}
+	if !strings.Contains(deck, `data-swipe="true"`) {
+		t.Error("the page should tell its script it is in swipe mode")
+	}
+	if strings.Count(deck, `class="share"`) != 2 {
+		t.Error("every card keeps its footer actions in the deck")
+	}
+	if !strings.Contains(deck, `class="markall fab"`) {
+		t.Errorf("mark-all-read should float in a deck: %s", deck)
+	}
+	// The end of the deck still offers a way back into it.
+	if !strings.Contains(deck, `id="deckEnd"`) || !strings.Contains(deck, `id="deckBack"`) {
+		t.Errorf("expected an end state with a way back: %s", deck)
+	}
+	feed := renderPage(t, items, []string{"x", "reddit"}, nil, "following", "")
+	if strings.Contains(feed, `class="deck"`) || strings.Contains(feed, `id="deckEnd"`) {
+		t.Errorf("the scrolling feed should render no deck: %s", feed)
+	}
+	if !strings.Contains(feed, `data-swipe="false"`) {
+		t.Errorf("the feed should tell its script swipe mode is off: %s", feed)
+	}
+}
+
+func TestSavedViewNeverSwipes(t *testing.T) {
+	in := pageInput{items: []core.Item{{App: "x", ID: "1", Title: "a"}}, now: time.Now(), savedView: true, swipe: true}
+	if buildPageData(in).Swipe {
+		t.Error("the saved list is for re-reading, so it stays a scrolling list")
+	}
+}
+
 func TestRenderCardShareButton(t *testing.T) {
 	it := core.Item{App: "x", ID: "1", Title: "hello", Body: "hello", Source: "@a", URL: "https://x.com/a/status/1", Age: "1m"}
 	if out := renderCard(t, it); !strings.Contains(out, `class="share"`) {
@@ -186,11 +261,11 @@ func TestRenderCardShareButton(t *testing.T) {
 }
 
 func TestRenderPageMarkAll(t *testing.T) {
-	with := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, true, "following", "")
+	with := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, "following", "")
 	if !strings.Contains(with, "mark all read") {
 		t.Fatal("expected mark-all-read button when there are items")
 	}
-	without := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
+	without := renderPage(t, nil, []string{"x"}, nil, "following", "")
 	if strings.Contains(without, "mark all read") {
 		t.Fatal("mark-all-read should be absent when the feed is empty")
 	}
@@ -201,12 +276,12 @@ func TestRenderPageMarkAll(t *testing.T) {
 }
 
 func TestRenderPageWarn(t *testing.T) {
-	p := renderPage(t, nil, []string{"inoreader"}, []string{"inoreader"}, true, "following", "Inoreader session is stale — re-run `tui inoreader --auth`.")
+	p := renderPage(t, nil, []string{"inoreader"}, []string{"inoreader"}, "following", "Inoreader session is stale — re-run `tui inoreader --auth`.")
 	if !strings.Contains(p, "session is stale") || !strings.Contains(p, `class="warn"`) {
 		t.Fatalf("expected a warn banner: %s", p)
 	}
 	// No warning message → no banner.
-	p2 := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
+	p2 := renderPage(t, nil, []string{"x"}, nil, "following", "")
 	if strings.Contains(p2, `class="warn"`) {
 		t.Fatal("warn banner should be absent when there's no warning")
 	}
@@ -239,16 +314,16 @@ func TestLinkify(t *testing.T) {
 
 func TestRenderPageEmptyAndNote(t *testing.T) {
 	// No authed apps: the page tells the user to log in.
-	p := renderPage(t, nil, nil, nil, true, "following", "")
+	p := renderPage(t, nil, nil, nil, "following", "")
 	if !strings.Contains(p, "No reader app is logged in") {
 		t.Fatal("expected login note, got: " + p)
 	}
-	// Oldest-first is the default: the sortbar highlights 'oldest'.
-	if !strings.Contains(p, "sortbar") || !strings.Contains(p, ">oldest</span>") {
-		t.Fatal("expected an oldest-first default sortbar: " + p)
+	// The sort toggle is gone; the order is the server's business.
+	if strings.Contains(p, "sortbar") {
+		t.Fatal("the sort row should not be rendered: " + p)
 	}
 	// Authed but zero items: inbox zero.
-	p2 := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
+	p2 := renderPage(t, nil, []string{"x"}, nil, "following", "")
 	if !strings.Contains(p2, "Inbox zero") {
 		t.Fatal("expected inbox-zero message")
 	}
@@ -257,7 +332,7 @@ func TestRenderPageEmptyAndNote(t *testing.T) {
 func TestRenderPageHealthDots(t *testing.T) {
 	// Every logged-in service gets a labeled dot: green when it loaded, red
 	// when its fetch failed. The dots replace the refresh button.
-	p := renderPage(t, nil, []string{"x", "reddit"}, []string{"reddit"}, true, "following", "")
+	p := renderPage(t, nil, []string{"x", "reddit"}, []string{"reddit"}, "following", "")
 	if !strings.Contains(p, `title="x: live"`) || !strings.Contains(p, `hdot ok`) {
 		t.Fatal("expected a green dot for the healthy service")
 	}
@@ -268,7 +343,7 @@ func TestRenderPageHealthDots(t *testing.T) {
 		t.Fatal("refresh button should be replaced by the health dots")
 	}
 	// No logged-in services: no health strip at all.
-	if strings.Contains(renderPage(t, nil, nil, nil, true, "following", ""), `class="health"`) {
+	if strings.Contains(renderPage(t, nil, nil, nil, "following", ""), `class="health"`) {
 		t.Fatal("health strip should be absent with no logged-in services")
 	}
 }
@@ -662,6 +737,35 @@ func TestSavedStoreRoundTrip(t *testing.T) {
 	}
 }
 
+// The saved list is ordered by when you saved things, newest first — the
+// publish dates are all over the place and are not what you came back for.
+func TestSavedListOrderedBySaveTime(t *testing.T) {
+	s := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	// Saved oldest-first, but published newest-first: the two orders disagree.
+	for i, id := range []string{"first", "second", "third"} {
+		it := core.Item{App: "x", ID: id, Title: id, At: base.Add(time.Duration(-i) * time.Hour)}
+		if err := s.add(it, base.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	for _, it := range s.list(base.Add(time.Hour)) {
+		got = append(got, it.ID)
+	}
+	want := []string{"third", "second", "first"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("saved order = %v, want most recently saved first %v", got, want)
+	}
+	// Re-saving an item moves it back to the top.
+	if err := s.add(core.Item{App: "x", ID: "first", Title: "first"}, base.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if top := s.list(base.Add(2 * time.Hour))[0].ID; top != "first" {
+		t.Errorf("re-saved item should lead the list, got %q", top)
+	}
+}
+
 func TestSavedPageAndButton(t *testing.T) {
 	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
 	empty := renderSavedPage(t, store)
@@ -689,7 +793,7 @@ func TestSavedPageAndButton(t *testing.T) {
 	}
 
 	// The feed view links to the saved list and shows its count.
-	feed := renderPage(t, nil, []string{"x"}, nil, true, "following", "")
+	feed := renderPage(t, nil, []string{"x"}, nil, "following", "")
 	if !strings.Contains(feed, `href="/?saved=1"`) {
 		t.Fatalf("expected a saved link in the header: %s", feed)
 	}
@@ -699,7 +803,7 @@ func TestSavedPageAndButton(t *testing.T) {
 }
 
 func TestHealthLabelsAreShort(t *testing.T) {
-	p := renderPage(t, nil, []string{"inoreader", "reddit", "douban", "folo"}, nil, true, "following", "")
+	p := renderPage(t, nil, []string{"inoreader", "reddit", "douban", "folo"}, nil, "following", "")
 	for _, want := range []string{">in<", ">rd<", ">db<", ">fo<"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("expected two-letter health label %q: %s", want, p)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -93,13 +94,21 @@ func (s *savedStore) remove(app, id string) error {
 	return s.save()
 }
 
-// list returns the saved items as feed items, recomputing each one's relative
-// age from its publish time so a post saved last week doesn't still read "2h".
+// list returns the saved items as feed items, most recently saved first —
+// the order you starred them in, not the order they were published, because
+// that is the order you come back looking for them. Each one's relative age is
+// recomputed from its publish time so a post saved last week doesn't still
+// read "2h".
 func (s *savedStore) list(now time.Time) []core.Item {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	items := make([]core.Item, 0, len(s.items))
-	for _, e := range s.items {
+	byRecent := make([]savedItem, len(s.items))
+	copy(byRecent, s.items)
+	// RFC3339 in UTC, so lexical order is chronological; a stable sort leaves
+	// entries with no timestamp in their existing (newest-first) order.
+	sort.SliceStable(byRecent, func(i, j int) bool { return byRecent[i].SavedAt > byRecent[j].SavedAt })
+	items := make([]core.Item, 0, len(byRecent))
+	for _, e := range byRecent {
 		it := e.Wire.Item(now)
 		if !it.At.IsZero() {
 			it.Age = humanAgo(it.At)

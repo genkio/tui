@@ -672,6 +672,7 @@ func main() {
 	web := flag.Bool("web", false, "run the web UI (all timeline) instead of the terminal app")
 	webAddr := flag.String("web-addr", "0.0.0.0:8080", "address:port to bind the web UI to")
 	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild) and cache fetched items briefly")
+	swipe := flag.Bool("swipe", false, "with --web: swipe through one card at a time (left/right marks read, up saves) instead of the scrolling feed")
 	stateDir := flag.String("state-dir", os.Getenv("TUI_STATE_DIR"), "single dir for credentials, read state, and configs (e.g. ~/Dropbox/tui to sync between devices); env TUI_STATE_DIR")
 	flag.Parse()
 
@@ -697,7 +698,7 @@ func main() {
 		os.Exit(1)
 	}
 	if *web {
-		if err := runWeb(root, *webAddr, *dev); err != nil {
+		if err := runWeb(root, *webAddr, *dev, *swipe); err != nil {
 			fmt.Fprintln(os.Stderr, "tui --web: "+err.Error())
 			os.Exit(1)
 		}

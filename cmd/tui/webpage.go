@@ -59,21 +59,21 @@ type pageInput struct {
 	apps      []string
 	failed    []string
 	now       time.Time
-	asc       bool
 	xTab      string
 	warn      string
 	saved     *savedStore
 	savedView bool
+	swipe     bool // --swipe: one card at a time instead of the scrolling feed
 }
 
 type pageData struct {
 	Unread      int  // shown only when HasApps; JS decrements it in place
 	Saved       int  // size of the saved list, in the header and its link
 	SavedView   bool // rendering the saved list rather than the live feed
+	Swipe       bool // deck of one card at a time, swiped through
 	XAuth       bool
 	XTab        string
 	Health      []healthEntry
-	Asc         bool
 	Warn        string
 	HasApps     bool
 	OfferForYou bool
@@ -169,12 +169,19 @@ func buildPageData(in pageInput) pageData {
 		health = append(health, h)
 	}
 
+	// The saved list is for re-reading, not triage: no deck there, whatever the
+	// server was started with.
+	swipe := in.swipe && !in.savedView
+	cl := listClips
+	if swipe {
+		cl = swipeClips
+	}
 	cards := make([]cardData, 0, len(in.items))
 	for _, it := range in.items {
 		// In the saved view every card is saved by definition; in the feed ask
 		// the store.
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
-		cards = append(cards, buildCard(it, starred))
+		cards = append(cards, buildCard(it, starred, cl))
 	}
 
 	savedCount := 0
@@ -186,10 +193,10 @@ func buildPageData(in pageInput) pageData {
 		Unread:    len(in.items),
 		Saved:     savedCount,
 		SavedView: in.savedView,
+		Swipe:     swipe,
 		XAuth:     xAuth,
 		XTab:      in.xTab,
 		Health:    health,
-		Asc:       in.asc,
 		Warn:      in.warn,
 		HasApps:   len(in.apps) > 0,
 		// With x authed on Following and nothing left to read, give a direct
@@ -199,7 +206,7 @@ func buildPageData(in pageInput) pageData {
 	}
 }
 
-func buildCard(it core.Item, starred bool) cardData {
+func buildCard(it core.Item, starred bool, cl clips) cardData {
 	chip := appLabels[it.App]
 	if chip == "" {
 		chip = it.App
@@ -238,21 +245,21 @@ func buildCard(it core.Item, starred bool) cardData {
 	// Two content panels: a clipped preview and a full version the footer's
 	// expand toggle reveals. linkify escapes, so the HTML is safe as-is.
 	if body != "" {
-		c.PreviewBody = template.HTML(preview(body, bodyClip))
+		c.PreviewBody = template.HTML(preview(body, cl.body))
 		c.FullBody = template.HTML(linkify(body))
 	}
 	if it.Quote != nil {
-		c.Quote = buildQuote(*it.Quote)
+		c.Quote = buildQuote(*it.Quote, cl.quote)
 	}
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
-	c.Expand = needsExpand(body, title) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
+	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	return c
 }
 
 // buildQuote shapes an embedded post into the nested card, clipped tighter than
 // the parent so a long quote can't bury the post that quotes it.
-func buildQuote(q core.Quote) *quoteData {
+func buildQuote(q core.Quote, clip int) *quoteData {
 	author := q.Author
 	if author == q.Source {
 		author = ""
@@ -267,7 +274,7 @@ func buildQuote(q core.Quote) *quoteData {
 		Images: cardImages(q.Images),
 	}
 	if q.Text != "" {
-		d.PreviewBody = template.HTML(preview(q.Text, quoteClip))
+		d.PreviewBody = template.HTML(preview(q.Text, clip))
 		d.FullBody = template.HTML(linkify(q.Text))
 	}
 	return d
@@ -286,15 +293,23 @@ func vidLen(secs int) string {
 	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 }
 
-// How much of a body survives into the clipped preview panel, in runes.
-const (
-	bodyClip  = 220
-	quoteClip = 140
+// clips is how much of a body and of a quoted post survive into the clipped
+// preview panel, in runes.
+type clips struct{ body, quote int }
+
+var (
+	listClips = clips{body: 220, quote: 140}
+	// A swiped card owns the whole screen, so more text fits before anything
+	// has to be expanded — but only about a screenful. The cap counts runes,
+	// and CJK sets about twice as many lines per rune as Latin does, so it is
+	// kept low enough that a dense Chinese post still leaves the footer above
+	// the fold.
+	swipeClips = clips{body: 420, quote: 180}
 )
 
 // needsExpand reports whether anything is clipped, i.e. there is more to reveal.
-func needsExpand(body, title string) bool {
-	return len([]rune(body)) > bodyClip || len([]rune(title)) > bodyClip
+func needsExpand(body, title string, clip int) bool {
+	return len([]rune(body)) > clip || len([]rune(title)) > clip
 }
 
 // preview renders the clipped panel: the first n runes, an ellipsis, and how

@@ -58,7 +58,9 @@ var healthLabels = map[string]string{
 // consistent between the TUI and the web page. Only the all view is exposed.
 // dev turns on the client hot-reload loop: page.tmpl is re-read per request
 // and fetched items are cached briefly so refreshes don't re-scrape services.
-func runWeb(root, addr string, dev bool) error {
+// swipe serves the same feed as a deck of one card at a time instead of a
+// scrolling list.
+func runWeb(root, addr string, dev, swipe bool) error {
 	devPath := ""
 	if dev {
 		devPath = filepath.Join(root, "cmd", "tui", "page.tmpl")
@@ -80,7 +82,7 @@ func runWeb(root, addr string, dev bool) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, saved, rendered)
+		handleAll(w, r, root, loader, cache, saved, rendered, swipe)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -112,7 +114,11 @@ func runWeb(root, addr string, dev bool) error {
 	}
 	defer ln.Close()
 
-	fmt.Printf("tui --web serving the all timeline on %s\n", addr)
+	mode := "scrolling feed"
+	if swipe {
+		mode = "swipe deck"
+	}
+	fmt.Printf("tui --web serving the all timeline (%s) on %s\n", mode, addr)
 	if u := tailscaleURL(host, port); u != "" {
 		fmt.Printf("  tailnet:  %s\n", u)
 	}
@@ -236,7 +242,7 @@ func (c *fetchCache) put(xTab string, now time.Time, items []core.Item, failed [
 // with ?json=1). Default order is oldest-first; ?order=desc flips to newest-first.
 // ?x=foryou serves x's For You timeline instead of the Following default (used
 // only ephemerally; the page resets to following on reload).
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *fetchCache, saved *savedStore, rendered *renderedItems) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *fetchCache, saved *savedStore, rendered *renderedItems, swipe bool) {
 	// In --dev a template typo should show up immediately, not after a full
 	// fetch, so load (and in dev, re-parse) the template first.
 	tmpl, err := loader.load()
@@ -251,14 +257,13 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// The saved view reads straight from the store: no fetch, so it loads
 	// instantly and still works when a service (or the network) is down.
 	if r.URL.Query().Get("saved") == "1" {
-		items := saved.list(now)
-		sortItems(items, asc)
+		items := saved.list(now) // newest save first; publish order is not what you saved for
 		if r.URL.Query().Get("json") == "1" {
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONItems(w, items, nil)
 			return
 		}
-		writePage(w, tmpl, pageInput{items: items, now: now, asc: asc, saved: saved, savedView: true})
+		writePage(w, tmpl, pageInput{items: items, now: now, saved: saved, savedView: true, swipe: swipe})
 		return
 	}
 
@@ -300,7 +305,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	writePage(w, tmpl, pageInput{
 		items: items, apps: apps, failed: failed, now: now,
-		asc: asc, xTab: xTab, warn: warn, saved: saved,
+		xTab: xTab, warn: warn, saved: saved, swipe: swipe,
 	})
 }
 

@@ -136,6 +136,7 @@ triage from your phone or any other device on your Tailscale network:
 ```sh
 tui --web                 # serve the all timeline on 0.0.0.0:8080
 tui --web --web-addr :9000   # custom port
+tui --web --swipe         # one card at a time, swiped through (see below)
 ```
 
 The server binds `0.0.0.0` by default so your other devices reach it, and
@@ -144,9 +145,12 @@ the merged `all` view (no per-app views, no login flow): each logged-in feed
 app's unread items, newest-first. Reading happens by scrolling, like the
 terminal: a card is marked read the moment it scrolls fully off the top of the
 screen and is muted (greyed) in place — it stays in the list so you can see
-what you've read. Each card's footer has a **link icon** that opens the original
-post in a new tab (the only way to leave the page) and a **more/less** toggle
-that expands the full post content for long items. Since scroll-to-read can't
+what you've read. Long posts are clipped, and the ellipsis is followed by a
+**"+N words"** count that expands the rest when tapped (a **less** button in
+the footer collapses it again). Each card's footer has a **link icon** that
+opens the original post in a new tab (the only way to leave the page) and a
+**share** button that hands the post to your phone's share sheet (falling back
+to copying it where the browser has no share API). Since scroll-to-read can't
 reach the last few cards, a **mark all read** button sits at the end of the
 feed to clear the tail in one tap. Once everything is read, if x is logged in
 and on its Following timeline, a dialog offers to **continue on x For You**;
@@ -154,13 +158,35 @@ confirming switches x to For You (ephemerally — reloading the page returns to
 the Following default). It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
 the TUI and the page — mark something read and it's read in the app, and vice
-versa. Items are sorted **oldest-first by default** (triage in
-the order they arrived), with a sort toggle to flip to newest-first. The page
-uses the Inter webfont (with system fallbacks) for a polished read.
+versa. Items are sorted **oldest-first** (triage in the order they arrived;
+`?order=desc` flips it), and the saved list is ordered by **when you saved
+things, newest first**. The page uses the Inter webfont (with system
+fallbacks) for a polished read.
 
 The page is server-rendered and responsive (cards stack full-width, tap-sized
 targets, follows your phone's light/dark theme). `?json=1` returns the same feed
 as JSON for scripts. Runs indefinitely until you Ctrl-C.
+
+### Swipe mode
+
+`tui --web --swipe` serves the same feed as a deck instead of a scroll: one
+card at a time, centered on the screen, with the rest stacked behind it.
+
+**Swipe left** to mark the card read and deal the next one; **swipe right** to
+walk back through what you've already dealt, one card per pull, as far back as
+the first one (they stay read — it's a second look, not an undo). **→** and
+**←** do the same with a keyboard, and a mouse can drag. Only sideways is a
+gesture: up and down scroll the page as usual, and everything else is a footer
+button, saving included. At the end of the deck a **back to the last one**
+link picks the walk back up.
+
+Cards get a longer text budget here (one card owns the screen) but stay clipped
+to roughly a screenful, so the footer actions — open, save, share, image
+toggle, video controls, the video **keep** download — are always in reach.
+Anything past the clip sits behind the same "+N words" toggle. **Mark all
+read** floats as a pill in the bottom-right corner. The saved list is for
+re-reading rather than triage, so it stays a scrolling list even in swipe
+mode.
 
 ### macOS firewall vs. source builds
 

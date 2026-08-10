@@ -31,10 +31,6 @@ header{
 }
 h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sortbar{display:flex;align-items:center;gap:12px;font-size:13px;margin:-4px 0 12px;color:var(--muted)}
-.sortbar .slabel{opacity:.7}
-.sortbar a{color:var(--muted);text-decoration:none}
-.sortbar .on{font-weight:700;color:var(--fg)}
 .warn{background:rgba(214,69,69,.12);border:1px solid rgba(214,69,69,.5);color:var(--fg);border-radius:10px;padding:10px 12px;margin:-4px 0 12px;font-size:14px}
 .health{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted);white-space:nowrap}
 .svc{display:inline-flex;align-items:center;gap:5px}
@@ -79,6 +75,13 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px;
 }
 .markall:disabled{opacity:.5;cursor:default}
+/* in a deck there is no end of the feed to park this at, so it floats */
+.markall.fab{
+  position:fixed;z-index:20;width:auto;margin:0;
+  right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
+  padding:0 16px;min-height:42px;border-radius:999px;border:1px solid var(--line);
+  font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,.3);
+}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
 .speed,.mute,.rot,.save,.img,.share{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
@@ -96,6 +99,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .dlg-no{border:1px solid var(--line);background:transparent;color:var(--fg)}
 .note{padding:16px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:15px}
 .note a{color:var(--accent);font-weight:600;text-decoration:none}
+.linkbtn{padding:0;border:0;background:none;font:inherit;font-weight:600;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .note.offer{margin-top:10px}
 .toast{
   position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
@@ -140,6 +144,37 @@ video.ffs{object-fit:cover !important}
   font:24px/44px -apple-system,system-ui,sans-serif;text-align:center;cursor:pointer;
   z-index:2147483647;transform:rotate(-90deg);-webkit-tap-highlight-color:transparent;
 }
+/* Swipe mode: the feed becomes a deck. One card is on screen at a time, sized
+   to the viewport and scrolling inside its own frame, with two empty offset
+   cards drawn behind it so the stack reads as "more where that came from". */
+/* the deck sits in the middle of what's left of the screen; auto margins
+   rather than align-items so a card taller than the space still scrolls to
+   its own top instead of being clipped there */
+.deckwrap{display:flex;min-height:calc(100dvh - 150px)}
+.deckwrap.hid{display:none}
+.deckwrap .deck{width:100%;margin:auto 0}
+.deck{position:relative}
+.deck::before,.deck::after{
+  content:'';position:absolute;left:0;right:0;top:0;bottom:0;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;z-index:-1;
+}
+.deck::before{transform:scale(.97) translateY(10px)}
+.deck::after{transform:scale(.94) translateY(20px)}
+.deck.last::before,.deck.last::after,.deck.last2::after{display:none}
+.deck .card{
+  margin-bottom:0;
+  touch-action:pan-y; /* sideways is ours, up and down stays the browser's scroll */
+  -webkit-tap-highlight-color:transparent;
+}
+.deck .card.fly{transition:transform .26s ease-out, opacity .26s ease-out}
+.deck .card.read{opacity:1} /* a swiped card leaves the screen; no need to grey it */
+.dragging{user-select:none;-webkit-user-select:none}
+.stamp{
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:3;pointer-events:none;
+  padding:4px 12px;border-radius:999px;border:2px solid var(--accent);color:var(--accent);
+  background:var(--bg);font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  opacity:0;transition:opacity .1s;
+}
 .vidbox{position:relative;margin:10px 0 2px}
 .vid{display:block;width:100%;max-height:70vh;border-radius:12px;background:#000}
 /* how long the clip runs, over the poster: enough to judge a tap before any of
@@ -151,20 +186,22 @@ video.ffs{object-fit:cover !important}
 }
 </style>
 </head><body>
-<div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" hidden></div>
+<div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" hidden></div>
 <div class="wrap">
 <header>
   <div class="sub" id="sub">{{if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<span id="unreadn">{{.Unread}}</span> unread {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{end}}</div>
 {{if .Health}}<div class="health">{{range .Health}}<span class="svc" title="{{.Title}}"><span class="hdot {{if .OK}}ok{{else}}bad{{end}}"></span>{{.Label}}</span>{{end}}</div>
 {{end}}</header>
-<div class="sortbar"><span class="slabel">sort</span>{{if .Asc}}<span class="sort on">oldest</span><a class="sort" href="?order=desc">newest</a>{{else}}<a class="sort" href="?order=asc">oldest</a><span class="sort on">newest</span>{{end}}</div>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
 {{end}}{{if .SavedView}}{{if not .Cards}}<div class="note">Nothing saved yet. Tap <b>save</b> on any item to keep it here.</div>
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">Inbox zero across every timeline.</div>
 {{if .OfferForYou}}<div class="note offer">All caught up. <a href="/?x=foryou">Continue with For You from x →</a></div>
-{{end}}{{end}}{{range .Cards}}{{template "card" .}}
-{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall" type="button">✓ mark all read</button>
+{{end}}{{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
+{{end}}<div class="stamp" id="stamp"></div></div></div>
+<div class="note hid" id="deckEnd">Deck's empty — that's every card. <button class="linkbtn" id="deckBack" type="button">← back to the last one</button></div>
+{{else}}{{range .Cards}}{{template "card" .}}
+{{end}}{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button">✓ mark all read</button>
 {{end}}<div id="toast" class="toast"></div>
 <dialog id="forYou" class="dlg">
   <div class="dlg-body">
@@ -177,6 +214,12 @@ video.ffs{object-fit:cover !important}
   </div>
 </dialog>
 <script>
+// --swipe serves the same cards as a deck: one on screen, thrown away by hand.
+// Everything else on the page (video, images, save, share, expand) is shared
+// between the two modes; only the layout and what marks a card read differ.
+var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
+var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview') === 'true';
+
 // Reading = scrolling: the moment a card is fully off-screen (its bottom edge
 // clears the top of the viewport) it is marked read and muted in place — it
 // stays in the list, greyed, so scrolling back up shows what you've read.
@@ -206,52 +249,56 @@ function decCount(n){
   if(c === 0) maybeOfferForYou();   // whole list read
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
+// queueRead marks one card read: muted in place and batched for the next flush.
+function queueRead(el){
+  if(el.classList.contains('read')) return false;  // already counted once
+  var app = el.dataset.app, id = el.dataset.id;
+  if(!app || !id) return false;
+  el.classList.add('read');
+  (pending[app] = pending[app] || []).push(id);
+  if(!flushTimer) flushTimer = setTimeout(flushPending, 400);
+  return true;
+}
 var obs = new IntersectionObserver(function(entries){
   if (ffs) return; // fake fullscreen scrolls the feed behind the video (hiding
                    // Safari's bars); that motion must not mark cards read
-  var dirty = false;
   entries.forEach(function(en){
     if(en.isIntersecting) return;                 // still visible
     var el = en.target;
     if(el.getBoundingClientRect().bottom > 0) return; // below, not yet scrolled past
-    if(el.classList.contains('read')) return;     // already muted once
-    var app = el.dataset.app, id = el.dataset.id;
-    if(!app || !id) return;
-    el.classList.add('read');                     // mute in place; keep in the list
-    (pending[app] = pending[app] || []).push(id);
-    dirty = true;
+    queueRead(el);
   });
-  if(dirty && !flushTimer) flushTimer = setTimeout(flushPending, 400);
 },{threshold:0});
 // The saved list is for re-reading, so scrolling through it must not mark
-// anything read.
-if (document.getElementById('state').getAttribute('data-savedview') !== 'true') {
+// anything read; in swipe mode the throw does the marking, not the scroll.
+if (!SWIPE && !SAVED_VIEW) {
   document.querySelectorAll('article.card').forEach(function(c){ obs.observe(c); });
 }
 
 // Save / unsave one item. The button posts just app+id; the server pairs that
 // with the item it last rendered and persists the whole thing, so a saved item
 // survives the feed moving on.
-document.addEventListener('click', function(e){
-  var b = e.target.closest ? e.target.closest('button.save') : null;
-  if (!b) return;
-  var card = b.closest('article.card');
-  var on = b.dataset.saved !== '1';
+function setSaved(card, on){
+  var b = card.querySelector('button.save');
   var fd = new FormData();
   fd.append('app', card.dataset.app);
   fd.append('id', card.dataset.id);
   fd.append('save', on ? '1' : '0');
-  b.disabled = true;
-  fetch('/save', {method:'POST', body:fd})
+  if (b) b.disabled = true;
+  return fetch('/save', {method:'POST', body:fd})
     .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'reload the page and try again' : 'could not save'); return res.json(); })
     .then(function(d){
-      b.dataset.saved = on ? '1' : '0';
-      b.textContent = on ? 'saved' : 'save';
+      if (b){ b.dataset.saved = on ? '1' : '0'; b.textContent = on ? 'saved' : 'save'; }
       var n = document.getElementById('savedn');
       if (n) n.textContent = d.saved;
     })
     .catch(function(err){ toast(err.message || 'could not save'); })
-    .then(function(){ b.disabled = false; });
+    .then(function(){ if (b) b.disabled = false; });
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.save') : null;
+  if (!b) return;
+  setSaved(b.closest('article.card'), b.dataset.saved !== '1');
 });
 
 // Share hands the item's own text (not its quoted post's) to the OS share
@@ -539,8 +586,9 @@ document.addEventListener('click', function(e){
   if (!b) return;
   var card = b.closest('article.card');
   card.querySelectorAll('.preview, .full').forEach(function(el){ el.classList.toggle('hid'); });
+  var expanded = card.querySelector('.preview').classList.contains('hid');
   var less = card.querySelector('.footer > button.expand');
-  if (less) less.classList.toggle('hid', !card.querySelector('.preview').classList.contains('hid'));
+  if (less) less.classList.toggle('hid', !expanded);
 });
 // Mark everything read with one tap (scroll can't reach the last cards).
 var markAllBtn = document.getElementById('markAll');
@@ -566,6 +614,146 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
   markAllBtn.textContent = '✓ all read';
   markAllBtn.disabled = true;
 });
+
+// The deck (--swipe): one card on screen, dealt with by hand. Throw it left to
+// mark it read and deal the next; pull right to walk back through what's
+// already been dealt, as far back as the first card. Up and down are left
+// alone so the page scrolls as it always did, and saving stays the footer
+// button it already was. On a desktop → deals and ← walks back.
+if (SWIPE) (function(){
+  var deck = document.getElementById('deck');
+  if (!deck) return;
+  var cards = [].slice.call(deck.querySelectorAll('article.card'));
+  var stamp = document.getElementById('stamp');
+  var endEl = document.getElementById('deckEnd');
+  var backEl = document.getElementById('deckBack');
+  var at = 0;
+
+  function current(){ return at < cards.length ? cards[at] : null; }
+  function show(){
+    cards.forEach(function(c, i){ c.classList.toggle('hid', i !== at); });
+    var left = cards.length - at;
+    deck.classList.toggle('last2', left === 2);
+    deck.classList.toggle('last', left <= 1);
+    window.scrollTo(0, 0); // the card that scrolled is gone; start the next at its top
+    var done = at >= cards.length;
+    // Hide the centering wrapper, not just the deck, or its height would leave
+    // a hole above the end note. Reversible: walking back brings it out again.
+    deck.parentNode.classList.toggle('hid', done);
+    if (endEl) endEl.classList.toggle('hid', !done);
+  }
+  // A card that leaves the screen takes its audio with it.
+  function quiet(card){
+    card.querySelectorAll('video').forEach(function(v){ v.pause(); });
+    card.querySelectorAll('.yt-embed').forEach(function(w){
+      if (w._ytPlayer && w._ytPlayer.pauseVideo) w._ytPlayer.pauseVideo();
+    });
+  }
+  function place(card, dx){
+    card.style.transform = dx ? 'translateX(' + dx + 'px) rotate(' + (dx / 28) + 'deg)' : '';
+  }
+  function settle(card){
+    card.classList.add('fly');
+    place(card, 0);
+    setTimeout(function(){ card.classList.remove('fly'); }, 260);
+  }
+  function throwOut(card, dx){
+    quiet(card);
+    card.classList.add('fly');
+    place(card, dx);
+    card.style.opacity = '0';
+    setTimeout(function(){
+      card.classList.remove('fly');
+      card.style.transform = '';
+      card.style.opacity = '';
+      at++;
+      show();
+    }, 260);
+  }
+  function mark(card){
+    if (!SAVED_VIEW) queueRead(card); // the flush decrements the header count
+    throwOut(card, -(window.innerWidth + 120));
+  }
+  // Walk back through what's already been dealt, as far as the first card.
+  // Those items stay read — you read them — this is only a second look.
+  function back(){
+    if (at === 0){ toast('this is the first one'); return false; }
+    var leaving = current();
+    if (leaving){
+      quiet(leaving);
+      leaving.classList.remove('fly');
+      place(leaving, 0);
+    }
+    at--;
+    show();
+    var card = current();
+    card.classList.remove('fly');
+    place(card, -(window.innerWidth + 120)); // returns from the side it left by
+    void card.offsetWidth;                   // land the start position before transitioning
+    card.classList.add('fly');
+    place(card, 0);
+    setTimeout(function(){ card.classList.remove('fly'); }, 260);
+    return true;
+  }
+  function showStamp(text, amount){
+    if (!stamp) return;
+    if (text) stamp.textContent = text;
+    stamp.style.opacity = amount;
+  }
+
+  function thX(){ return Math.min(120, window.innerWidth * 0.28); } // read per gesture: the phone may have rotated
+  var drag = null;
+  deck.addEventListener('pointerdown', function(e){
+    if (ffs || (e.button != null && e.button !== 0)) return;
+    var card = current();
+    if (!card || card !== e.target.closest('article.card')) return;
+    // The card's own controls (player, links, footer buttons) own their taps.
+    if (e.target.closest('button, a, video, iframe, input, .yt')) return;
+    drag = {card: card, id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, axis: '', t0: Date.now()};
+  });
+  deck.addEventListener('pointermove', function(e){
+    if (!drag || e.pointerId !== drag.id) return;
+    var card = drag.card;
+    drag.dx = e.clientX - drag.x0;
+    drag.dy = e.clientY - drag.y0;
+    if (!drag.axis){
+      if (Math.abs(drag.dx) < 8 && Math.abs(drag.dy) < 8) return;
+      // A vertical drag is the page scrolling: let go of it entirely.
+      if (Math.abs(drag.dy) >= Math.abs(drag.dx)){ drag = null; return; }
+      drag.axis = 'x';
+      document.body.classList.add('dragging');
+      deck.setPointerCapture(e.pointerId);
+    }
+    e.preventDefault();
+    place(card, drag.dx);
+    showStamp(drag.dx < 0 ? 'read' : 'back', Math.min(1, Math.abs(drag.dx) / thX()));
+  });
+  function release(e){
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    var card = drag.card, dx = drag.dx, axis = drag.axis;
+    var quick = Date.now() - drag.t0 < 300; // a flick counts for less distance
+    drag = null;
+    document.body.classList.remove('dragging');
+    showStamp('', 0);
+    if (!axis) return;                      // never passed the slop: a tap, not a throw
+    if (Math.abs(dx) < thX() && !(quick && Math.abs(dx) > 55)){ settle(card); return; }
+    if (dx < 0) mark(card);                 // thrown left: read it and deal the next
+    else if (!back()) settle(card);         // pulled right: the one before this, if there is one
+  }
+  deck.addEventListener('pointerup', release);
+  deck.addEventListener('pointercancel', release);
+  if (backEl) backEl.addEventListener('click', back); // the end of the deck has no card to pull
+
+  document.addEventListener('keydown', function(e){
+    if (ffs || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowLeft'){ e.preventDefault(); back(); }
+    else if (e.key === 'ArrowRight'){
+      var card = current();
+      if (card){ e.preventDefault(); mark(card); }
+    }
+  });
+  show();
+})();
 
 // x feed state (from the server): whether x is authed and which tab is live.
 var st = document.getElementById('state');
