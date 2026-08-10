@@ -82,6 +82,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   padding:0 16px;min-height:42px;border-radius:999px;border:1px solid var(--line);
   font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,.3);
 }
+.markall.hid{display:none} /* .hid alone loses to .markall.fab */
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
 .speed,.mute,.rot,.save,.img,.share{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
@@ -89,18 +90,21 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
 .hid{display:none}
 .empty{color:var(--muted);font-style:italic}
-.dlg{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:16px;padding:20px;max-width:360px;width:calc(100vw - 48px)}
-.dlg::backdrop{background:rgba(0,0,0,.55)}
-.dlg-title{margin:0 0 6px;font-size:19px;font-weight:700}
-.dlg-hint{margin:0 0 16px;color:var(--muted);font-size:15px}
-.dlg-actions{display:flex;gap:10px}
-.dlg-actions button{flex:1;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:600;min-height:44px;cursor:pointer}
-.dlg-go{border:none;background:var(--accent);color:#fff}
-.dlg-no{border:1px solid var(--line);background:transparent;color:var(--fg)}
 .note{padding:16px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:15px}
 .note a{color:var(--accent);font-weight:600;text-decoration:none}
-.linkbtn{padding:0;border:0;background:none;font:inherit;font-weight:600;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .note.offer{margin-top:10px}
+/* a feed page is fetched before it is sent, so a tap that refetches leaves the
+   old page on screen with nothing happening; cover it while the wait runs */
+.loading{
+  position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.5);color:#fff;font-size:15px;font-weight:600;
+}
+.loading.hid{display:none} /* .hid alone loses to .loading */
+.loading span{animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-color-scheme: light){
+  .loading{background:rgba(246,247,249,.75);color:var(--fg)}
+}
 .toast{
   position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
   background:var(--fg);color:var(--bg);font-size:14px;font-weight:600;
@@ -186,7 +190,7 @@ video.ffs{object-fit:cover !important}
 }
 </style>
 </head><body>
-<div id="state" data-xauth="{{if .XAuth}}true{{else}}false{{end}}" data-xtab="{{.XTab}}" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" hidden></div>
+<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" hidden></div>
 <div class="wrap">
 <header>
   <div class="sub" id="sub">{{if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<span id="unreadn">{{.Unread}}</span> unread {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{end}}</div>
@@ -196,23 +200,15 @@ video.ffs{object-fit:cover !important}
 {{end}}{{if .SavedView}}{{if not .Cards}}<div class="note">Nothing saved yet. Tap <b>save</b> on any item to keep it here.</div>
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">Inbox zero across every timeline.</div>
-{{if .OfferForYou}}<div class="note offer">All caught up. <a href="/?x=foryou">Continue with For You from x →</a></div>
+{{if .OfferForYou}}<div class="note offer">All caught up. {{template "foryou" .}}</div>
 {{end}}{{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
 {{end}}<div class="stamp" id="stamp"></div></div></div>
-<div class="note hid" id="deckEnd">Deck's empty — that's every card. <button class="linkbtn" id="deckBack" type="button">← back to the last one</button></div>
+<div class="note hid" id="deckEnd">Deck's empty — that's every card.{{if .XForYou}} {{template "foryou" .}}{{end}}</div>
 {{else}}{{range .Cards}}{{template "card" .}}
 {{end}}{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button">✓ mark all read</button>
+{{end}}{{if and .XForYou .Cards (not .Swipe)}}<div class="note offer hid" id="forYouNote">All read. {{template "foryou" .}}</div>
 {{end}}<div id="toast" class="toast"></div>
-<dialog id="forYou" class="dlg">
-  <div class="dlg-body">
-    <p class="dlg-title">All read.</p>
-    <p class="dlg-hint">Everything's clear. Want to keep going on x's For You timeline?</p>
-  </div>
-  <div class="dlg-actions">
-    <button id="forYouGo" class="dlg-go" type="button">For You</button>
-    <button id="forYouNo" class="dlg-no" type="button">Not now</button>
-  </div>
-</dialog>
+<div id="loading" class="loading hid"><span>loading…</span></div>
 <script>
 // --swipe serves the same cards as a deck: one on screen, thrown away by hand.
 // Everything else on the page (video, images, save, share, expand) is shared
@@ -613,6 +609,7 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
   decCount(n);
   markAllBtn.textContent = '✓ all read';
   markAllBtn.disabled = true;
+  if (SWIPE) markAllBtn.classList.add('hid'); // a floating button with nothing to do is just in the way
 });
 
 // The deck (--swipe): one card on screen, dealt with by hand. Throw it left to
@@ -626,7 +623,6 @@ if (SWIPE) (function(){
   var cards = [].slice.call(deck.querySelectorAll('article.card'));
   var stamp = document.getElementById('stamp');
   var endEl = document.getElementById('deckEnd');
-  var backEl = document.getElementById('deckBack');
   var at = 0;
 
   function current(){ return at < cards.length ? cards[at] : null; }
@@ -641,6 +637,8 @@ if (SWIPE) (function(){
     // a hole above the end note. Reversible: walking back brings it out again.
     deck.parentNode.classList.toggle('hid', done);
     if (endEl) endEl.classList.toggle('hid', !done);
+    // Nothing left to mark once the deck is dealt out.
+    if (markAllBtn) markAllBtn.classList.toggle('hid', done);
   }
   // A card that leaves the screen takes its audio with it.
   function quiet(card){
@@ -742,7 +740,6 @@ if (SWIPE) (function(){
   }
   deck.addEventListener('pointerup', release);
   deck.addEventListener('pointercancel', release);
-  if (backEl) backEl.addEventListener('click', back); // the end of the deck has no card to pull
 
   document.addEventListener('keydown', function(e){
     if (ffs || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -755,22 +752,35 @@ if (SWIPE) (function(){
   show();
 })();
 
-// x feed state (from the server): whether x is authed and which tab is live.
-var st = document.getElementById('state');
-var X_AUTHED = st ? st.getAttribute('data-xauth') === 'true' : false;
-var X_TAB = st ? st.getAttribute('data-xtab') : 'following';
-var forYouPrompted = false;
+// Every feed page is scraped from the services before a byte of it is sent —
+// a slow x can take most of a minute — and until then the browser just sits on
+// the page you tapped from. Cover it as the tap happens, so the wait looks like
+// a wait. Only links that refetch: the saved list is served from disk, and
+// anything opening a new tab leaves this page alone.
+document.addEventListener('click', function(e){
+  var a = e.target.closest ? e.target.closest('a[href]') : null;
+  if (!a || a.target || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+  var u = new URL(a.getAttribute('href'), location.href);
+  if (u.origin !== location.origin || u.pathname !== '/' || u.searchParams.get('saved') === '1') return;
+  document.getElementById('loading').classList.remove('hid');
+});
+// Coming back through history restores this page as it was left, cover and all.
+window.addEventListener('pageshow', function(){ document.getElementById('loading').classList.add('hid'); });
+
 // The ?x=foryou hand-off is one-shot: strip the param so any later reload
 // returns to the normal Following default.
 if(location.search.indexOf('x=foryou') !== -1){ history.replaceState(null, '', location.pathname); }
-// Once the whole list is read, offer to keep going on x For You.
+// Once the whole list is read, uncover the link to x's other timeline at the
+// end of the feed. The server renders it only when there is one to offer, and
+// the deck has the same link in its own end note.
 function maybeOfferForYou(){
-  if(forYouPrompted || !X_AUTHED || X_TAB !== 'following') return;
-  forYouPrompted = true;
-  document.getElementById('forYou').showModal();
+  var note = document.getElementById('forYouNote');
+  if (note) note.classList.remove('hid');
 }
-document.getElementById('forYouGo').addEventListener('click', function(){ location.href = '/?x=foryou'; });
-document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>
+{{/* Every way out of an emptied list is the same link: x's For You, refetched
+     on each visit — from For You itself too, so there is always another round
+     to pull rather than a dead end. */}}
+{{define "foryou"}}<a href="/?x=foryou">{{if .OnForYou}}Another round of For You from x →{{else}}Continue with For You from x →{{end}}</a>{{end}}
 {{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}

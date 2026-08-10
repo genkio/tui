@@ -71,12 +71,12 @@ type pageData struct {
 	Saved       int  // size of the saved list, in the header and its link
 	SavedView   bool // rendering the saved list rather than the live feed
 	Swipe       bool // deck of one card at a time, swiped through
-	XAuth       bool
-	XTab        string
 	Health      []healthEntry
 	Warn        string
 	HasApps     bool
-	OfferForYou bool
+	OfferForYou bool // empty feed: offer x's For You right away
+	XForYou     bool // x is authed, so For You is always somewhere to go next
+	OnForYou    bool // ...and it is already what's on screen, so the next tap is another round
 	Cards       []cardData
 }
 
@@ -194,14 +194,15 @@ func buildPageData(in pageInput) pageData {
 		Saved:     savedCount,
 		SavedView: in.savedView,
 		Swipe:     swipe,
-		XAuth:     xAuth,
-		XTab:      in.xTab,
 		Health:    health,
 		Warn:      in.warn,
 		HasApps:   len(in.apps) > 0,
-		// With x authed on Following and nothing left to read, give a direct
-		// way into For You right from the empty state.
-		OfferForYou: len(in.items) == 0 && xAuth && in.xTab == "following",
+		// With x authed and nothing left to read, give a direct way into For
+		// You right from the empty state. Offered from For You too: each visit
+		// refetches, so the timeline hands over whatever it has since.
+		OfferForYou: len(in.items) == 0 && xAuth,
+		XForYou:     xAuth,
+		OnForYou:    in.xTab == "foryou",
 		Cards:       cards,
 	}
 }

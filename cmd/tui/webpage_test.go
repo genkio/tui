@@ -51,8 +51,9 @@ func renderSavedPage(t *testing.T, store *savedStore) string {
 	return b.String()
 }
 
-// renderSwipePage renders the feed the way --swipe serves it.
-func renderSwipePage(t *testing.T, items []core.Item) string {
+// renderSwipePage renders the feed the way --swipe serves it, for the given
+// authed apps.
+func renderSwipePage(t *testing.T, items []core.Item, apps ...string) string {
 	t.Helper()
 	loader, err := newPageLoader("")
 	if err != nil {
@@ -63,7 +64,10 @@ func renderSwipePage(t *testing.T, items []core.Item) string {
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	in := pageInput{items: items, apps: []string{"x", "reddit"}, now: time.Now(), xTab: "following", swipe: true}
+	if len(apps) == 0 {
+		apps = []string{"x", "reddit"}
+	}
+	in := pageInput{items: items, apps: apps, now: time.Now(), xTab: "following", swipe: true}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -233,9 +237,15 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	if !strings.Contains(deck, `class="markall fab"`) {
 		t.Errorf("mark-all-read should float in a deck: %s", deck)
 	}
-	// The end of the deck still offers a way back into it.
-	if !strings.Contains(deck, `id="deckEnd"`) || !strings.Contains(deck, `id="deckBack"`) {
-		t.Errorf("expected an end state with a way back: %s", deck)
+	// The end of the deck offers x's other timeline, since x is authed here and
+	// on Following.
+	if !strings.Contains(deck, `id="deckEnd"`) || !strings.Contains(deck, `href="/?x=foryou"`) {
+		t.Errorf("expected an end state offering For You: %s", deck)
+	}
+	// Without x there is nowhere else to go, so the end state is a plain note.
+	noX := renderSwipePage(t, []core.Item{{App: "reddit", ID: "1", Title: "a"}}, "reddit")
+	if strings.Contains(noX, `href="/?x=foryou"`) {
+		t.Errorf("no x, no For You offer: %s", noX)
 	}
 	feed := renderPage(t, items, []string{"x", "reddit"}, nil, "following", "")
 	if strings.Contains(feed, `class="deck"`) || strings.Contains(feed, `id="deckEnd"`) {
@@ -243,6 +253,44 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	}
 	if !strings.Contains(feed, `data-swipe="false"`) {
 		t.Errorf("the feed should tell its script swipe mode is off: %s", feed)
+	}
+}
+
+// Reaching the end of the feed offers x's other timeline as a link at the
+// bottom rather than a modal, and only where there is one to offer.
+func TestForYouNoteReplacesTheDialog(t *testing.T) {
+	items := []core.Item{{App: "x", ID: "1", Title: "a"}}
+	feed := renderPage(t, items, []string{"x"}, nil, "following", "")
+	if strings.Contains(feed, "<dialog") {
+		t.Errorf("the For You dialog should be gone: %s", feed)
+	}
+	if !strings.Contains(feed, `class="note offer hid" id="forYouNote"`) {
+		t.Errorf("expected a hidden For You note the read count uncovers: %s", feed)
+	}
+	// Already on For You: still offered, worded as the next round rather than a
+	// switch, since every visit refetches the timeline.
+	onForYou := renderPage(t, items, []string{"x"}, nil, "foryou", "")
+	if !strings.Contains(onForYou, `id="forYouNote"`) || !strings.Contains(onForYou, "Another round of For You") {
+		t.Errorf("For You should offer another round of itself: %s", onForYou)
+	}
+	if strings.Contains(feed, "Another round") {
+		t.Errorf("from Following it is a switch, not a round: %s", feed)
+	}
+	// No x at all: nothing to offer.
+	if p := renderPage(t, items, []string{"reddit"}, nil, "following", ""); strings.Contains(p, `id="forYouNote"`) {
+		t.Errorf("no x, no offer: %s", p)
+	}
+	// The deck carries the same link in its own end note instead.
+	if d := renderSwipePage(t, items); strings.Contains(d, `id="forYouNote"`) {
+		t.Errorf("the deck's end note already offers it: %s", d)
+	}
+}
+
+// Following a link that refetches covers the page it left behind.
+func TestLoadingCover(t *testing.T) {
+	p := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
+	if !strings.Contains(p, `id="loading" class="loading hid"`) {
+		t.Errorf("expected a hidden loading cover: %s", p)
 	}
 }
 
