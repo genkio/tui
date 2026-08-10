@@ -131,11 +131,57 @@ func TestRenderCardExpandOnlyWhenLong(t *testing.T) {
 	}
 	long := core.Item{App: "reddit", ID: "2", Title: "T", Body: strings.Repeat("word ", 200), Source: "r/g", URL: "https://e.com", Age: "1m"}
 	out := renderCard(t, long)
-	if !strings.Contains(out, "class=\"expand\"") {
+	// Expanding is the word count in the text; the footer only carries the
+	// collapse button, hidden until something is expanded.
+	if !strings.Contains(out, `class="expand hid" type="button">less`) {
 		t.Fatal("expand should appear for long content")
 	}
 	if !strings.Contains(out, "class=\"full hid\"") {
 		t.Fatal("expected a hidden full-content panel")
+	}
+}
+
+// The ellipsis says there is more; the badge after it says how much more.
+func TestRenderCardRemainingWordCount(t *testing.T) {
+	// 200 words of 5 runes each: the 220-rune clip keeps exactly 44 of them.
+	long := core.Item{App: "reddit", ID: "1", Title: "T", Body: strings.Repeat("word ", 200), Source: "r/g", URL: "https://e.com", Age: "1m"}
+	out := renderCard(t, long)
+	if !strings.Contains(out, `…<button class="rest" type="button" title="show the rest">+156 words</button>`) {
+		t.Fatalf("expected the clipped preview to report the words left: %s", out)
+	}
+	if n := strings.Count(out, `class="rest"`); n != 1 {
+		t.Errorf("only the clipped preview carries the badge, got %d: %s", n, out)
+	}
+	short := core.Item{App: "reddit", ID: "2", Title: "T", Body: "short", Source: "r/g", URL: "https://e.com", Age: "1m"}
+	if out := renderCard(t, short); strings.Contains(out, `class="rest"`) {
+		t.Errorf("nothing is clipped, so no word count: %s", out)
+	}
+}
+
+func TestCountWords(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"one", 1},
+		{"  two  words  ", 2},
+		{"hi, there", 2},
+		{"don't stop", 2},
+		{"你好，世界", 4},       // no spaces: each rune a word, the comma none
+		{"go 语言 rocks", 4}, // mixed script
+	}
+	for _, c := range cases {
+		if got := countWords(c.in); got != c.want {
+			t.Errorf("countWords(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestRenderCardShareButton(t *testing.T) {
+	it := core.Item{App: "x", ID: "1", Title: "hello", Body: "hello", Source: "@a", URL: "https://x.com/a/status/1", Age: "1m"}
+	if out := renderCard(t, it); !strings.Contains(out, `class="share"`) {
+		t.Fatalf("expected a share button in the footer: %s", out)
 	}
 }
 
@@ -328,16 +374,20 @@ func TestRenderCardQuote(t *testing.T) {
 	if strings.Contains(out, "quoting @eve") {
 		t.Errorf("the quote must not also be appended to the body: %s", out)
 	}
-	if strings.Contains(out, `class="expand"`) {
+	if strings.Contains(out, `class="expand`) || strings.Contains(out, `class="rest"`) {
 		t.Errorf("a short post + short quote needs no expand toggle: %s", out)
 	}
 
-	// A long quote alone is enough to earn the expand toggle, and the quote gets
-	// its own preview/full pair so expanding reveals all of it.
+	// A long quote alone is enough to earn the expand toggle: the count in the
+	// quote's own text expands the card, and the quote gets its own
+	// preview/full pair so expanding reveals all of it.
 	it.Quote.Text = strings.Repeat("word ", 100)
 	out = renderCard(t, it)
-	if !strings.Contains(out, `class="expand"`) {
-		t.Errorf("a clipped quote should offer expand: %s", out)
+	if !strings.Contains(out, `class="rest"`) {
+		t.Errorf("a clipped quote should offer its own expand control: %s", out)
+	}
+	if !strings.Contains(out, `class="expand hid"`) {
+		t.Errorf("a clipped quote should get the footer collapse button: %s", out)
 	}
 	if strings.Count(out, `class="full hid"`) != 2 {
 		t.Errorf("expected a full panel for both the body and the quote: %s", out)

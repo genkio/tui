@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/genkio/tui/core"
 )
@@ -237,7 +238,7 @@ func buildCard(it core.Item, starred bool) cardData {
 	// Two content panels: a clipped preview and a full version the footer's
 	// expand toggle reveals. linkify escapes, so the HTML is safe as-is.
 	if body != "" {
-		c.PreviewBody = template.HTML(linkify(clip(body, bodyClip)))
+		c.PreviewBody = template.HTML(preview(body, bodyClip))
 		c.FullBody = template.HTML(linkify(body))
 	}
 	if it.Quote != nil {
@@ -266,7 +267,7 @@ func buildQuote(q core.Quote) *quoteData {
 		Images: cardImages(q.Images),
 	}
 	if q.Text != "" {
-		d.PreviewBody = template.HTML(linkify(clip(q.Text, quoteClip)))
+		d.PreviewBody = template.HTML(preview(q.Text, quoteClip))
 		d.FullBody = template.HTML(linkify(q.Text))
 	}
 	return d
@@ -296,13 +297,52 @@ func needsExpand(body, title string) bool {
 	return len([]rune(body)) > bodyClip || len([]rune(title)) > bodyClip
 }
 
-// clip truncates s to at most n runes, adding an ellipsis when cut.
-func clip(s string, n int) string {
+// preview renders the clipped panel: the first n runes, an ellipsis, and how
+// many words expanding would still reveal. The count is the expand control
+// itself, so the tap lands where the text stops rather than down in the
+// footer. Text shorter than the clip is returned whole, which keeps preview
+// and full identical for cards that need no expanding at all.
+func preview(s string, n int) string {
 	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n]) + "…"
+	if len(r) <= n {
+		return linkify(s)
 	}
-	return s
+	return linkify(string(r[:n])) + `…<button class="rest" type="button" title="show the rest">` + restLabel(countWords(string(r[n:]))) + `</button>`
+}
+
+func restLabel(n int) string {
+	if n == 1 {
+		return "+1 word"
+	}
+	return fmt.Sprintf("+%d words", n)
+}
+
+// countWords counts runs of non-space text, except that each CJK rune counts
+// on its own: Chinese and Japanese posts have no spaces, so a run-based count
+// would report the whole remainder as one word. Stray punctuation never starts
+// a word, so "你好,世界" is four and "hi, there" is two.
+func countWords(s string) int {
+	n, inWord := 0, false
+	for _, r := range s {
+		switch {
+		case cjkRune(r):
+			n++
+			inWord = false
+		case unicode.IsSpace(r):
+			inWord = false
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+		default:
+			if !inWord {
+				n++
+				inWord = true
+			}
+		}
+	}
+	return n
+}
+
+func cjkRune(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
 }
 
 // linkRe matches a URL plus any trailing punctuation (so "see http://x.com."

@@ -52,6 +52,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .dot{opacity:.5}
 .body{margin:8px 0 4px;color:var(--fg);white-space:pre-wrap;word-break:break-word;font-size:15px}
 .body .link{color:var(--accent);text-decoration:underline;word-break:break-all}
+/* how much text the ellipsis is hiding, and the control that reveals it */
+.rest{
+  margin-left:5px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:600;
+  color:var(--accent);white-space:nowrap;cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+}
 /* the embedded post (x's quote box): inset and dimmed so it reads as context,
    not as the post you're on */
 .quote{margin:10px 0 2px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(128,128,128,.07)}
@@ -76,7 +81,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall:disabled{opacity:.5;cursor:default}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save,.img,.share{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 .save[data-saved="1"]{color:var(--accent)}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
 .hid{display:none}
@@ -247,6 +252,50 @@ document.addEventListener('click', function(e){
     })
     .catch(function(err){ toast(err.message || 'could not save'); })
     .then(function(){ b.disabled = false; });
+});
+
+// Share hands the item's own text (not its quoted post's) to the OS share
+// sheet. navigator.share needs a secure context, which a LAN http:// page is
+// not, so the same text is copied to the clipboard there instead — the button
+// always does something.
+function sharePayload(card){
+  var title = card.querySelector(':scope > .preview > .ctitle');
+  var body = card.querySelector(':scope > .full > .body');   // full, so no clip and no word-count badge
+  var link = card.querySelector(':scope > .footer > a.open[target]');
+  var parts = [];
+  if (title) parts.push(title.textContent.trim());
+  if (body) parts.push(body.textContent.trim());
+  var d = {text: parts.join('\n\n')};
+  if (title) d.title = title.textContent.trim();
+  if (link) d.url = link.href;
+  return d;
+}
+function copyText(t){
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
+  return new Promise(function(res, rej){
+    var ta = document.createElement('textarea');
+    ta.value = t; ta.setAttribute('readonly',''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = document.execCommand && document.execCommand('copy');
+    ta.remove();
+    ok ? res() : rej(new Error('copy failed'));
+  });
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.share') : null;
+  if (!b) return;
+  var d = sharePayload(b.closest('article.card'));
+  if (!d.text && !d.url) { toast('nothing to share'); return; }
+  if (navigator.share){
+    navigator.share(d).catch(function(err){
+      if (err && err.name === 'AbortError') return; // sheet dismissed, not a failure
+      toast('could not share');
+    });
+    return;
+  }
+  copyText([d.text, d.url].filter(Boolean).join('\n\n'))
+    .then(function(){ toast('copied'); })
+    .catch(function(){ toast('could not share'); });
 });
 
 // Attached stills render only when asked for: the footer's image toggle reveals
@@ -481,13 +530,17 @@ document.addEventListener('click', function(e){
 document.addEventListener('keydown', function(e){ if (e.key === 'Escape') exitFfs(); });
 
 // Expand/collapse reveals the full post content — the card's own body and the
-// quoted post's, which each render as their own preview/full pair.
-document.querySelectorAll('.expand').forEach(function(btn){
-  btn.addEventListener('click', function(){
-    var card = btn.closest('article.card');
-    card.querySelectorAll('.preview, .full').forEach(function(el){ el.classList.toggle('hid'); });
-    btn.textContent = card.querySelector('.preview').classList.contains('hid') ? 'less' : 'more';
-  });
+// quoted post's, which each render as their own preview/full pair. Expanding
+// is the "+N words" count at the end of the clipped text (server-rendered, so
+// delegate); collapsing is the footer button, which exists only while there is
+// something expanded to collapse.
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.rest, button.expand') : null;
+  if (!b) return;
+  var card = b.closest('article.card');
+  card.querySelectorAll('.preview, .full').forEach(function(el){ el.classList.toggle('hid'); });
+  var less = card.querySelector('.footer > button.expand');
+  if (less) less.classList.toggle('hid', !card.querySelector('.preview').classList.contains('hid'));
 });
 // Mark everything read with one tap (scroll can't reach the last cards).
 var markAllBtn = document.getElementById('markAll');
@@ -532,4 +585,4 @@ document.getElementById('forYouGo').addEventListener('click', function(){ locati
 document.getElementById('forYouNo').addEventListener('click', function(){ document.getElementById('forYou').close(); });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand" type="button">more</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}
