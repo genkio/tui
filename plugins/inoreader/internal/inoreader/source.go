@@ -62,6 +62,7 @@ func ToItems(arts []Article) []core.Item {
 			Author: a.Author,
 			URL:    a.URL,
 			Age:    a.Age,
+			Audio:  a.Audio,
 			Images: a.Images,
 		}
 	}

@@ -181,6 +181,10 @@ video.ffs{object-fit:cover !important}
 }
 .vidbox{position:relative;margin:10px 0 2px}
 .vid{display:block;width:100%;max-height:70vh;border-radius:12px;background:#000}
+/* a podcast episode: the browser's own audio bar, full width. Unlike video it
+   preloads metadata, so the controls can state how long the episode runs before
+   a tap starts it — the audio answer to the .vlen badge */
+.aud{display:block;width:100%;margin:10px 0 2px}
 /* how long the clip runs, over the poster: enough to judge a tap before any of
    it downloads (preload="none" means nothing has yet) */
 .vlen{
@@ -452,29 +456,38 @@ document.querySelectorAll('article.card').forEach(function(card){
     d.addEventListener('click', function(){ ytPlay(d, id); });
     var foot = card.querySelector('.footer');
     foot.before(d);
-    // The speed/mute toggles are server-rendered only for native videos;
+    // The speed/mute toggles are server-rendered only for native players;
     // give YouTube cards the same footer controls (no save — YouTube doesn't
-    // hand out direct streams the way video.twimg.com does).
+    // hand out direct streams the way video.twimg.com does). A card whose
+    // audio player already brought the speed button needs only the rest.
+    var ex = foot.querySelector('button.expand'); // null appends, which is the same place
     if (!foot.querySelector('button.speed')){
-      var sp = document.createElement('button'); sp.type = 'button'; sp.className = 'speed'; sp.title = 'playback speed for all videos';
+      var sp = document.createElement('button'); sp.type = 'button'; sp.className = 'speed'; sp.title = 'playback speed for every player';
+      foot.insertBefore(sp, ex);
+    }
+    if (!foot.querySelector('button.rot')){
       var mu = document.createElement('button'); mu.type = 'button'; mu.className = 'mute'; mu.title = 'sound for all videos';
       var ro = document.createElement('button'); ro.type = 'button'; ro.className = 'rot'; ro.title = 'rotated fullscreen'; ro.textContent = 'rotate';
-      var ex = foot.querySelector('button.expand');
-      foot.insertBefore(sp, ex); foot.insertBefore(mu, ex); foot.insertBefore(ro, ex);
+      foot.insertBefore(mu, ex); foot.insertBefore(ro, ex);
     }
   });
 });
 
-// Video playback settings are global: the speed (default 2x) and mute
-// (default muted) buttons on any card apply to every player — native <video>
-// and YouTube embeds alike — so the whole feed behaves one way. The rate is
-// re-applied on play because loading media resets it. Clicks are delegated
-// since YouTube cards get their buttons injected after this runs.
+// Playback settings are global: the speed (default 2x) and mute (default
+// muted) buttons on any card apply to every player — native <video>, YouTube
+// embeds, and podcast <audio> alike — so the whole feed behaves one way. The
+// rate is re-applied on play because loading media resets it. Clicks are
+// delegated since YouTube cards get their buttons injected after this runs.
 var SPEED = 2;
 var MUTED = true;
-function applyVideoPrefs(){
+function applyMediaPrefs(){
   document.querySelectorAll('video.vid').forEach(function(v){
     v.defaultPlaybackRate = SPEED; v.playbackRate = SPEED; v.muted = MUTED;
+  });
+  // Audio is the content, not a moving picture with a soundtrack: mute never
+  // applies to it, so only the speed carries over.
+  document.querySelectorAll('audio.aud').forEach(function(a){
+    a.defaultPlaybackRate = SPEED; a.playbackRate = SPEED;
   });
   ytPlayers.forEach(function(p){
     if (p.setPlaybackRate) p.setPlaybackRate(SPEED);
@@ -488,12 +501,12 @@ document.addEventListener('click', function(e){
   if (!b) return;
   if (b.classList.contains('speed')) SPEED = SPEED === 2 ? 1 : 2;
   else MUTED = !MUTED;
-  applyVideoPrefs();
+  applyMediaPrefs();
 });
-document.querySelectorAll('video.vid').forEach(function(v){
-  v.addEventListener('play', function(){ v.playbackRate = SPEED; });
+document.querySelectorAll('video.vid, audio.aud').forEach(function(m){
+  m.addEventListener('play', function(){ m.playbackRate = SPEED; });
 });
-applyVideoPrefs();
+applyMediaPrefs();
 
 // Fake fullscreen (pipepipe-web's trick): pin the card's player over the
 // viewport, sized 100vh×100vw and rotated -90°, so a landscape video fills a
@@ -642,7 +655,7 @@ if (SWIPE) (function(){
   }
   // A card that leaves the screen takes its audio with it.
   function quiet(card){
-    card.querySelectorAll('video').forEach(function(v){ v.pause(); });
+    card.querySelectorAll('video, audio').forEach(function(m){ m.pause(); });
     card.querySelectorAll('.yt-embed').forEach(function(w){
       if (w._ytPlayer && w._ytPlayer.pauseVideo) w._ytPlayer.pauseVideo();
     });
@@ -706,7 +719,7 @@ if (SWIPE) (function(){
     var card = current();
     if (!card || card !== e.target.closest('article.card')) return;
     // The card's own controls (player, links, footer buttons) own their taps.
-    if (e.target.closest('button, a, video, iframe, input, .yt')) return;
+    if (e.target.closest('button, a, video, audio, iframe, input, .yt')) return;
     drag = {card: card, id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, axis: '', t0: Date.now()};
   });
   deck.addEventListener('pointermove', function(e){
@@ -783,4 +796,4 @@ function maybeOfferForYou(){
      on each visit — from For You itself too, so there is always another round
      to pull rather than a dead end. */}}
 {{define "foryou"}}<a href="/?x=foryou">{{if .OnForYou}}Another round of For You from x →{{else}}Continue with For You from x →{{end}}</a>{{end}}
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for all videos">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}

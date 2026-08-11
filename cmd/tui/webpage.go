@@ -100,6 +100,7 @@ type cardData struct {
 	Poster      string
 	VidLen      string // "1:23" badge over the poster; blank when the length is unknown
 	HasVideo    bool   // this card or its quote has a player, so show the shared controls
+	Audio       string // attached episode file; the card shows an inline audio player
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
@@ -240,6 +241,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 		Video:  it.Video,
 		Poster: it.Poster,
 		VidLen: vidLen(it.VidSecs),
+		Audio:  it.Audio,
 		Images: cardImages(it.Images),
 		Saved:  starred,
 	}
@@ -410,6 +412,7 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 		Video   string      `json:"video,omitempty"`
 		Poster  string      `json:"poster,omitempty"`
 		VidSecs int         `json:"vidsecs,omitempty"`
+		Audio   string      `json:"audio,omitempty"`
 		Images  []string    `json:"images,omitempty"`
 		Quote   *core.Quote `json:"quote,omitempty"`
 	}
@@ -427,6 +430,7 @@ func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
 			Video:   it.Video,
 			Poster:  it.Poster,
 			VidSecs: it.VidSecs,
+			Audio:   it.Audio,
 			Images:  it.Images,
 			Quote:   it.Quote,
 		}

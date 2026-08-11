@@ -26,6 +26,7 @@ type Item struct {
 	Video   string    // direct mp4 of an attached video, when the app provides one
 	Poster  string    // still frame shown before Video plays
 	VidSecs int       // Video's length in seconds; 0 when the app reported none
+	Audio   string    // direct audio file of an attached episode (a podcast enclosure)
 	Images  []string  // attached still images; the web card reveals them on demand
 	Quote   *Quote    // the post this one embeds (an x quote), if any
 }
@@ -75,6 +76,7 @@ type Wire struct {
 	Video   string   `json:"video,omitempty"`
 	Poster  string   `json:"poster,omitempty"`
 	VidSecs int      `json:"vidsecs,omitempty"`
+	Audio   string   `json:"audio,omitempty"`
 	Images  []string `json:"images,omitempty"`
 	Quote   *Quote   `json:"quote,omitempty"`
 }
@@ -96,6 +98,7 @@ func (w Wire) Item(now time.Time) Item {
 		Video:   w.Video,
 		Poster:  w.Poster,
 		VidSecs: w.VidSecs,
+		Audio:   w.Audio,
 		Images:  w.Images,
 		Quote:   w.Quote,
 	}
@@ -116,6 +119,7 @@ func (it Item) Wire() Wire {
 		Video:   it.Video,
 		Poster:  it.Poster,
 		VidSecs: it.VidSecs,
+		Audio:   it.Audio,
 		Images:  it.Images,
 		Quote:   it.Quote,
 	}

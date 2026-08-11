@@ -272,6 +272,10 @@ func scrapeArticle(id, fragment string) Article {
 	if err != nil {
 		return a
 	}
+	// A podcast's episode file, from the whole fragment rather than the content
+	// body: Inoreader hangs the enclosure off its player chrome, which sits
+	// outside the article text.
+	a.Audio = core.AudioFromHTML(fragment)
 
 	var content *html.Node
 	var walk func(*html.Node)

@@ -61,6 +61,48 @@ func TestImagesFromHTMLCaps(t *testing.T) {
 	}
 }
 
+func TestAudioFromHTML(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"audio src", `<audio preload="metadata" src="https://e.com/ep.mp3"></audio>`, "https://e.com/ep.mp3"},
+		{
+			"source child",
+			`<audio controls><source src="https://e.com/ep.m4a" type="audio/mp4"></audio>`,
+			"https://e.com/ep.m4a",
+		},
+		{
+			// Inoreader parks the enclosure here for the player its own script
+			// builds; the class is what says the file is audio.
+			"data-media-url on the player div",
+			`<div class="enclosures_audio_player audio-url" data-media-url="https://dts.podtrac.com/redirect.mp3/x/default.mp3?aid=rss_feed" data-media-type="0"></div>`,
+			"https://dts.podtrac.com/redirect.mp3/x/default.mp3?aid=rss_feed",
+		},
+		{
+			"typed enclosure link",
+			`<a href="https://e.com/dl?id=7" data-type="audio/mpeg">default.mp3</a>`,
+			"https://e.com/dl?id=7",
+		},
+		{"link by extension", `<a href="https://e.com/ep.mp3?utm=1">ep.mp3</a>`, "https://e.com/ep.mp3?utm=1"},
+		{
+			"player wins over the link below it",
+			`<audio src="https://e.com/ep.mp3"></audio><a href="https://e.com/other.mp3">other</a>`,
+			"https://e.com/ep.mp3",
+		},
+		{"a video carrier is not audio", `<div data-media-url="https://e.com/clip.mp4"></div>`, ""},
+		{"plain link ignored", `<a href="https://e.com/post">post</a>`, ""},
+		{"no media", `<p>just words</p>`, ""},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		if got := AudioFromHTML(c.in); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestImageURL(t *testing.T) {
 	cases := map[string]string{
 		"https://e.com/a.jpg":   "https://e.com/a.jpg",

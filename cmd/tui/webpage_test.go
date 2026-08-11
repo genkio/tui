@@ -431,6 +431,49 @@ func TestRenderCardVideo(t *testing.T) {
 	}
 }
 
+func TestRenderCardAudio(t *testing.T) {
+	it := core.Item{
+		App: "inoreader", ID: "77", Title: "Why Adults Are Getting Cancer at a Younger Age",
+		Body: "Show notes", Source: "The Daily", URL: "https://ex.com/thedaily",
+		Audio: "https://dts.podtrac.com/redirect.mp3/x/default.mp3?aid=rss_feed",
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `<audio class="aud" controls preload="metadata" src="https://dts.podtrac.com/redirect.mp3/x/default.mp3?aid=rss_feed"`) {
+		t.Fatalf("expected an inline audio player: %s", out)
+	}
+	// An episode plays at the shared 2× like any other player, but sound is the
+	// whole point of it, so it gets no mute toggle — nor rotate, nor /dl, which
+	// only x's video CDN is allowed through.
+	if !strings.Contains(out, `class="speed"`) {
+		t.Fatalf("expected the speed control: %s", out)
+	}
+	if strings.Contains(out, `class="mute"`) || strings.Contains(out, `class="rot"`) || strings.Contains(out, "/dl?") {
+		t.Fatalf("audio should carry no mute, rotate, or download: %s", out)
+	}
+	// No episode -> no player, no controls.
+	it.Audio = ""
+	if out := renderCard(t, it); strings.Contains(out, "<audio") || strings.Contains(out, `class="speed"`) {
+		t.Fatalf("player and controls should be absent without audio: %s", out)
+	}
+}
+
+// A podcast item that also has a video keeps the full video control set, with
+// one speed button driving both players.
+func TestRenderCardAudioAndVideoShareOneSpeed(t *testing.T) {
+	it := core.Item{
+		App: "inoreader", ID: "78", Title: "both", Body: "both", Source: "feed",
+		Video: "https://video.twimg.com/ext_tw_video/78/high.mp4",
+		Audio: "https://ex.com/ep.mp3",
+	}
+	out := renderCard(t, it)
+	if strings.Count(out, `class="speed"`) != 1 {
+		t.Errorf("speed is global, so one button: %s", out)
+	}
+	if !strings.Contains(out, `class="mute"`) || !strings.Contains(out, `class="rot"`) {
+		t.Errorf("the video's own controls must survive: %s", out)
+	}
+}
+
 func TestRenderCardVideoLength(t *testing.T) {
 	it := core.Item{
 		App: "x", ID: "50", Title: "watch this", Body: "watch this", Source: "@vera",

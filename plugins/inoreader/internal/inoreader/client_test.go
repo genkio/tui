@@ -98,6 +98,27 @@ func TestUnreadsScrapesAndOrders(t *testing.T) {
 	}
 }
 
+// A podcast subscription hangs the episode file off the player chrome, which
+// sits outside the article body, so the whole fragment has to be searched.
+func TestScrapeArticleFindsPodcastEnclosure(t *testing.T) {
+	const ep = "https://dts.podtrac.com/redirect.mp3/nyt.simplecastaudio.com/x/audio/128/default.mp3?aid=rss_feed"
+	frag := `<div class="enclosures_audio_player d-none audio-url" data-article-id="1003" data-media-url="` + ep + `" data-media-type="0"></div>` +
+		`<a class="article_title_link" id="article_title_link_1003" href="https://ex.com/3">Episode</a>` +
+		`<div class="article_content" id="article_contents_inner_1003"><p>Show notes</p>` +
+		`<table class="tbl enclosures_tbl"><tr><td><a target="_blank" href="` + ep + `" data-type="audio/mpeg">default.mp3</a></td></tr></table></div>`
+
+	a := scrapeArticle("1003", frag)
+	if a.Audio != ep {
+		t.Errorf("audio = %q, want %q", a.Audio, ep)
+	}
+	if got := ToItems([]Article{a})[0].Audio; got != ep {
+		t.Errorf("ToItems dropped the episode: %q", got)
+	}
+	if a := scrapeArticle("1001", frag1001); a.Audio != "" {
+		t.Errorf("a plain article carries no audio: %q", a.Audio)
+	}
+}
+
 func TestStaleSessionDetection(t *testing.T) {
 	// Inoreader answers with a generic "no request processor" envelope when the
 	// session cookie has rotated; we must surface it as a stale-session error so

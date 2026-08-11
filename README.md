@@ -150,7 +150,11 @@ what you've read. Long posts are clipped, and the ellipsis is followed by a
 the footer collapses it again). Each card's footer has a **link icon** that
 opens the original post in a new tab (the only way to leave the page) and a
 **share** button that hands the post to your phone's share sheet (falling back
-to copying it where the browser has no share API). Since scroll-to-read can't
+to copying it where the browser has no share API). Attached media plays on the
+page: a video (or a linked YouTube clip) as a click-to-play player, a podcast
+episode from a reader as an audio bar. Playback is set once for the whole feed
+from any card's footer — **2×** by default, tapped down to 1× — and video also
+starts muted, where an episode never does. Since scroll-to-read can't
 reach the last few cards, a **mark all read** button sits at the end of the
 feed to clear the tail in one tap. Once everything is read, if x is logged in,
 a link at the bottom offers to **continue on x For You**; following it switches

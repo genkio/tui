@@ -14,4 +14,5 @@ type Article struct {
 	Age     string   // server-rendered relative time, e.g. "2h"; "" if absent
 	Content string   // body flattened to plain text; shown on expand
 	Images  []string // images from the body HTML, before it was flattened
+	Audio   string   // attached episode file, for a podcast subscription
 }
