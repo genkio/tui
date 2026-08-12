@@ -53,8 +53,9 @@ mv ~/.config/tui/env "$TUI_STATE_DIR/env"
 for d in ~/.local/state/*-tui; do mkdir -p "$TUI_STATE_DIR/state/$(basename $d)" && mv $d/* "$TUI_STATE_DIR/state/$(basename $d)/"; done
 ```
 
-The flag only affects the launcher; when running a plugin directly
-(`tui x`), set the env var. The browser login profile
+The flag works on the launcher and on a single app alike (`tui --state-dir
+<dir>`, `tui x --state-dir <dir>`), and an app the picker opens inherits
+whatever the launcher was given. The browser login profile
 (`~/.config/tui/profile`) deliberately stays local: live Chromium profiles
 don't survive file syncing, and the captured session values in `env` are what
 the apps actually use. Read marks are whole-file JSON saves, so triage from one

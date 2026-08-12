@@ -682,11 +682,9 @@ func main() {
 	}
 
 	// Export the state dir so every self-exec'd `tui <app>` subprocess resolves
-	// the same env/read-state/config paths as the launcher; normalized (~ and
-	// relative paths expanded) so children don't depend on the launcher's cwd.
+	// the same env/read-state/config paths as the launcher.
 	if *stateDir != "" {
-		os.Setenv("TUI_STATE_DIR", *stateDir)
-		os.Setenv("TUI_STATE_DIR", core.StateDir())
+		exportStateDir(*stateDir)
 	}
 
 	// root locates the dev source tree for per-plugin .env; an installed binary

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,8 +39,45 @@ func runPluginIfRequested() {
 	if !ok {
 		return
 	}
+	os.Args = takeStateDir(os.Args)
 	os.Args = append(os.Args[:1], os.Args[2:]...)
 	os.Exit(run())
+}
+
+// takeStateDir turns the launcher's --state-dir into the env var the state
+// paths actually read, and takes it out of the arguments. A plugin runs from
+// here, before the launcher parses anything, so its own flag set is the only
+// one in play — and it does not define this flag, which is why `tui x
+// --state-dir DIR` used to die on "flag provided but not defined". Both flag
+// spellings and both value forms are accepted, the same as Go's flag package.
+func takeStateDir(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		name, val, hasVal := strings.Cut(args[i], "=")
+		if name != "-state-dir" && name != "--state-dir" {
+			out = append(out, args[i])
+			continue
+		}
+		if !hasVal {
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "tui: -state-dir needs a directory")
+				os.Exit(2)
+			}
+			i++
+			val = args[i]
+		}
+		exportStateDir(val)
+	}
+	return out
+}
+
+// exportStateDir publishes the state dir for everything that reads it: this
+// process's own core.StatePath/ConfigPath calls and any `tui <app>` subprocess
+// it spawns. Stored normalized (~ and relative paths expanded) so a child with
+// a different working directory resolves the same files.
+func exportStateDir(dir string) {
+	os.Setenv("TUI_STATE_DIR", dir)
+	os.Setenv("TUI_STATE_DIR", core.StateDir())
 }
 
 // self is the path to this binary, for re-running a plugin as `tui <app>`.
