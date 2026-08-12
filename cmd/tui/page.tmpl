@@ -67,6 +67,23 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .quote .vidbox{margin-bottom:0}
 .quote .vid{max-height:50vh}
 .quote .open{font-size:13px;min-height:32px}
+/* The saved list arrives whole (it is read from disk, not scraped), so it can
+   be sliced where it sits: a row of chips over the first card, one group per
+   axis. Picks inside a group are alternatives; the groups all have to hold. */
+.filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 12px}
+.fgroup{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+/* groups are set apart by a wider gap, not a rule: the row wraps as chips are
+   added, and a rule at the start of a wrapped line reads as a stray mark */
+.fgroup+.fgroup{margin-left:6px}
+.fchip{
+  display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-radius:999px;
+  padding:4px 11px;min-height:36px;color:var(--muted);
+  font:inherit;font-size:13px;font-weight:600;
+}
+.fchip[data-on="1"]{border-color:var(--accent);color:var(--fg)}
+.fchip .fn{font-variant-numeric:tabular-nums;opacity:.65}
+.fclear{margin-left:auto;color:var(--accent)}
 .card.read{opacity:.45}
 /* a card with a player carries most of a dozen actions, more than a phone is
    wide: the row scrolls sideways rather than wrapping into a second line that
@@ -217,7 +234,9 @@ video.ffs{object-fit:cover !important}
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">Inbox zero across every timeline.</div>
 {{if .OfferForYou}}<div class="note offer">All caught up. {{template "foryou" .}}</div>
-{{end}}{{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
+{{end}}{{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}{{$kind := .Kind}}<div class="fgroup">{{range .Chips}}<button class="fchip" type="button" data-kind="{{$kind}}" data-key="{{.Key}}" data-on="0">{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn">{{.Count}}</span></button>{{end}}</div>{{end}}<button class="fchip fclear hid" type="button" id="fclear">clear</button></div>
+<div class="note hid" id="noMatch">Nothing saved matches those filters.</div>
+{{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
 {{end}}<div class="stamp" id="stamp"></div></div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.{{if .XForYou}} {{template "foryou" .}}{{end}}</div>
 {{else}}{{range .Cards}}{{template "card" .}}
@@ -861,6 +880,39 @@ document.addEventListener('click', function(e){
 // Coming back through history restores this page as it was left, cover and all.
 window.addEventListener('pageshow', function(){ document.getElementById('loading').classList.add('hid'); });
 
+// The saved list's filter chips. The whole list is already in the page, so a
+// pick is a matter of hiding cards, not a round trip: within a group the picks
+// are alternatives (x or reddit), and each group is a condition of its own
+// (reddit *and* video). A group with nothing picked asks nothing.
+(function(){
+  var bar = document.getElementById('filters');
+  if (!bar) return;
+  var none = document.getElementById('noMatch');
+  var clear = document.getElementById('fclear');
+  function picked(kind){
+    return [].map.call(bar.querySelectorAll('.fchip[data-kind="' + kind + '"][data-on="1"]'), function(b){ return b.dataset.key; });
+  }
+  function apply(){
+    var apps = picked('app'), types = picked('type'), shown = 0;
+    document.querySelectorAll('article.card').forEach(function(c){
+      var ok = (!apps.length || apps.indexOf(c.dataset.app) >= 0) &&
+               (!types.length || types.indexOf(c.dataset.type) >= 0);
+      c.classList.toggle('hid', !ok);
+      if (ok) shown++;
+    });
+    var any = apps.length + types.length > 0;
+    clear.classList.toggle('hid', !any);
+    none.classList.toggle('hid', shown > 0);
+  }
+  bar.addEventListener('click', function(e){
+    var b = e.target.closest('.fchip');
+    if (!b) return;
+    if (b === clear) bar.querySelectorAll('.fchip').forEach(function(c){ c.dataset.on = '0'; });
+    else b.dataset.on = b.dataset.on === '1' ? '0' : '1';
+    apply();
+  });
+})();
+
 // The ?x=foryou hand-off is one-shot: strip the param so any later reload
 // returns to the normal Following default.
 if(location.search.indexOf('x=foryou') !== -1){ history.replaceState(null, '', location.pathname); }
@@ -877,4 +929,4 @@ function maybeOfferForYou(){
      on each visit — from For You itself too, so there is always another round
      to pull rather than a dead end. */}}
 {{define "foryou"}}<a href="/?x=foryou">{{if .OnForYou}}Another round of For You from x →{{else}}Continue with For You from x →{{end}}</a>{{end}}
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}

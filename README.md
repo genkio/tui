@@ -175,6 +175,16 @@ versa. Items are sorted **oldest-first** (triage in the order they arrived;
 things, newest first**. The page uses the Inter webfont (with system
 fallbacks) for a polished read.
 
+The saved list is read from disk rather than scraped, so it arrives whole and
+can be sliced where it sits: a row of **filter chips** above the first card,
+one group for the **source** (`𝕏`, `rdt`, `ino`, …) and one for what the item
+carries (**text**, **video**, **audio**), each chip counting what it would
+leave. Picks inside a group are alternatives (x *or* reddit) and the groups
+all have to hold (reddit *and* video), so several can be on at once; **clear**
+drops them all. Filtering hides cards the page already has — no round trip —
+and a group that would light up the whole list isn't drawn, so a saved list of
+one kind from one app gets no chips.
+
 The page is server-rendered and responsive (cards stack full-width, tap-sized
 targets, follows your phone's light/dark theme). A feed page is scraped before
 a byte of it is sent, so following a link that refetches puts a **loading…**

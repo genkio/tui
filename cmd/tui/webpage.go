@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -77,7 +78,22 @@ type pageData struct {
 	OfferForYou bool // empty feed: offer x's For You right away
 	XForYou     bool // x is authed, so For You is always somewhere to go next
 	OnForYou    bool // ...and it is already what's on screen, so the next tap is another round
+	Filters     []filterGroup
 	Cards       []cardData
+}
+
+// filterGroup is one axis the saved list can be narrowed along; its chips are
+// alternatives, and the groups are conditions that all have to hold.
+type filterGroup struct {
+	Kind  string // "app" or "type", the card attribute the chips test
+	Chips []filterChip
+}
+
+type filterChip struct {
+	Key   string
+	Label string
+	Color string // the source's own chip color; blank for the content types
+	Count int
 }
 
 type healthEntry struct {
@@ -102,6 +118,7 @@ type cardData struct {
 	HasVideo    bool   // this card or its quote has a player, so show the shared controls
 	Audio       string // attached episode file; the card shows an inline audio player
 	RedGif      string // redgifs clip id; the footer offers to fetch and play it
+	Type        string // what the card carries: "video", "audio" or "text"
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
@@ -191,10 +208,18 @@ func buildPageData(in pageInput) pageData {
 		savedCount = in.saved.count()
 	}
 
+	// Only the saved list gets the filter cloud: it is served whole from disk,
+	// so slicing it is a matter of hiding cards the browser already has.
+	var filters []filterGroup
+	if in.savedView {
+		filters = savedFilters(cards)
+	}
+
 	return pageData{
 		Unread:    len(in.items),
 		Saved:     savedCount,
 		SavedView: in.savedView,
+		Filters:   filters,
 		Swipe:     swipe,
 		Health:    health,
 		Warn:      in.warn,
@@ -209,15 +234,25 @@ func buildPageData(in pageInput) pageData {
 	}
 }
 
+// appLabel and appColor are how a service shows up on a card: its short chip
+// name and the theme color the terminal gives it, with a fallback for an app
+// the web view hasn't been taught yet.
+func appLabel(app string) string {
+	if l := appLabels[app]; l != "" {
+		return l
+	}
+	return app
+}
+
+func appColor(app string) string {
+	if c := appColors[app]; c != "" {
+		return c
+	}
+	return "#4a9eff"
+}
+
 func buildCard(it core.Item, starred bool, cl clips) cardData {
-	chip := appLabels[it.App]
-	if chip == "" {
-		chip = it.App
-	}
-	color := appColors[it.App]
-	if color == "" {
-		color = "#4a9eff"
-	}
+	chip, color := appLabel(it.App), appColor(it.App)
 
 	title := strings.TrimSpace(it.Title)
 	body := strings.TrimSpace(it.Body)
@@ -261,7 +296,65 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
 	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
+	c.Type = cardType(c, it)
 	return c
+}
+
+// ytLinkRe is the client's ytId() as a test: a card linking a YouTube video
+// grows a player in the browser, so the saved list should call it a video even
+// though nothing was attached to the item.
+var ytLinkRe = regexp.MustCompile(`(?:youtube\.com/watch\?[^#]*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)[\w-]{11}`)
+
+// cardType sorts a card by what it carries, so the saved list can be sliced
+// into things to watch, things to listen to, and things to read. A card with
+// both a player and an episode is a video: that is what the eye lands on.
+func cardType(c cardData, it core.Item) string {
+	switch {
+	case c.HasVideo, c.RedGif != "", ytLinkRe.MatchString(it.URL + " " + it.Title + " " + it.Body):
+		return "video"
+	case c.Audio != "":
+		return "audio"
+	default:
+		return "text"
+	}
+}
+
+// savedFilters builds the chip cloud over the saved list: one group per axis
+// (which service it came from, what it carries), each chip counting the cards
+// it stands for. A group whose chips are the whole list narrows nothing, so it
+// is left out — and with both left out there is no cloud to draw.
+func savedFilters(cards []cardData) []filterGroup {
+	apps, types := map[string]int{}, map[string]int{}
+	for _, c := range cards {
+		apps[c.App]++
+		types[c.Type]++
+	}
+	var out []filterGroup
+	if len(apps) > 1 {
+		g := filterGroup{Kind: "app"}
+		for a, n := range apps {
+			g.Chips = append(g.Chips, filterChip{Key: a, Label: appLabel(a), Color: appColor(a), Count: n})
+		}
+		// biggest source first, alphabetical between ties, so the row is stable
+		// from load to load
+		sort.Slice(g.Chips, func(i, j int) bool {
+			if g.Chips[i].Count != g.Chips[j].Count {
+				return g.Chips[i].Count > g.Chips[j].Count
+			}
+			return g.Chips[i].Key < g.Chips[j].Key
+		})
+		out = append(out, g)
+	}
+	if len(types) > 1 {
+		g := filterGroup{Kind: "type"}
+		for _, t := range []string{"text", "video", "audio"} { // always this order, whatever the counts
+			if n := types[t]; n > 0 {
+				g.Chips = append(g.Chips, filterChip{Key: t, Label: t, Count: n})
+			}
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 // buildQuote shapes an embedded post into the nested card, clipped tighter than

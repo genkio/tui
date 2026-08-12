@@ -961,6 +961,105 @@ func TestSavedPageAndButton(t *testing.T) {
 	}
 }
 
+func TestCardType(t *testing.T) {
+	cases := []struct {
+		name string
+		it   core.Item
+		want string
+	}{
+		{"plain post", core.Item{App: "reddit", Title: "hi", Body: "there"}, "text"},
+		{"attached video", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4"}, "video"},
+		{"quoted video", core.Item{App: "x", Quote: &core.Quote{Video: "https://video.twimg.com/a.mp4"}}, "video"},
+		{"redgifs link", core.Item{App: "reddit", URL: "https://www.redgifs.com/watch/elementaryhoarseflea"}, "video"},
+		// The player is built in the browser from the link, but the item is a
+		// video all the same.
+		{"youtube link", core.Item{App: "folo", Body: "clip: https://youtu.be/aqz-KE-bpKQ"}, "video"},
+		{"podcast", core.Item{App: "inoreader", Audio: "https://ex.com/ep.mp3"}, "audio"},
+		{"both", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4", Audio: "https://ex.com/ep.mp3"}, "video"},
+	}
+	for _, c := range cases {
+		if got := buildCard(c.it, false, listClips).Type; got != c.want {
+			t.Errorf("%s: type = %q, want %q", c.name, got, c.want)
+		}
+		if out := renderCard(t, c.it); !strings.Contains(out, `data-type="`+c.want+`"`) {
+			t.Errorf("%s: card should carry its type: %s", c.name, out)
+		}
+	}
+}
+
+func TestSavedFilters(t *testing.T) {
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	now := time.Now()
+	items := []core.Item{
+		{App: "reddit", ID: "1", Title: "read me", Source: "r/go"},
+		{App: "reddit", ID: "2", Title: "clip", URL: "https://www.redgifs.com/watch/elementaryhoarseflea"},
+		{App: "x", ID: "3", Title: "post", Source: "@vera"},
+		{App: "inoreader", ID: "4", Title: "episode", Audio: "https://ex.com/ep.mp3"},
+	}
+	for _, it := range items {
+		if err := store.add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := renderSavedPage(t, store)
+	for _, want := range []string{
+		`<div class="filters" id="filters">`,
+		`data-kind="app" data-key="reddit" data-on="0"`,
+		`data-kind="app" data-key="x"`,
+		`data-kind="app" data-key="inoreader"`,
+		`data-kind="type" data-key="text"`,
+		`data-kind="type" data-key="video"`,
+		`data-kind="type" data-key="audio"`,
+		`id="noMatch"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("saved page missing %s:\n%s", want, page)
+		}
+	}
+	// The busiest source leads, and every chip states what it would leave.
+	if i, j := strings.Index(page, `data-key="reddit"`), strings.Index(page, `data-key="x"`); i > j {
+		t.Error("reddit has two saved items, so its chip should come first")
+	}
+	if !strings.Contains(page, `<span class="fn">2</span>`) {
+		t.Errorf("expected a count on the reddit chip: %s", page)
+	}
+
+	// The live feed is fetched per load and marked read by scrolling; filtering
+	// belongs to the saved list.
+	if feed := renderPage(t, items, []string{"reddit", "x"}, nil, "following", ""); strings.Contains(feed, `id="filters"`) {
+		t.Error("the filter cloud is for the saved list, not the feed")
+	}
+}
+
+// A group whose chips would all stay lit filters nothing, so it isn't drawn —
+// and a saved list of one kind from one app gets no cloud at all.
+func TestSavedFiltersSkipPointlessGroups(t *testing.T) {
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	now := time.Now()
+	for _, it := range []core.Item{
+		{App: "reddit", ID: "1", Title: "one", Source: "r/go"},
+		{App: "reddit", ID: "2", Title: "two", Source: "r/go"},
+	} {
+		if err := store.add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if page := renderSavedPage(t, store); strings.Contains(page, `id="filters"`) {
+		t.Errorf("one source, one type: nothing to filter by:\n%s", page)
+	}
+
+	if err := store.add(core.Item{App: "reddit", ID: "3", Title: "clip", Video: "https://video.twimg.com/a.mp4"}, now); err != nil {
+		t.Fatal(err)
+	}
+	page := renderSavedPage(t, store)
+	if !strings.Contains(page, `data-kind="type"`) {
+		t.Errorf("a mixed-type list should offer the type group: %s", page)
+	}
+	if strings.Contains(page, `data-kind="app"`) {
+		t.Errorf("everything is from reddit, so the source group is noise: %s", page)
+	}
+}
+
 func TestHealthLabelsAreShort(t *testing.T) {
 	p := renderPage(t, nil, []string{"inoreader", "reddit", "douban", "folo"}, nil, "following", "")
 	for _, want := range []string{">in<", ">rd<", ">db<", ">fo<"} {
