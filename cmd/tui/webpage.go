@@ -101,6 +101,7 @@ type cardData struct {
 	VidLen      string // "1:23" badge over the poster; blank when the length is unknown
 	HasVideo    bool   // this card or its quote has a player, so show the shared controls
 	Audio       string // attached episode file; the card shows an inline audio player
+	RedGif      string // redgifs clip id; the footer offers to fetch and play it
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
@@ -254,6 +255,9 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 	if it.Quote != nil {
 		c.Quote = buildQuote(*it.Quote, cl.quote)
 	}
+	if c.Video == "" {
+		c.RedGif = redgifID(it.URL, it.Title, it.Body)
+	}
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
 	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
@@ -361,6 +365,22 @@ func countWords(s string) int {
 
 func cjkRune(r rune) bool {
 	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
+}
+
+// redgifRe matches a redgifs watch (or embed) link. Reddit posts them as plain
+// link posts, so the id in the URL is all there is to go on — the stream itself
+// is resolved later, only if the footer's video button is tapped.
+var redgifRe = regexp.MustCompile(`(?i)https?://(?:[\w-]+\.)?redgifs\.com/(?:watch|ifr)/([a-z0-9]{3,64})`)
+
+// redgifID returns the first redgifs clip id among the given texts, blank when
+// none of them links one.
+func redgifID(texts ...string) string {
+	for _, t := range texts {
+		if m := redgifRe.FindStringSubmatch(t); m != nil {
+			return strings.ToLower(m[1])
+		}
+	}
+	return ""
 }
 
 // linkRe matches a URL plus any trailing punctuation (so "see http://x.com."

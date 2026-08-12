@@ -152,12 +152,18 @@ opens the original post in a new tab (the only way to leave the page) and a
 **share** button that hands the post to your phone's share sheet (falling back
 to copying it where the browser has no share API). Attached media plays on the
 page: a video (or a linked YouTube clip) as a click-to-play player, a podcast
-episode from a reader as an audio bar. Playback is set once for the whole feed
-from any card's footer — **2×** by default, tapped down to 1× — and video also
-starts muted, where an episode never does. Since scroll-to-read can't
-reach the last few cards, a **mark all read** button sits at the end of the
-feed to clear the tail in one tap. Once everything is read, if x is logged in,
-a link at the bottom offers to **continue on x For You**; following it switches
+episode from a reader as an audio bar. A reddit post whose video lives on
+**redgifs** is only a link, so its footer gets a **video** button instead: tap
+it and the server resolves the clip and plays it on the card, tap again to put
+it away — it is fetched once, so bringing it back costs nothing. Playback is
+set once for the whole feed from any card's footer — **2×** by default, tapped
+down to 1× — and video also starts muted, where an episode never does. A
+**loop** button at the end of the row repeats video (off by default). A footer
+with a player in it outgrows a phone, so the row scrolls sideways. Since
+scroll-to-read can't reach the last few cards, a **mark all read** button sits
+at the end of the feed to clear the tail in one tap. Once everything is read,
+if x is logged in, a link at the bottom offers to **continue on x For You**;
+following it switches
 x to For You (ephemerally — reloading the page returns to the Following
 default). The offer stands on For You too, worded as **another round**, since
 each visit refetches the timeline — so an emptied list is never a dead end. It
@@ -192,7 +198,9 @@ somewhere to go next — another round of it if that is where you already were.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
 to roughly a screenful, so the footer actions — open, save, share, image
-toggle, video controls, the video **keep** download — are always in reach.
+toggle, video controls, the video **keep** download — are always in reach
+(swipe the row itself sideways when they outrun the screen; only the card
+behind it throws).
 Anything past the clip sits behind the same "+N words" toggle. **Mark all
 read** floats as a pill in the bottom-right corner. The saved list is for
 re-reading rather than triage, so it stays a scrolling list even in swipe

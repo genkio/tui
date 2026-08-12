@@ -68,7 +68,16 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .quote .vid{max-height:50vh}
 .quote .open{font-size:13px;min-height:32px}
 .card.read{opacity:.45}
-.footer{display:flex;align-items:center;gap:18px;margin-top:12px}
+/* a card with a player carries most of a dozen actions, more than a phone is
+   wide: the row scrolls sideways rather than wrapping into a second line that
+   would push the next card down */
+.footer{
+  display:flex;align-items:center;gap:18px;margin-top:12px;
+  overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;
+  touch-action:pan-x; /* sideways here is the row's, not the deck's */
+}
+.footer::-webkit-scrollbar{display:none}
+.footer>*{flex:none}
 .markall{
   display:block;width:100%;margin:20px 0 0;padding:14px;
   background:var(--card);border:1px dashed var(--line);color:var(--accent);
@@ -85,7 +94,10 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall.hid{display:none} /* .hid alone loses to .markall.fab */
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img,.share{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save,.img,.share,.rgv,.loop{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.rgv:disabled{opacity:.6;cursor:default}
+.rgv[data-on="1"]{color:var(--accent)}
+.loop[data-on="1"]{color:var(--accent)}
 .save[data-saved="1"]{color:var(--accent)}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
 .hid{display:none}
@@ -363,6 +375,27 @@ document.addEventListener('click', function(e){
   b.dataset.on = on ? '1' : '0';
 });
 
+// The speed/mute/rotate toggles are server-rendered only for the players the
+// server knew about; a player that arrives later — a YouTube embed, a resolved
+// redgifs clip — needs the same footer controls added by hand. A card whose
+// audio player already brought the speed button needs only the rest.
+function addPlayerControls(foot){
+  var ex = foot.querySelector('button.expand'); // null appends, which is the same place
+  if (!foot.querySelector('button.speed')){
+    var sp = document.createElement('button'); sp.type = 'button'; sp.className = 'speed'; sp.title = 'playback speed for every player';
+    foot.insertBefore(sp, ex);
+  }
+  if (!foot.querySelector('button.rot')){
+    var mu = document.createElement('button'); mu.type = 'button'; mu.className = 'mute'; mu.title = 'sound for all videos';
+    var ro = document.createElement('button'); ro.type = 'button'; ro.className = 'rot'; ro.title = 'rotated fullscreen'; ro.textContent = 'rotate';
+    foot.insertBefore(mu, ex); foot.insertBefore(ro, ex);
+  }
+  if (!foot.querySelector('button.loop')){
+    var lo = document.createElement('button'); lo.type = 'button'; lo.className = 'loop'; lo.title = 'repeat every video'; lo.dataset.on = '0';
+    foot.insertBefore(lo, ex); // last of the actions, as the server renders it
+  }
+}
+
 // YouTube links get an inline click-to-play embed: a lazy thumbnail per video
 // that swaps on tap to the official IFrame-API player, so the global speed and
 // mute toggles drive it too. Embedding is the owner's call — when it's
@@ -424,6 +457,7 @@ function ytPlay(thumb, id){
             e.target.setPlaybackRate(SPEED); // loading resets the rate
             pending = false;
           }
+          if (e.data === YT.PlayerState.ENDED && LOOP) e.target.playVideo(); // an embed has no loop attribute
         },
         onError: function(){
           var a = document.createElement('a');
@@ -456,33 +490,73 @@ document.querySelectorAll('article.card').forEach(function(card){
     d.addEventListener('click', function(){ ytPlay(d, id); });
     var foot = card.querySelector('.footer');
     foot.before(d);
-    // The speed/mute toggles are server-rendered only for native players;
-    // give YouTube cards the same footer controls (no save — YouTube doesn't
-    // hand out direct streams the way video.twimg.com does). A card whose
-    // audio player already brought the speed button needs only the rest.
-    var ex = foot.querySelector('button.expand'); // null appends, which is the same place
-    if (!foot.querySelector('button.speed')){
-      var sp = document.createElement('button'); sp.type = 'button'; sp.className = 'speed'; sp.title = 'playback speed for every player';
-      foot.insertBefore(sp, ex);
-    }
-    if (!foot.querySelector('button.rot')){
-      var mu = document.createElement('button'); mu.type = 'button'; mu.className = 'mute'; mu.title = 'sound for all videos';
-      var ro = document.createElement('button'); ro.type = 'button'; ro.className = 'rot'; ro.title = 'rotated fullscreen'; ro.textContent = 'rotate';
-      foot.insertBefore(mu, ex); foot.insertBefore(ro, ex);
-    }
+    // No save button: YouTube doesn't hand out direct streams the way
+    // video.twimg.com does.
+    addPlayerControls(foot);
   });
 });
 
-// Playback settings are global: the speed (default 2x) and mute (default
-// muted) buttons on any card apply to every player — native <video>, YouTube
-// embeds, and podcast <audio> alike — so the whole feed behaves one way. The
-// rate is re-applied on play because loading media resets it. Clicks are
-// delegated since YouTube cards get their buttons injected after this runs.
+// A redgifs post is a link post: nothing on the card plays, and the mp4 hides
+// behind an id casing only redgifs' API knows. The footer's video button asks
+// the server for it, so a card nobody taps costs nothing, and then stays on as
+// a show/hide toggle like the image one — the clip is resolved once, and a
+// second tap puts the card back the way it was.
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.rgv') : null;
+  if (!b || b.disabled) return;
+  var card = b.closest('article.card');
+  var shown = card.querySelector('.rgvbox');
+  if (shown){
+    var on = b.dataset.on !== '1';
+    shown.classList.toggle('hid', !on);
+    if (!on) shown.querySelector('video').pause();
+    b.dataset.on = on ? '1' : '0';
+    return;
+  }
+  b.disabled = true; b.textContent = 'loading…';
+  fetch('/redgif?id=' + encodeURIComponent(b.dataset.id))
+    .then(function(res){ if(!res.ok) throw 0; return res.json(); })
+    .then(function(d){
+      if (!d.video) throw 0;
+      var box = document.createElement('div');
+      box.className = 'vidbox rgvbox';
+      var v = document.createElement('video');
+      v.className = 'vid'; v.controls = true; v.playsInline = true; v.muted = MUTED; v.src = d.video;
+      if (d.poster) v.poster = d.poster;
+      box.appendChild(v);
+      if (d.len){
+        var len = document.createElement('span');
+        len.className = 'vlen'; len.textContent = d.len;
+        box.appendChild(len);
+      }
+      var foot = card.querySelector('.footer');
+      foot.before(box);
+      b.disabled = false; b.dataset.on = '1'; b.textContent = 'video';
+      addPlayerControls(foot);
+      v.addEventListener('play', function(){ v.playbackRate = SPEED; });
+      applyMediaPrefs();
+      // the tap that asked for it is the gesture that may play it
+      var p = v.play();
+      if (p && p.catch) p.catch(function(){});
+    })
+    .catch(function(){
+      b.disabled = false; b.textContent = 'video';
+      toast('could not load the video');
+    });
+});
+
+// Playback settings are global: the speed (default 2x), mute (default muted)
+// and loop (default off) buttons on any card apply to every player — native
+// <video>, YouTube embeds, and podcast <audio> alike — so the whole feed
+// behaves one way. The rate is re-applied on play because loading media resets
+// it. Clicks are delegated since YouTube cards get their buttons injected
+// after this runs.
 var SPEED = 2;
 var MUTED = true;
+var LOOP = false;
 function applyMediaPrefs(){
   document.querySelectorAll('video.vid').forEach(function(v){
-    v.defaultPlaybackRate = SPEED; v.playbackRate = SPEED; v.muted = MUTED;
+    v.defaultPlaybackRate = SPEED; v.playbackRate = SPEED; v.muted = MUTED; v.loop = LOOP;
   });
   // Audio is the content, not a moving picture with a soundtrack: mute never
   // applies to it, so only the speed carries over.
@@ -495,11 +569,16 @@ function applyMediaPrefs(){
   });
   document.querySelectorAll('button.speed').forEach(function(b){ b.textContent = SPEED + '×'; });
   document.querySelectorAll('button.mute').forEach(function(b){ b.textContent = MUTED ? 'unmute' : 'mute'; });
+  document.querySelectorAll('button.loop').forEach(function(b){
+    b.dataset.on = LOOP ? '1' : '0';
+    b.textContent = LOOP ? 'looping' : 'loop';
+  });
 }
 document.addEventListener('click', function(e){
-  var b = e.target.closest ? e.target.closest('button.speed, button.mute') : null;
+  var b = e.target.closest ? e.target.closest('button.speed, button.mute, button.loop') : null;
   if (!b) return;
   if (b.classList.contains('speed')) SPEED = SPEED === 2 ? 1 : 2;
+  else if (b.classList.contains('loop')) LOOP = !LOOP;
   else MUTED = !MUTED;
   applyMediaPrefs();
 });
@@ -522,7 +601,8 @@ function ffsPlayers(){
 }
 function enterFfs(card){
   if (ffs || !card) return;
-  var el = card.querySelector('video.vid') || card.querySelector('.yt-embed');
+  // a player the video toggle has put away is not the one to blow up
+  var el = card.querySelector('.vidbox:not(.hid) video.vid') || card.querySelector('.yt-embed');
   if (!el){
     var thumb = card.querySelector('.yt'); // not started yet: start it now
     if (thumb) thumb.click();
@@ -718,8 +798,9 @@ if (SWIPE) (function(){
     if (ffs || (e.button != null && e.button !== 0)) return;
     var card = current();
     if (!card || card !== e.target.closest('article.card')) return;
-    // The card's own controls (player, links, footer buttons) own their taps.
-    if (e.target.closest('button, a, video, audio, iframe, input, .yt')) return;
+    // The card's own controls (player, links, footer buttons) own their taps,
+    // and the footer scrolls sideways on its own — that drag is not a throw.
+    if (e.target.closest('button, a, video, audio, iframe, input, .yt, .footer')) return;
     drag = {card: card, id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, axis: '', t0: Date.now()};
   });
   deck.addEventListener('pointermove', function(e){
@@ -796,4 +877,4 @@ function maybeOfferForYou(){
      on each visit — from For You itself too, so there is always another round
      to pull rather than a dead end. */}}
 {{define "foryou"}}<a href="/?x=foryou">{{if .OnForYou}}Another round of For You from x →{{else}}Continue with For You from x →{{end}}</a>{{end}}
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}

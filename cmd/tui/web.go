@@ -103,6 +103,7 @@ func runWeb(root, addr string, dev, swipe bool) error {
 	mux.HandleFunc("/dl", handleDownload)
 	mux.HandleFunc("/img", handleImage)
 	mux.HandleFunc("/ytlen", newYTLens().handle)
+	mux.HandleFunc("/redgif", newRedgifLens().handle)
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {

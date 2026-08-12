@@ -423,11 +423,76 @@ func TestRenderCardVideo(t *testing.T) {
 	if !strings.Contains(out, "<span>keep</span>") || strings.Count(out, ">save</button>") != 1 {
 		t.Fatalf("the download link must not also be labelled save: %s", out)
 	}
+	// Repeat is the last of the footer's actions, and off until asked for.
+	if !strings.Contains(out, `<button class="loop" type="button" data-on="0"`) {
+		t.Fatalf("expected a loop toggle, off by default: %s", out)
+	}
+	if !strings.HasSuffix(strings.TrimSuffix(out, "</article>"), ">loop</button></div>") {
+		t.Fatalf("loop should come last in the footer: %s", out)
+	}
 	// No video -> no player, no controls.
 	it.Video, it.Poster = "", ""
 	out = renderCard(t, it)
 	if strings.Contains(out, "<video") || strings.Contains(out, `class="speed"`) || strings.Contains(out, "/dl?") {
 		t.Fatal("player and controls should be absent without a video")
+	}
+	if strings.Contains(out, `class="loop"`) {
+		t.Fatal("nothing to repeat without a video")
+	}
+}
+
+// A redgifs link post has nothing playable in the feed JSON, so the card offers
+// a video button instead of a player: the stream is resolved only when tapped.
+func TestRenderCardRedgif(t *testing.T) {
+	it := core.Item{
+		App: "reddit", ID: "1abc", Title: "massage day",
+		Source: "r/jav", Author: "someone",
+		URL:    "https://www.redgifs.com/watch/ElementaryHoarseFlea",
+		Images: []string{"https://preview.redd.it/abc.jpg"},
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `<button class="rgv" type="button" data-on="0" data-id="elementaryhoarseflea"`) {
+		t.Fatalf("expected the footer video button, off until tapped: %s", out)
+	}
+	// Nothing plays yet, so none of the player controls are rendered: the button
+	// brings them along when it swaps itself for the player.
+	if strings.Contains(out, "<video") || strings.Contains(out, `class="speed"`) {
+		t.Fatalf("no player until the button is tapped: %s", out)
+	}
+
+	// The link can also sit in the body of a self post.
+	it.URL = "https://old.reddit.com/r/jav/comments/1abc/massage_day/"
+	it.Body = "mirror: https://redgifs.com/ifr/elementaryhoarseflea"
+	if out := renderCard(t, it); !strings.Contains(out, `data-id="elementaryhoarseflea"`) {
+		t.Fatalf("a redgifs link in the body should offer the same button: %s", out)
+	}
+
+	// Any other link is left alone.
+	it.Body = "see https://example.com/watch/nothing"
+	if out := renderCard(t, it); strings.Contains(out, `class="rgv"`) {
+		t.Fatalf("only redgifs links get the button: %s", out)
+	}
+}
+
+func TestRedgifID(t *testing.T) {
+	cases := map[string]string{
+		"https://www.redgifs.com/watch/elementaryhoarseflea":       "elementaryhoarseflea",
+		"https://redgifs.com/watch/ElementaryHoarseFlea":           "elementaryhoarseflea",
+		"https://v3.redgifs.com/watch/abc?rel=user%3Asomeone":      "abc",
+		"http://www.redgifs.com/ifr/elementaryhoarseflea":          "elementaryhoarseflea",
+		"look at https://www.redgifs.com/watch/somename, it's ok":  "somename",
+		"https://www.redgifs.com/users/someone":                    "",
+		"https://notredgifs.example.com/watch/elementaryhoarsefle": "",
+		"https://media.redgifs.com/ElementaryHoarseFlea.mp4":       "",
+	}
+	for in, want := range cases {
+		if got := redgifID(in); got != want {
+			t.Errorf("redgifID(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// The first link on the card wins; blank texts are skipped.
+	if got := redgifID("", "", "https://www.redgifs.com/watch/first and https://www.redgifs.com/watch/second"); got != "first" {
+		t.Errorf("got %q, want the first clip linked", got)
 	}
 }
 
@@ -449,6 +514,9 @@ func TestRenderCardAudio(t *testing.T) {
 	}
 	if strings.Contains(out, `class="mute"`) || strings.Contains(out, `class="rot"`) || strings.Contains(out, "/dl?") {
 		t.Fatalf("audio should carry no mute, rotate, or download: %s", out)
+	}
+	if strings.Contains(out, `class="loop"`) {
+		t.Fatalf("an episode is not something to repeat: %s", out)
 	}
 	// No episode -> no player, no controls.
 	it.Audio = ""
