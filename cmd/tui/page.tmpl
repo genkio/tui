@@ -624,6 +624,38 @@ document.querySelectorAll('video.vid, audio.aud').forEach(function(m){
 });
 applyMediaPrefs();
 
+// The length badge turns into a countdown once the clip is running: before a
+// tap it answers "how long is this", after one the useful question is "how much
+// is left". The badge's own text is the length, kept in the element so the end
+// (or a restart) can put it back. Listens in the capture phase, which also
+// catches players that arrive later (a resolved redgifs clip).
+function lenBadge(el){
+  var box = el.parentElement;
+  return box && box.classList.contains('vidbox') ? box.querySelector('.vlen') : null;
+}
+function fmtLen(secs){
+  secs = Math.max(0, Math.round(secs));
+  var m = Math.floor(secs / 60) % 60, s = secs % 60;
+  var h = Math.floor(secs / 3600);
+  var mm = h ? (m < 10 ? '0' + m : '' + m) : '' + m;
+  return (h ? h + ':' : '') + mm + ':' + (s < 10 ? '0' + s : '' + s);
+}
+function countdown(el){
+  var b = lenBadge(el);
+  if (!b || !isFinite(el.duration) || !el.duration) return;
+  if (!b.dataset.len) b.dataset.len = b.textContent;
+  var left = el.duration - el.currentTime;
+  // Ceil so the last second reads 0:01 rather than sitting on 0:00.
+  b.textContent = el.currentTime > 0 ? fmtLen(Math.ceil(left)) : b.dataset.len;
+}
+function countdownReset(el){
+  var b = lenBadge(el);
+  if (b && b.dataset.len) b.textContent = b.dataset.len;
+}
+document.addEventListener('timeupdate', function(e){ countdown(e.target); }, true);
+document.addEventListener('seeked', function(e){ countdown(e.target); }, true);
+document.addEventListener('ended', function(e){ countdownReset(e.target); }, true);
+
 // Where you left off. A saved item is the one thing here that outlives the
 // page, so the position in its player is kept with it: posted back as it plays
 // and handed down with the card, so the next visit — on this phone or on

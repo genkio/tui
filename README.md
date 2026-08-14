@@ -158,7 +158,9 @@ episode from a reader as an audio bar. A reddit post whose video lives on
 it and the server resolves the clip and plays it on the card, tap again to put
 it away — it is fetched once, so bringing it back costs nothing. Playback is
 set once for the whole feed from any card's footer — **2×** by default, tapped
-down to 1× — and video also starts muted, where an episode never does. A
+down to 1× — and video also starts muted, where an episode never does. The
+badge in the player's corner states how long the clip runs before a tap
+downloads any of it, then counts down what's left of it once it's playing. A
 **loop** button at the end of the row repeats video (off by default). A footer
 with a player in it outgrows a phone, so the row scrolls sideways. Since
 scroll-to-read can't reach the last few cards, a **mark all read** button sits
