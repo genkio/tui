@@ -1,4 +1,4 @@
-APPS := x inoreader slack folo reddit douban
+APPS := x inoreader slack folo reddit douban bilibili
 CODESIGN_ID := tui-codesign
 
 .DEFAULT_GOAL := build

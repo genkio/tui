@@ -112,7 +112,8 @@ type cardData struct {
 	PreviewBody template.HTML
 	FullBody    template.HTML
 	URL         string
-	Video       string // direct mp4; the card shows an inline player
+	Video       string // mp4 for the inline player: the app's own, or this server's bilibili route
+	Keep        string // where the footer's keep link saves that mp4 from
 	Poster      string
 	VidLen      string // "1:23" badge over the poster; blank when the length is unknown
 	HasVideo    bool   // this card or its quote has a player, so show the shared controls
@@ -299,13 +300,53 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 		c.Quote = buildQuote(*it.Quote, cl.quote)
 	}
 	if c.Video == "" {
-		c.RedGif = redgifID(it.URL, it.Title, it.Body)
+		// A bilibili post links a watch page and nothing else: the stream behind it
+		// is resolved and proxied by /bili, so the player points there. Everything
+		// else that hides a clip behind a link is redgifs.
+		if bv := biliVideoID(it.App, it.URL); bv != "" {
+			c.Video = biliPath + "?id=" + bv
+		} else {
+			c.RedGif = redgifID(it.URL, it.Title, it.Body)
+		}
 	}
+	c.Keep = keepURL(it.App, it.ID, c.Video)
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
 	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	c.Type = cardType(c, it)
 	return c
+}
+
+// biliVideoRe matches the bvid in a bilibili watch URL. A series episode
+// (/bangumi/play/ep…) has no bvid and so no stream this server can resolve; those
+// cards stay a link out.
+var biliVideoRe = regexp.MustCompile(`bilibili\.com/video/(BV[0-9A-Za-z]{10})`)
+
+// biliVideoID is the bilibili video a card is about, blank when the item is not
+// a bilibili post or does not name one.
+func biliVideoID(app, rawURL string) string {
+	if app != "bilibili" {
+		return ""
+	}
+	if m := biliVideoRe.FindStringSubmatch(rawURL); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// keepURL is where the footer's keep link saves the card's clip from: a direct
+// mp4 goes through /dl, which names the file and gets around the CDN turning away
+// a cross-origin download, while a bilibili clip is already coming through this
+// server and only needs to be asked for as an attachment.
+func keepURL(app, id, video string) string {
+	switch {
+	case video == "":
+		return ""
+	case strings.HasPrefix(video, biliPath+"?"):
+		return video + "&dl=1"
+	default:
+		return "/dl?n=" + app + "-" + id + ".mp4&u=" + url.QueryEscape(video)
+	}
 }
 
 // ytLinkRe is the client's ytId() as a test: a card linking a YouTube video

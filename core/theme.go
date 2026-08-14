@@ -53,6 +53,7 @@ func NewTheme(isDark bool) Theme {
 			"folo":      chip("170"), // magenta
 			"reddit":    chip("208"), // orange
 			"douban":    chip("34"),  // douban green
+			"bilibili":  chip("205"), // bilibili pink
 		},
 	}
 }
@@ -78,4 +79,4 @@ func PlainChip(app string) string {
 	return app
 }
 
-var chipLabels = map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo", "reddit": "rdt", "douban": "dou"}
+var chipLabels = map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo", "reddit": "rdt", "douban": "dou", "bilibili": "bili"}

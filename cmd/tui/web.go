@@ -32,6 +32,7 @@ var appColors = map[string]string{
 	"folo":      "#d07df0", // magenta
 	"reddit":    "#ff6b33", // orange
 	"douban":    "#00b51d", // douban green
+	"bilibili":  "#fb7299", // bilibili pink
 }
 
 var appLabels = map[string]string{
@@ -40,6 +41,7 @@ var appLabels = map[string]string{
 	"folo":      "folo",
 	"reddit":    "rdt",
 	"douban":    "dou",
+	"bilibili":  "bili",
 }
 
 // healthLabels are the header's per-service dot labels, kept to two characters
@@ -51,6 +53,7 @@ var healthLabels = map[string]string{
 	"folo":      "fo",
 	"reddit":    "rd",
 	"douban":    "db",
+	"bilibili":  "bl",
 }
 
 // runWeb serves the merged "all" timeline over HTTP, bound to addr (default
@@ -114,6 +117,7 @@ func runWeb(root, addr string, dev, swipe bool) error {
 	mux.HandleFunc("/img", handleImage)
 	mux.HandleFunc("/ytlen", newYTLens().handle)
 	mux.HandleFunc("/redgif", newRedgifLens().handle)
+	mux.HandleFunc(biliPath, newBiliLens().handle)
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {

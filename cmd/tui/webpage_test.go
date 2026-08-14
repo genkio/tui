@@ -399,6 +399,46 @@ func TestRenderPageHealthDots(t *testing.T) {
 	}
 }
 
+// A bilibili post carries only a watch page: the player is this server's own
+// route, which resolves the stream when it is first asked for.
+func TestRenderCardBilibiliVideo(t *testing.T) {
+	it := core.Item{
+		App: "bilibili", ID: "1000000000000000001",
+		Title:   "我做了一个东西",
+		Body:    "花了三个月做这个",
+		Source:  "何同学 · 1.2万播放",
+		URL:     "https://www.bilibili.com/video/BV1GJ411x7h7",
+		Poster:  "https://i2.hdslb.com/bfs/archive/cover.jpg",
+		VidSecs: 754,
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `src="/bili?id=BV1GJ411x7h7"`) {
+		t.Fatalf("expected the player to point at the bilibili route: %s", out)
+	}
+	if !strings.Contains(out, `poster="https://i2.hdslb.com/bfs/archive/cover.jpg"`) || !strings.Contains(out, `<span class="vlen">12:34</span>`) {
+		t.Fatalf("the cover and the running time come from the feed: %s", out)
+	}
+	if !strings.Contains(out, `href="/bili?id=BV1GJ411x7h7&amp;dl=1"`) {
+		t.Fatalf("keep should ask the same route for an attachment: %s", out)
+	}
+	if strings.Contains(out, "/dl?") {
+		t.Fatalf("nothing here is a direct mp4 for the /dl proxy: %s", out)
+	}
+	if !strings.Contains(out, `data-type="video"`) {
+		t.Fatalf("the saved list should be able to slice it as a video: %s", out)
+	}
+	if strings.Contains(out, `class="rgv"`) {
+		t.Fatalf("a bilibili card is not a redgifs card: %s", out)
+	}
+
+	// A series episode names no bvid, so there is nothing to resolve and the card
+	// stays a link out.
+	it.URL = "https://www.bilibili.com/bangumi/play/ep123456"
+	if out = renderCard(t, it); strings.Contains(out, "<video") || strings.Contains(out, "/bili?") {
+		t.Fatalf("a bvid-less post should offer no player: %s", out)
+	}
+}
+
 func TestRenderCardVideo(t *testing.T) {
 	it := core.Item{
 		App: "x", ID: "50", Title: "watch this", Body: "watch this",
@@ -419,7 +459,7 @@ func TestRenderCardVideo(t *testing.T) {
 	if !strings.Contains(out, `class="speed"`) || !strings.Contains(out, `class="mute"`) || !strings.Contains(out, `class="rot"`) {
 		t.Fatalf("expected speed, mute, and rotate controls: %s", out)
 	}
-	if !strings.Contains(out, `href="/dl?n=x-50.mp4&u=https%3a%2f%2fvideo.twimg.com`) {
+	if !strings.Contains(out, `href="/dl?n=x-50.mp4&amp;u=https%3A%2F%2Fvideo.twimg.com`) {
 		t.Fatalf("expected a /dl download link: %s", out)
 	}
 	// Download is 'keep', so it doesn't read as a second copy of the star button.

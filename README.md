@@ -12,6 +12,7 @@ read daily:
 | [`folo`](plugins/folo/README.md)           | Folo pending (unread) article triage        |
 | [`reddit`](plugins/reddit/README.md)       | Reddit home timeline                         |
 | [`douban`](plugins/douban/README.md)       | Douban following timeline (友邻广播)          |
+| [`bilibili`](plugins/bilibili/README.md)   | bilibili 动态: video posts of who you follow  |
 
 The whole family ships as one binary; each app is a plugin under `plugins/`.
 
@@ -41,7 +42,7 @@ export TUI_STATE_DIR=~/Dropbox/tui   # in your shell profile; or: tui --state-di
 ```
 $TUI_STATE_DIR/
   env                          credentials for every app (chmod 600)
-  state/<app>-tui/read.json    read state (x, reddit, douban)
+  state/<app>-tui/read.json    read state (x, reddit, douban, bilibili)
   config/<app>-tui/config.toml per-app settings
 ```
 
@@ -156,7 +157,13 @@ page: a video (or a linked YouTube clip) as a click-to-play player, a podcast
 episode from a reader as an audio bar. A reddit post whose video lives on
 **redgifs** is only a link, so its footer gets a **video** button instead: tap
 it and the server resolves the clip and plays it on the card, tap again to put
-it away — it is fetched once, so bringing it back costs nothing. Playback is
+it away — it is fetched once, so bringing it back costs nothing. A **bilibili**
+post is the same problem one step further on: its mp4 hides behind a play-URL
+call and its CDN refuses anyone without a `bilibili.com` Referer, which a page
+cannot forge — so the card's player points at the server's own `/bili` route,
+which resolves the video, streams it with the headers bilibili wants, and passes
+`Range` through so seeking and rotate-to-fullscreen work as they do for any
+other clip. **keep** asks that route for the same bytes as a download. Playback is
 set once for the whole feed from any card's footer — **2×** by default, tapped
 down to 1× — and video also starts muted, where an episode never does. The
 badge in the player's corner states how long the clip runs before a tap
