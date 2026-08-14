@@ -8,6 +8,7 @@ import (
 	"html"
 	"html/template"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +101,14 @@ func runWeb(root, addr string, dev, swipe bool) error {
 			return
 		}
 		handleSave(w, r, saved, rendered)
+	})
+	mux.HandleFunc("/pos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handlePos(w, r, saved)
 	})
 	mux.HandleFunc("/dl", handleDownload)
 	mux.HandleFunc("/img", handleImage)
@@ -348,6 +358,41 @@ func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, rende
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"saved":%d}`, saved.count())
+}
+
+// maxPosSrc caps the stream URL a position is pinned to, so a stray post can't
+// grow the store.
+const maxPosSrc = 2048
+
+// handlePos remembers how far into a saved item's player the page has got, so
+// the next visit picks up there — on this device or on another one reading the
+// same synced store. Reported while playing and again on pause or as the page
+// goes away, which is also what a sendBeacon lands on. An item that isn't saved
+// is not an error: the page reports from the feed too, and there the position
+// has nothing to live on.
+func handlePos(w http.ResponseWriter, r *http.Request, saved *savedStore) {
+	app, id := r.FormValue("app"), r.FormValue("id")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	secs, err := strconv.ParseFloat(r.FormValue("secs"), 64)
+	if err != nil || math.IsNaN(secs) || math.IsInf(secs, 0) || secs < 0 {
+		http.Error(w, "secs must be a non-negative number", http.StatusBadRequest)
+		return
+	}
+	src := r.FormValue("src")
+	if len(src) > maxPosSrc {
+		http.Error(w, "src too long", http.StatusBadRequest)
+		return
+	}
+	kept, err := saved.setPos(app, id, src, secs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":%t}`, kept)
 }
 
 // sortItems orders the feed by publish time: oldest first when asc is true,

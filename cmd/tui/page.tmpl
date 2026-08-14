@@ -454,6 +454,7 @@ function ytLen(thumb, id){
     .catch(function(){}); // no badge is fine; it is a hint, not the content
 }
 function ytPlay(thumb, id){
+  var card = thumb.closest('article.card');
   var wrap = document.createElement('div');
   wrap.className = 'yt-embed';
   var target = document.createElement('div');
@@ -461,20 +462,36 @@ function ytPlay(thumb, id){
   thumb.replaceWith(wrap);
   ytApi(function(){
     var pending = true;
+    var poll = null;
+    // Where this one was left off, asked for as the player is built: `start` is
+    // YouTube's own resume point, honored before the first frame, where a
+    // seekTo() from onReady races the player's own loading.
+    var at = ytResumeAt(card, id);
+    var vars = {autoplay: 1, playsinline: 1, origin: location.origin};
+    if (at) vars.start = Math.floor(at);
     var p = new YT.Player(target, {
       videoId: id,
       host: 'https://www.youtube-nocookie.com',
-      playerVars: {autoplay: 1, playsinline: 1, origin: location.origin},
+      playerVars: vars,
       events: {
         onReady: function(e){
           e.target.setPlaybackRate(SPEED);
           if (MUTED) e.target.mute(); else e.target.unMute();
+          e.target._posSent = at; // already where the server has it
           e.target.playVideo();
         },
         onStateChange: function(e){
           if (e.data === YT.PlayerState.PLAYING && pending){
             e.target.setPlaybackRate(SPEED); // loading resets the rate
             pending = false;
+          }
+          // An embed has no timeupdate to hang the position report on, so it is
+          // polled while playing and taken once more when it stops.
+          if (e.data === YT.PlayerState.PLAYING){
+            if (!poll) poll = setInterval(function(){ ytSavePos(card, p, id); }, POS_EVERY * 1000);
+          } else {
+            clearInterval(poll); poll = null;
+            if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) ytSavePos(card, e.target, id);
           }
           if (e.data === YT.PlayerState.ENDED && LOOP) e.target.playVideo(); // an embed has no loop attribute
         },
@@ -490,6 +507,7 @@ function ytPlay(thumb, id){
       }
     });
     ytPlayers.push(p);
+    p._posCard = card; p._posId = id; // so a closing page can report this one too
     wrap._ytPlayer = p; // fake fullscreen finds the player via its wrapper
   });
 }
@@ -605,6 +623,99 @@ document.querySelectorAll('video.vid, audio.aud').forEach(function(m){
   m.addEventListener('play', function(){ m.playbackRate = SPEED; });
 });
 applyMediaPrefs();
+
+// Where you left off. A saved item is the one thing here that outlives the
+// page, so the position in its player is kept with it: posted back as it plays
+// and handed down with the card, so the next visit — on this phone or on
+// another device reading the same synced store — picks up there. Media events
+// don't bubble, so these listen in the capture phase, which also catches
+// players that arrive later (a resolved redgifs clip).
+var POS_EVERY = 15; // seconds of playback between reports
+var POS_MIN = 5;    // less than this in is not worth coming back to
+var POS_END = 10;   // this close to the end, it is finished, not paused
+function mediaSrc(el){ return el.currentSrc || el.src || ''; }
+// postPos sends a position for one player, or 0 to forget it. The card carries
+// the last value so a re-render isn't needed to keep the page in step.
+function postPos(card, src, secs, beacon){
+  if (!card || !card.dataset.app) return;
+  var fd = new FormData();
+  fd.append('app', card.dataset.app);
+  fd.append('id', card.dataset.id);
+  fd.append('src', secs > 0 ? src : '');
+  fd.append('secs', secs.toFixed(1));
+  if (beacon && navigator.sendBeacon) navigator.sendBeacon('/pos', fd);
+  else fetch('/pos', {method: 'POST', body: fd, keepalive: true}).catch(function(){});
+  card.dataset.pos = secs;
+  card.dataset.posKey = secs > 0 ? src : '';
+}
+// savePos reports where a player is now: the plain position, or 0 once it is
+// past the end or back near the start, which is how a finished item forgets it.
+function savePos(el, beacon){
+  var card = el.closest ? el.closest('article.card') : null;
+  if (!card || !isFinite(el.duration) || !el.duration) return;
+  var t = el.currentTime;
+  if (t >= el.duration - POS_END || t < POS_MIN) t = 0;
+  if (el._posSent === t) return;
+  el._posSent = t;
+  postPos(card, mediaSrc(el), t, beacon);
+}
+// resumeMedia puts a player back where the card says it was left, once the
+// browser knows how long the media runs.
+function resumeMedia(el){
+  var card = el.closest ? el.closest('article.card') : null;
+  if (!card || !isFinite(el.duration)) return;
+  var at = parseFloat(card.dataset.pos || '0');
+  if (!at || card.dataset.posKey !== mediaSrc(el)) return;
+  if (at < POS_MIN || at > el.duration - POS_END) return;
+  el._posSent = at; // already where the server has it; don't report it back
+  el.currentTime = at;
+}
+document.addEventListener('loadedmetadata', function(e){ resumeMedia(e.target); }, true);
+// An audio bar preloads its metadata as it is parsed, which can land before
+// this script runs at all — so sweep once for players that are already ready
+// rather than waiting for an event that has been and gone.
+document.querySelectorAll('video.vid, audio.aud').forEach(function(m){
+  if (m.readyState >= 1) resumeMedia(m);
+});
+document.addEventListener('timeupdate', function(e){
+  var el = e.target;
+  if (el.paused || !isFinite(el.duration)) return;
+  if (Math.abs(el.currentTime - (el._posAt || 0)) < POS_EVERY) return;
+  el._posAt = el.currentTime;
+  savePos(el);
+}, true);
+document.addEventListener('pause', function(e){ savePos(e.target); }, true);
+document.addEventListener('ended', function(e){ savePos(e.target); }, true);
+// A YouTube embed has no media element to listen to, so its position is read
+// off the player instead. 'yt:<id>' names the stream the way a media URL names
+// a native one, so one saved item can only ever resume one of them.
+// ytResumeAt is where this embed should start, or 0 for the beginning. The
+// duration isn't known before the player exists, so "near the end" is judged
+// when the position is reported instead, which is what stored a 0 in the first
+// place.
+function ytResumeAt(card, id){
+  if (!card || card.dataset.posKey !== 'yt:' + id) return 0;
+  var at = parseFloat(card.dataset.pos || '0');
+  return at >= POS_MIN ? at : 0;
+}
+function ytSavePos(card, p, id, beacon){
+  if (!card || !p || !p.getDuration) return;
+  var d = p.getDuration(), t = p.getCurrentTime();
+  if (!d) return;
+  if (t >= d - POS_END || t < POS_MIN) t = 0;
+  if (p._posSent === t) return;
+  p._posSent = t;
+  postPos(card, 'yt:' + id, t, beacon);
+}
+// A phone closing the tab gets no second chance: send whatever is in flight.
+window.addEventListener('pagehide', function(){
+  document.querySelectorAll('video.vid, audio.aud').forEach(function(m){
+    if (m.currentTime > 0) savePos(m, true);
+  });
+  ytPlayers.forEach(function(p){
+    if (p.getCurrentTime && p.getCurrentTime() > 0) ytSavePos(p._posCard, p, p._posId, true);
+  });
+});
 
 // Fake fullscreen (pipepipe-web's trick): pin the card's player over the
 // viewport, sized 100vh×100vw and rotated -90°, so a landscape video fills a
@@ -929,4 +1040,4 @@ function maybeOfferForYou(){
      on each visit — from For You itself too, so there is always another round
      to pull rather than a dead end. */}}
 {{define "foryou"}}<a href="/?x=foryou">{{if .OnForYou}}Another round of For You from x →{{else}}Continue with For You from x →{{end}}</a>{{end}}
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}"><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Video}}<a class="open" href="/dl?n=x-{{.ID}}.mp4&u={{.Video}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}

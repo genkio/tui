@@ -123,7 +123,9 @@ type cardData struct {
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
 	Expand      bool
-	Saved       bool // starred: the footer button offers to unsave it
+	Saved       bool    // starred: the footer button offers to unsave it
+	Pos         float64 // seconds into PosSrc to resume at; 0 when there is nothing to resume
+	PosSrc      string  // the stream that position belongs to
 }
 
 // cardImages prepares an app's stills for the card, sending the ones the
@@ -200,7 +202,13 @@ func buildPageData(in pageInput) pageData {
 		// In the saved view every card is saved by definition; in the feed ask
 		// the store.
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
-		cards = append(cards, buildCard(it, starred, cl))
+		card := buildCard(it, starred, cl)
+		// Where the item was left off, kept with the item itself. The feed shows
+		// it too: a card starred earlier resumes wherever you got to in it.
+		if in.saved != nil {
+			card.Pos, card.PosSrc = in.saved.pos(it.App, it.ID)
+		}
+		cards = append(cards, card)
 	}
 
 	savedCount := 0

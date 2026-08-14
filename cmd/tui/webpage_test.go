@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1059,6 +1062,162 @@ func TestSavedFiltersSkipPointlessGroups(t *testing.T) {
 		t.Errorf("everything is from reddit, so the source group is noise: %s", page)
 	}
 }
+
+// Where you left off is kept with the saved item, so it survives the page, a
+// restart, and the trip to another device through the synced store.
+func TestSavedPlaybackPosition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "saved.json")
+	store := loadSaved(path)
+	ep := core.Item{App: "inoreader", ID: "9", Title: "episode", Audio: "https://ex.com/ep.mp3"}
+	if err := store.add(ep, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing to resume until something reports a position.
+	if page := renderSavedPage(t, store); strings.Contains(page, "data-pos=") {
+		t.Errorf("a fresh save has no position: %s", page)
+	}
+
+	kept, err := store.setPos("inoreader", "9", "https://ex.com/ep.mp3", 615.5)
+	if err != nil || !kept {
+		t.Fatalf("setPos = %v, %v; want it kept", kept, err)
+	}
+	page := renderSavedPage(t, store)
+	if !strings.Contains(page, `data-pos="615.5" data-pos-key="https://ex.com/ep.mp3"`) {
+		t.Errorf("card should carry the resume point: %s", page)
+	}
+
+	// It is on disk, not just in this process.
+	reloaded := loadSaved(path)
+	if at, src := reloaded.pos("inoreader", "9"); at != 615.5 || src != "https://ex.com/ep.mp3" {
+		t.Errorf("after reload: %v %q, want the stored position", at, src)
+	}
+
+	// Re-saving refreshes the item, not where you got to in it.
+	if err := reloaded.add(ep, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if at, _ := reloaded.pos("inoreader", "9"); at != 615.5 {
+		t.Errorf("re-saving dropped the position (%v)", at)
+	}
+
+	// Finishing (or starting over) forgets it, and the attribute goes with it.
+	if _, err := reloaded.setPos("inoreader", "9", "https://ex.com/ep.mp3", 0); err != nil {
+		t.Fatal(err)
+	}
+	if at, src := reloaded.pos("inoreader", "9"); at != 0 || src != "" {
+		t.Errorf("zero should clear the position, got %v %q", at, src)
+	}
+	if page := renderSavedPage(t, reloaded); strings.Contains(page, "data-pos=") {
+		t.Errorf("a cleared position should not render: %s", page)
+	}
+
+	// An item nobody saved has nowhere to keep one.
+	if kept, err := reloaded.setPos("x", "404", "https://video.twimg.com/a.mp4", 30); kept || err != nil {
+		t.Errorf("setPos on an unsaved item = %v, %v; want it dropped quietly", kept, err)
+	}
+}
+
+// A YouTube embed's position is keyed "yt:<id>", which is not a URL — and the
+// attribute must not be named as if it were one. html/template treats any
+// attribute ending in "src" as a URL context and rewrites anything with an
+// unknown scheme to #ZgotmplZ, which silently broke resuming for every embed.
+func TestSavedPositionKeySurvivesTheTemplate(t *testing.T) {
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	if err := store.add(core.Item{
+		App: "inoreader", ID: "77", Title: "an episode with a clip",
+		Body: "watch: https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.setPos("inoreader", "77", "yt:aqz-KE-bpKQ", 615); err != nil {
+		t.Fatal(err)
+	}
+	page := renderSavedPage(t, store)
+	if strings.Contains(page, "ZgotmplZ") {
+		t.Fatalf("the position key was sanitized away: %s", page)
+	}
+	if !strings.Contains(page, `data-pos="615" data-pos-key="yt:aqz-KE-bpKQ"`) {
+		t.Fatalf("expected the embed's resume key intact: %s", page)
+	}
+}
+
+// The feed shows it too: a card starred earlier resumes where it was left.
+func TestFeedCardCarriesSavedPosition(t *testing.T) {
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	it := core.Item{App: "x", ID: "50", Title: "clip", Video: "https://video.twimg.com/a.mp4"}
+	if err := store.add(it, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.setPos("x", "50", "https://video.twimg.com/a.mp4", 42); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	in := pageInput{items: []core.Item{it}, apps: []string{"x"}, now: time.Now(), saved: store}
+	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), `data-pos="42"`) {
+		t.Errorf("a saved item in the feed should resume too: %s", b.String())
+	}
+}
+
+func TestPosHandler(t *testing.T) {
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	if err := store.add(core.Item{App: "x", ID: "50", Title: "clip"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	post := func(form url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/pos", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handlePos(rec, r, store)
+		return rec
+	}
+
+	rec := post(url.Values{"app": {"x"}, "id": {"50"}, "src": {"https://video.twimg.com/a.mp4"}, "secs": {"42.5"}})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("got %d %s, want the position kept", rec.Code, rec.Body.String())
+	}
+	if at, src := store.pos("x", "50"); at != 42.5 || src != "https://video.twimg.com/a.mp4" {
+		t.Errorf("stored %v %q", at, src)
+	}
+
+	// Reported from the feed for something never starred: accepted, not stored.
+	rec = post(url.Values{"app": {"reddit"}, "id": {"nope"}, "src": {"https://x/a.mp4"}, "secs": {"9"}})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":false`) {
+		t.Errorf("an unsaved item should be answered, not an error: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Junk is refused rather than written into the store.
+	for _, bad := range []url.Values{
+		{"id": {"50"}, "secs": {"1"}},                              // no app
+		{"app": {"x"}, "secs": {"1"}},                              // no id
+		{"app": {"x"}, "id": {"50"}, "secs": {"soon"}},             // not a number
+		{"app": {"x"}, "id": {"50"}, "secs": {"-5"}},               // before the start
+		{"app": {"x"}, "id": {"50"}, "secs": {"NaN"}},              // not a position
+		{"app": {"x"}, "id": {"50"}, "secs": {"Inf"}},              // nor is this
+		{"app": {"x"}, "id": {"50"}, "secs": {"1"}, "src": {long}}, // an unbounded src
+	} {
+		if rec := post(bad); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v gave %d, want 400", bad, rec.Code)
+		}
+	}
+	if at, _ := store.pos("x", "50"); at != 42.5 {
+		t.Errorf("a refused report changed the stored position to %v", at)
+	}
+}
+
+var long = strings.Repeat("u", maxPosSrc+1)
 
 func TestHealthLabelsAreShort(t *testing.T) {
 	p := renderPage(t, nil, []string{"inoreader", "reddit", "douban", "folo"}, nil, "following", "")

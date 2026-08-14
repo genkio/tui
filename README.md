@@ -186,6 +186,16 @@ drops them all. Filtering hides cards the page already has — no round trip —
 and a group that would light up the whole list isn't drawn, so a saved list of
 one kind from one app gets no chips.
 
+A saved item also remembers **where you left off**. The position in its player
+is posted back as you watch or listen and rides along in `saved.json`, so
+reopening the list picks up there — on the same phone, or on another device
+reading the same synced store. It covers video, podcast audio, redgifs clips
+and YouTube embeds alike, and pins the position to the stream it belongs to, so
+a card carrying both a clip and an episode can't resume the wrong one. Getting
+within ten seconds of the end counts as finished rather than paused, so the
+next visit starts it over instead of dropping you at the credits. Feed cards
+resume too when the item is already saved.
+
 The page is server-rendered and responsive (cards stack full-width, tap-sized
 targets, follows your phone's light/dark theme). A feed page is scraped before
 a byte of it is sent, so following a link that refetches puts a **loading…**
