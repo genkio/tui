@@ -475,14 +475,14 @@ function ytPlay(thumb, id){
       playerVars: vars,
       events: {
         onReady: function(e){
-          e.target.setPlaybackRate(SPEED);
+          e.target.setPlaybackRate(ytRate());
           if (MUTED) e.target.mute(); else e.target.unMute();
           e.target._posSent = at; // already where the server has it
           e.target.playVideo();
         },
         onStateChange: function(e){
           if (e.data === YT.PlayerState.PLAYING && pending){
-            e.target.setPlaybackRate(SPEED); // loading resets the rate
+            e.target.setPlaybackRate(ytRate()); // loading resets the rate
             pending = false;
           }
           // An embed has no timeupdate to hang the position report on, so it is
@@ -582,13 +582,16 @@ document.addEventListener('click', function(e){
     });
 });
 
-// Playback settings are global: the speed (default 2x), mute (default muted)
+// Playback settings are global: the speed (cycles 2× → 2.5× → 1×), mute (default muted)
 // and loop (default off) buttons on any card apply to every player — native
 // <video>, YouTube embeds, and podcast <audio> alike — so the whole feed
 // behaves one way. The rate is re-applied on play because loading media resets
 // it. Clicks are delegated since YouTube cards get their buttons injected
 // after this runs.
-var SPEED = 2;
+var SPEEDS = [2, 2.5, 1];
+var SPEED = SPEEDS[0];
+// the IFrame API caps at 2× and ignores anything higher
+function ytRate(){ return Math.min(SPEED, 2); }
 var MUTED = true;
 var LOOP = false;
 function applyMediaPrefs(){
@@ -601,7 +604,7 @@ function applyMediaPrefs(){
     a.defaultPlaybackRate = SPEED; a.playbackRate = SPEED;
   });
   ytPlayers.forEach(function(p){
-    if (p.setPlaybackRate) p.setPlaybackRate(SPEED);
+    if (p.setPlaybackRate) p.setPlaybackRate(ytRate());
     if (p.mute && p.unMute){ if (MUTED) p.mute(); else p.unMute(); }
   });
   document.querySelectorAll('button.speed').forEach(function(b){ b.textContent = SPEED + '×'; });
@@ -614,7 +617,7 @@ function applyMediaPrefs(){
 document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.speed, button.mute, button.loop') : null;
   if (!b) return;
-  if (b.classList.contains('speed')) SPEED = SPEED === 2 ? 1 : 2;
+  if (b.classList.contains('speed')) SPEED = SPEEDS[(SPEEDS.indexOf(SPEED) + 1) % SPEEDS.length];
   else if (b.classList.contains('loop')) LOOP = !LOOP;
   else MUTED = !MUTED;
   applyMediaPrefs();
