@@ -476,6 +476,60 @@ func TestChipGroupsShareOneRow(t *testing.T) {
 	}
 }
 
+// The deck takes h/l as well as the arrows, the vim spelling of sideways.
+// Left walks back, right deals the next: the direction you are travelling, not
+// the direction the card is thrown.
+func TestDeckTakesVimKeys(t *testing.T) {
+	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
+	if !strings.Contains(p, `k === 'ArrowLeft' || k === 'h' || k === 'H'`) {
+		t.Error("h should walk back, like the left arrow")
+	}
+	if !strings.Contains(p, `k === 'ArrowRight' || k === 'l' || k === 'L'`) {
+		t.Error("l should deal the next card, like the right arrow")
+	}
+	// j/k are the terminal's vertical pair; up and down stay the page's scroll,
+	// so the deck must not claim them.
+	if strings.Contains(p, `=== 'j'`) || strings.Contains(p, `=== 'k'`) {
+		t.Error("the deck should not bind the vertical keys")
+	}
+}
+
+// A read that never reached the server leaves the page lying to you: the card
+// is greyed and off the counts, the server still has it unread. Swiping on from
+// there only widens the gap, so the page repairs itself — one retry for a blip,
+// then a reload, which comes back as whatever the server actually has.
+func TestALostReadResyncs(t *testing.T) {
+	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
+	// The ids stay queued: the retry needs something to send.
+	if !strings.Contains(p, `pending[app] = ids.concat(pending[app]); failed = true; }`) {
+		t.Error("a failed mark should go back on the queue, not be dropped")
+	}
+	if !strings.Contains(p, "Promise.all(calls).then(function(){ if(failed) resync(); })") {
+		t.Error("a flush that lost a mark should resync")
+	}
+	// Retry once, reload after that — not the other way round, or a dropped
+	// packet mid-swipe would throw the deck away.
+	if !strings.Contains(p, "flushTimer = setTimeout(flushPending, 1500)") {
+		t.Error("the first failure should retry, not reload")
+	}
+	if !strings.Contains(p, "location.reload();\n}") {
+		t.Error("a second failure should reload")
+	}
+	// Marking read again after a recovery gets its own retry.
+	if !strings.Contains(p, "decCount(ids.length); retried = false;") {
+		t.Error("a landed mark should clear the retry, so the next blip gets one too")
+	}
+	// A page that reloads under you should say why, once, in passing.
+	if !strings.Contains(p, `sessionStorage.setItem('tui:resync', '1')`) ||
+		!strings.Contains(p, `toast("reloaded: the server didn't take some reads")`) {
+		t.Error("the fresh page should explain the reload")
+	}
+	// A hung request is the quiet version of a refused one.
+	if !strings.Contains(p, "AbortSignal.timeout") {
+		t.Error("a mark that never answers should time out so the resync happens")
+	}
+}
+
 // A swiped card starts where the chips end. Centring it in the leftover
 // viewport put a short card a long way down and moved every card as the next
 // one's height changed.

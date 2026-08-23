@@ -152,9 +152,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   .loading{background:rgba(246,247,249,.75);color:var(--fg)}
 }
 .toast{
-  position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
+  position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);
   background:var(--fg);color:var(--bg);font-size:14px;font-weight:600;
   padding:8px 16px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .2s;
+  z-index:60; /* the deck's floating mark-all sits down here too */
+  max-width:min(88vw,380px);text-align:center;line-height:1.35;
 }
 .yt{position:relative;margin:10px 0 2px;border-radius:12px;overflow:hidden;cursor:pointer;aspect-ratio:16/9;background:#000}
 .yt img{width:100%;height:100%;object-fit:cover;display:block;opacity:.85}
@@ -275,6 +277,14 @@ var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview')
 // Marks are batched per app so a fast scroll is one --mark-read call per app.
 var pending = {};   // app -> ids that scrolled off, awaiting a flush
 var flushTimer = null;
+// /mark only writes the server's cache, so it answers at once. A request that
+// hangs instead is the same trouble as one that is refused, and quieter about
+// it, so cap the wait — a failure has to be noticed either way.
+function markFetch(fd){
+  var o = {method:'POST', body:fd};
+  if(window.AbortSignal && AbortSignal.timeout) o.signal = AbortSignal.timeout(15000);
+  return fetch('/mark', o);
+}
 // Returns when every mark it sent has landed, so a caller that is about to
 // throw the page away (clearing the filters reloads) can wait for it first.
 function flushPending(){
@@ -282,19 +292,42 @@ function flushPending(){
   var apps = Object.keys(pending);
   var dirty = apps.some(function(a){ return pending[a].length > 0; });
   if(!dirty) return Promise.resolve();
-  var calls = [];
+  var calls = [], failed = false;
   apps.forEach(function(app){
     var ids = pending[app]; if(!ids.length) return;
     pending[app] = [];
     var fd = new FormData(); fd.append('app', app); fd.append('json','1');
     ids.forEach(function(id){ fd.append('id', id); });
-    calls.push(fetch('/mark',{method:'POST',body:fd})
+    calls.push(markFetch(fd)
       .then(function(res){ return res.json(); })
-      .then(function(d){ if(!d.ok) throw 0; decCount(ids.length); })
-      .catch(function(){ toast('could not save some reads'); }));
+      .then(function(d){ if(!d.ok) throw 0; decCount(ids.length); retried = false; })
+      // Put them back rather than dropping them, so the retry has something to
+      // send and the queue stays the honest record of what the server has not
+      // heard about.
+      .catch(function(){ pending[app] = ids.concat(pending[app]); failed = true; }));
   });
-  return Promise.all(calls);
+  return Promise.all(calls).then(function(){ if(failed) resync(); });
 }
+// A mark the server never took leaves the page lying to you: those cards are
+// greyed and off the counts over a state the server does not have, and swiping
+// on only widens the gap. One retry covers a blip — a dropped packet, a phone
+// waking up — because throwing the deck away for that would be its own
+// annoyance. Past that, the page is beyond repairing in place, so reload: what
+// comes back is what the server actually has. Reads that never landed return
+// unread, which is the truth, and if the server really is gone the browser says
+// so more plainly than this page could.
+var retried = false;
+function resync(){
+  if(!retried){
+    retried = true;
+    if(!flushTimer) flushTimer = setTimeout(flushPending, 1500);
+    return;
+  }
+  try { sessionStorage.setItem('tui:resync', '1'); } catch(e){}
+  location.reload();
+}
+// Takes n off the header's unread count; a negative n hands them back, which is
+// what a mark that failed after the count already moved has to do.
 function decCount(n){
   var s = document.getElementById('unreadn'); if(!s) return;
   var c = (parseInt(s.textContent, 10) || 0) - n; if(c < 0) c = 0;
@@ -337,6 +370,14 @@ function relabelMarkAll(){
   n.textContent = document.querySelectorAll('article.card:not(.read):not(.fout)').length;
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
+// A page that reloads itself under you is startling; say once, in passing, why.
+// Nothing to act on — the reload was the fix — so it fades like any other note.
+try {
+  if(sessionStorage.getItem('tui:resync')){
+    sessionStorage.removeItem('tui:resync');
+    toast("reloaded: the server didn't take some reads");
+  }
+} catch(e){}
 // queueRead marks one card read: muted in place and batched for the next flush.
 function queueRead(el){
   if(el.classList.contains('read')) return false;  // already counted once
@@ -926,16 +967,20 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
     (groups[app] = groups[app] || []).push(id);
     card.classList.add('read');
   });
-  var n = 0, calls = [];
+  var n = 0, calls = [], failed = false;
   Object.keys(groups).forEach(function(app){
     var ids = groups[app]; n += ids.length;
     var fd = new FormData(); fd.append('app', app); fd.append('json','1');
     ids.forEach(function(id){ fd.append('id', id); });
-    calls.push(fetch('/mark',{method:'POST',body:fd})
+    calls.push(markFetch(fd)
       .then(function(res){ return res.json(); })
       .then(function(d){ if(!d.ok) throw 0; })
-      .catch(function(){ toast('could not save all reads'); }));
+      // Same as a scrolled read that didn't land: hand the ids to the queue so
+      // the retry can try again. The header count came off up front here, so
+      // put that back — otherwise a retry that lands takes them off twice.
+      .catch(function(){ pending[app] = ids.concat(pending[app] || []); decCount(-ids.length); failed = true; }));
   });
+  Promise.all(calls).then(function(){ if(failed) resync(); });
   decCount(n);
   recountChips();
   markAllBtn.textContent = '✓ all read';
@@ -1125,10 +1170,15 @@ if (SWIPE) (function(){
   deck.addEventListener('pointerup', release);
   deck.addEventListener('pointercancel', release);
 
+  // Sideways on a keyboard: the arrows, and h/l for the same reason the
+  // terminal side uses j/k. Left goes back through what's been dealt, right
+  // deals the next one — the direction you are travelling, not the direction
+  // the card is thrown.
   document.addEventListener('keydown', function(e){
     if (ffs || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'ArrowLeft'){ e.preventDefault(); back(); }
-    else if (e.key === 'ArrowRight'){
+    var k = e.key;
+    if (k === 'ArrowLeft' || k === 'h' || k === 'H'){ e.preventDefault(); back(); }
+    else if (k === 'ArrowRight' || k === 'l' || k === 'L'){
       var card = current();
       if (card){ e.preventDefault(); mark(card); }
     }

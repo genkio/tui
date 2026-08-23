@@ -255,9 +255,9 @@ the count is the **real** backlog, because it grows across sweeps instead of
 being replaced by one. Tap the count to ask for a fetch now; it says
 `fetching…` while one is in flight and how stale it is otherwise (`4m`).
 
-A page carries at most **200 cards** — a phone rendering a thousand bodies,
+A page carries at most **500 cards** — a phone rendering a thousand bodies,
 posters and players would crawl — while the header counts the whole thing. The
-button says *"mark these 200 read"* when there's more behind it, and clearing
+button says *"mark these 500 read"* when there's more behind it, and clearing
 them reloads into the next batch, so the number stays honest and the triage loop
 keeps going.
 
@@ -267,6 +267,16 @@ retried until it lands, across a restart included. That's what makes marking a
 few hundred items at once work: Inoreader spends an HTTP round trip per article,
 so a page-sized batch could never answer inside one request. The mark still
 reaches the app, so the TUI agrees about it as before.
+
+If a mark can't reach the server at all — the laptop went to sleep, the Wi-Fi
+dropped, the server was restarted mid-swipe — the page **repairs itself** rather
+than swallowing it. Those greyed cards and lowered counts are a state the server
+doesn't have, and swiping on only widens the gap. So: one retry a second and a
+half later, which is all a dropped packet or a waking phone needs and costs you
+nothing; if that fails too, the page reloads. What comes back is what the server
+actually has, so reads that never landed show up unread again — a couple of
+cards to redo, in exchange for a page you can trust. The fresh page says once,
+in passing, why it reloaded.
 
 **Inoreader is drained.** It's the one service that can't page at all: its
 "load more" call returns a stale copy of the first page, so the only way to
@@ -302,8 +312,9 @@ card at a time, centered on the screen, with the rest stacked behind it.
 
 **Swipe left** to mark the card read and deal the next one; **swipe right** to
 walk back through what you've already dealt, one card per pull, as far back as
-the first one (they stay read — it's a second look, not an undo). **→** and
-**←** do the same with a keyboard, and a mouse can drag. Only sideways is a
+the first one (they stay read — it's a second look, not an undo). **→**/**l**
+deals the next one and **←**/**h** walks back, and a mouse can drag. Only
+sideways is a
 gesture: up and down scroll the page as usual, and everything else is a footer
 button, saving included. Once the deck is dealt out the floating **mark all
 read** goes away and, if x is logged in, the end note offers **For You** as
