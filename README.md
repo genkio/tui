@@ -43,6 +43,8 @@ export TUI_STATE_DIR=~/Dropbox/tui   # in your shell profile; or: tui --state-di
 $TUI_STATE_DIR/
   env                          credentials for every app (chmod 600)
   state/<app>-tui/read.json    read state (x, reddit, douban, bilibili)
+  state/tui/saved.json         the web view's saved list
+  state/tui/feed.json          the web view's backlog cache and read marks
   config/<app>-tui/config.toml per-app settings
 ```
 
@@ -60,7 +62,9 @@ whatever the launcher was given. The browser login profile
 (`~/.config/tui/profile`) deliberately stays local: live Chromium profiles
 don't survive file syncing, and the captured session values in `env` are what
 the apps actually use. Read marks are whole-file JSON saves, so triage from one
-device at a time; concurrent edits end as Dropbox conflict copies.
+device at a time; concurrent edits end as Dropbox conflict copies. The same goes
+double for `state/tui/feed.json`: run one `tui --web`, since it's the only
+record of a backlog Inoreader has been told you've read.
 
 ## Use
 
@@ -124,6 +128,11 @@ can't move the badge off the ceiling, so it's wasted requests. It's re-checked
 only when you return from that app (you may have read it down) or press `r`.
 Services below the cap keep polling, so new items still bump the number.
 
+One exception: once `tui --web` has drained Inoreader (see below), Inoreader's
+own count is zero, so the picker reads that badge off the web server's backlog
+instead and labels it **`N unread on --web`** — those items are triaged there,
+and opening the Inoreader TUI won't show them.
+
 ```sh
 make build    # build the launcher + all four TUIs
 make x        # build just one (also: make inoreader, make slack)
@@ -136,9 +145,11 @@ The same `all` timeline is available as a mobile-friendly web page, so you can
 triage from your phone or any other device on your Tailscale network:
 
 ```sh
-tui --web                 # serve the all timeline on 0.0.0.0:8080
+tui --web                    # serve the all timeline on 0.0.0.0:8080
 tui --web --web-addr :9000   # custom port
-tui --web --swipe         # one card at a time, swiped through (see below)
+tui --web --swipe            # one card at a time, swiped through (see below)
+tui --web --web-fetch 30m    # fetch less often (default 10m; 0 = on demand only)
+tui --web --web-drain=false  # leave Inoreader's own unread list alone (see below)
 ```
 
 The server binds `0.0.0.0` by default so your other devices reach it, and
@@ -176,24 +187,41 @@ if x is logged in, a link at the bottom offers to **continue on x For You**;
 following it switches
 x to For You (ephemerally — reloading the page returns to the Following
 default). The offer stands on For You too, worded as **another round**, since
-each visit refetches the timeline — so an emptied list is never a dead end. It
-reuses the same `--json` / `--mark-read`
+each visit refetches that timeline — so an emptied list is never a dead end. For
+You is the one thing fetched live rather than served from the backlog cache: it's
+an endless firehose, not a list you get to the end of, so nothing from it is
+cached. It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
-the TUI and the page — mark something read and it's read in the app, and vice
-versa. Items are sorted **oldest-first** (triage in the order they arrived;
+the TUI and the page — mark something read and it's read in the app too (see
+**The backlog cache** below for the one place that changes). Items are sorted
+**oldest-first** (triage in the order they arrived;
 `?order=desc` flips it), and the saved list is ordered by **when you saved
 things, newest first**. The page uses the Inter webfont (with system
 fallbacks) for a polished read.
 
-The saved list is read from disk rather than scraped, so it arrives whole and
-can be sliced where it sits: a row of **filter chips** above the first card,
-one group for the **source** (`𝕏`, `rdt`, `ino`, …) and one for what the item
-carries (**text**, **video**, **audio**), each chip counting what it would
-leave. Picks inside a group are alternatives (x *or* reddit) and the groups
+Both lists are read from disk rather than scraped, so both arrive whole and can
+be sliced where they sit: one wrapping row of **filter chips** above the first
+card, a group for the **source** (`𝕏`, `rdt`, `ino`, …) followed by one for what
+the item carries (**text**, **video**, **audio**), each chip counting the unread
+items it would leave — so reading takes the chip numbers down alongside the
+header's. Picks inside a group are alternatives (x *or* reddit) and the groups
 all have to hold (reddit *and* video), so several can be on at once; **clear**
-drops them all. Filtering hides cards the page already has — no round trip —
-and a group that would light up the whole list isn't drawn, so a saved list of
-one kind from one app gets no chips.
+drops them all. Filtering hides cards the page already has, no round trip.
+
+On the feed a source chip is also that service's **status light**: its count is
+green when the last sweep of it worked and red when it didn't, so a stale number
+looks stale. Every logged-in app gets a chip whether or not it has anything on
+the page — a service that failed to fetch has nothing to show and is exactly the
+one worth seeing — and anything still cached from an app you've since logged out
+of keeps a chip too, just without a colour. On the saved list, read off disk with
+no service to be up or down, the chips are plain: there, a group that would light
+up the whole list narrows nothing and isn't drawn, so a saved list of one kind
+from one app gets no chips at all.
+
+The chips are also what **mark all read** applies to: with a filter on it clears
+the sources you've picked and leaves the rest unread, so you can sweep reddit
+away and keep the articles for later. A card the filter hides isn't marked read
+by scrolling either, since you haven't read it.
 
 A saved item also remembers **where you left off**. The position in its player
 is posted back as you watch or listen and rides along in `saved.json`, so
@@ -206,11 +234,66 @@ next visit starts it over instead of dropping you at the credits. Feed cards
 resume too when the item is already saved.
 
 The page is server-rendered and responsive (cards stack full-width, tap-sized
-targets, follows your phone's light/dark theme). A feed page is scraped before
-a byte of it is sent, so following a link that refetches puts a **loading…**
-cover over the page you tapped from rather than leaving it looking idle.
-`?json=1` returns the same feed as JSON for scripts. Runs indefinitely until
-you Ctrl-C.
+targets, follows your phone's light/dark theme). A feed page comes off the
+cache and is instant, but For You is still scraped live, so following a link
+that refetches puts a **loading…** cover over the page you tapped from rather
+than leaving it looking idle. `?json=1` returns the whole backlog as JSON for
+scripts (no window). Runs indefinitely until you Ctrl-C.
+
+### The backlog cache
+
+A page load used to scrape all six services before it sent a byte, which is why
+refreshing took the best part of a minute, and why the unread count was never
+the real one: each app hands over its newest page (40-50 items) and no more.
+
+Now a background sweeper does the fetching, every **10 minutes** by default and
+jittered ±15% so the requests don't arrive on a machine-perfect cadence (the
+services within one sweep are spread out too). What it finds accumulates in
+`state/tui/feed.json`, keyed by app and id, and a page load just reads that
+file. Two things follow: the page is as fast as the saved list already was, and
+the count is the **real** backlog, because it grows across sweeps instead of
+being replaced by one. Tap the count to ask for a fetch now; it says
+`fetching…` while one is in flight and how stale it is otherwise (`4m`).
+
+A page carries at most **200 cards** — a phone rendering a thousand bodies,
+posters and players would crawl — while the header counts the whole thing. The
+button says *"mark these 200 read"* when there's more behind it, and clearing
+them reloads into the next batch, so the number stays honest and the triage loop
+keeps going.
+
+**Read marks are ours now.** Marking something read writes to the cache and the
+request returns; carrying it to the app's own `--mark-read` is a background job,
+retried until it lands, across a restart included. That's what makes marking a
+few hundred items at once work: Inoreader spends an HTTP round trip per article,
+so a page-sized batch could never answer inside one request. The mark still
+reaches the app, so the TUI agrees about it as before.
+
+**Inoreader is drained.** It's the one service that can't page at all: its
+"load more" call returns a stale copy of the first page, so the only way to
+reach article 51 is to tell it the first fifty are read and ask again. The
+sweeper does exactly that, up to 8 rounds a sweep, and the items land in the
+cache **unread for you** — read upstream is not read by you. Persisting comes
+first and marking second, always: an article Inoreader thinks you've read but
+that never reached the cache would be gone for good.
+
+The consequences are worth knowing:
+
+- inoreader.com will show **0 unread** from then on. Your backlog lives in
+  `feed.json`, and `--web` is where you read it.
+- the standalone `tui inoreader` TUI and the terminal `all` view fetch live, so
+  they'll look empty. The picker's badge reads the cache instead and says
+  `unread on --web` so it isn't lying to you.
+- `--web-drain=false` turns it off, at the cost of only ever seeing Inoreader's
+  first page. Every other service pages honestly (folo walks a cursor) or has no
+  server-side read state at all (x, reddit, douban, bilibili keep a local
+  `read.json`), and none of them is ever marked read at fetch time.
+
+Two housekeeping notes. The cache is a **single-writer** file: run one
+`tui --web`, since it rewrites the whole thing each sweep and a Dropbox conflict
+copy here is lost backlog rather than an annoyance. And it's bounded — read
+entries are pruned after two weeks, and past 6000 entries the oldest read ones
+go first, unread ones only as a last resort, with a line on stderr when that
+happens.
 
 ### Swipe mode
 

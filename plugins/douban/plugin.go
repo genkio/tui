@@ -43,6 +43,7 @@ func run() error {
 		check       = flag.Bool("check", false, "fetch one page of the following timeline and exit")
 		count       = flag.Bool("count", false, "print the unread status count and exit")
 		dumpJSON    = flag.Bool("json", false, "print unread statuses as JSON and exit (for the 'all' timeline)")
+		maxItems    = flag.Int("max", 0, "with --json: fetch up to this many, past the config cap (the web server's backlog sweep asks for more than a screenful)")
 		markRead    = flag.Bool("mark-read", false, "mark read the status ids read from stdin (one per line) and exit")
 		auth        = flag.Bool("auth", false, "log in via a browser and capture the session into ~/.config/tui/env")
 		configPath  = flag.String("config", "", "config file path (default: $XDG_CONFIG_HOME/douban-tui/config.toml)")
@@ -94,6 +95,9 @@ func run() error {
 		return printCount(ctx, client, cfg)
 	}
 	if *dumpJSON {
+		if *maxItems > 0 {
+			cfg.MaxStatuses = *maxItems
+		}
 		return printJSON(ctx, client, cfg)
 	}
 

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/genkio/tui/core"
 )
 
 func TestParseCountToken(t *testing.T) {
@@ -89,5 +91,56 @@ func TestBadgeStates(t *testing.T) {
 	m.countStale["x"] = false
 	if got := m.badge(0); got != unread {
 		t.Fatalf("recovery should restore the count badge, got %q", got)
+	}
+
+	// A count that came from the web server's backlog says so: those items are
+	// triaged on --web, and opening the app here won't show them.
+	m.countWeb["x"] = true
+	if got := m.badge(0); !strings.Contains(got, "unread on --web") {
+		t.Fatalf("a backlog count should be labeled as such, got %q", got)
+	}
+}
+
+// A drained service answers zero to its own --count, so the picker asks the
+// web server's backlog instead. Nothing else does, and a machine that has
+// never run --web is unaffected.
+func TestBacklogCount(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TUI_STATE_DIR", dir)
+
+	// No cache yet: fall through to the service's own --count.
+	if _, ok := backlogCount("inoreader"); ok {
+		t.Fatal("an unswept cache should not answer for the service")
+	}
+
+	c := loadFeedCache("")
+	now := time.Now()
+	c.upsert([]core.Item{
+		{App: "inoreader", ID: "1", Title: "a"},
+		{App: "inoreader", ID: "2", Title: "b"},
+		{App: "x", ID: "3", Title: "c"},
+	}, now)
+	c.markRead("inoreader", []string{"2"}, now)
+	c.setSwept(now)
+	if err := c.save(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := backlogCount("inoreader")
+	if !ok || got != "1" {
+		t.Fatalf("backlogCount(inoreader) = %q, %v; want \"1\", true", got, ok)
+	}
+	// A service that keeps its own unread list answers for itself.
+	if _, ok := backlogCount("x"); ok {
+		t.Fatal("x is not drained, so its own --count is the truth")
+	}
+
+	// A drain that ran out of rounds is short of the truth, and says so.
+	c.setStatus("inoreader", appStatus{Capped: true})
+	if err := c.save(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := backlogCount("inoreader"); got != "1+" {
+		t.Fatalf("a capped backlog should render as \"1+\", got %q", got)
 	}
 }

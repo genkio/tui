@@ -32,11 +32,6 @@ header{
 h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .warn{background:rgba(214,69,69,.12);border:1px solid rgba(214,69,69,.5);color:var(--fg);border-radius:10px;padding:10px 12px;margin:-4px 0 12px;font-size:14px}
-.health{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted);white-space:nowrap}
-.svc{display:inline-flex;align-items:center;gap:5px}
-.hdot{width:8px;height:8px;border-radius:50%;flex:none}
-.hdot.ok{background:var(--ok)}
-.hdot.bad{background:var(--bad)}
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:14px;
   padding:14px 16px;margin-bottom:12px;
@@ -67,24 +62,43 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .quote .vidbox{margin-bottom:0}
 .quote .vid{max-height:50vh}
 .quote .open{font-size:13px;min-height:32px}
-/* The saved list arrives whole (it is read from disk, not scraped), so it can
-   be sliced where it sits: a row of chips over the first card, one group per
-   axis. Picks inside a group are alternatives; the groups all have to hold. */
-.filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 12px}
-.fgroup{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+/* Both lists arrive whole (read from disk, not scraped), so either can be
+   sliced where it sits: a row of chips over the first card, one group per
+   axis. Picks inside a group are alternatives; the groups all have to hold.
+   The groups are display:contents so every chip is a flex item of the one row
+   and they fill it as they come — a nested flex box per group would break the
+   line at the group boundary and leave the rest of it empty. */
+.filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+.fgroup{display:contents}
 /* groups are set apart by a wider gap, not a rule: the row wraps as chips are
    added, and a rule at the start of a wrapped line reads as a stray mark */
-.fgroup+.fgroup{margin-left:6px}
+.fgroup+.fgroup>.fchip:first-child{margin-left:8px}
 .fchip{
-  display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;cursor:pointer;
   background:var(--card);border:1px solid var(--line);border-radius:999px;
-  padding:4px 11px;min-height:36px;color:var(--muted);
+  padding:3px 9px;min-height:32px;color:var(--muted);
   font:inherit;font-size:13px;font-weight:600;
 }
 .fchip[data-on="1"]{border-color:var(--accent);color:var(--fg)}
 .fchip .fn{font-variant-numeric:tabular-nums;opacity:.65}
+/* a source chip's count is that service's status light too, which is what the
+   header's separate row of dots used to be: green means the last sweep of it
+   worked, red means it didn't and this number is stale */
+.fchip .fn.ok{color:var(--ok);opacity:1}
+.fchip .fn.bad{color:var(--bad);opacity:1}
 .fclear{margin-left:auto;color:var(--accent)}
+/* filtered out, which is a different hiding from the deck's own .hid: the deck
+   toggles that on every card but the one in play, and the two would fight over
+   a single class */
+.card.fout{display:none!important}
 .card.read{opacity:.45}
+/* the unread count doubles as the refresh control: the server fetches on its
+   own schedule, so the only thing the page wants of it is "now" */
+.refresh{
+  padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer;
+}
+.refresh .upd{opacity:.6}
+.refresh:disabled{cursor:default}
 /* a card with a player carries most of a dozen actions, more than a phone is
    wide: the row scrolls sideways rather than wrapping into a second line that
    would push the next card down */
@@ -101,6 +115,9 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px;
 }
 .markall:disabled{opacity:.5;cursor:default}
+/* why the button's number is smaller than the header's: the page carries a
+   window of the backlog, and this is the rest of it */
+.markall .behind{font-weight:600;font-size:12px;color:var(--muted);margin-left:6px}
 /* in a deck there is no end of the feed to park this at, so it floats */
 .markall.fab{
   position:fixed;z-index:20;width:auto;margin:0;
@@ -180,12 +197,14 @@ video.ffs{object-fit:cover !important}
 /* Swipe mode: the feed becomes a deck. One card is on screen at a time, sized
    to the viewport and scrolling inside its own frame, with two empty offset
    cards drawn behind it so the stack reads as "more where that came from". */
-/* the deck sits in the middle of what's left of the screen; auto margins
-   rather than align-items so a card taller than the space still scrolls to
-   its own top instead of being clipped there */
-.deckwrap{display:flex;min-height:calc(100dvh - 150px)}
+/* the deck starts where the chips end, rather than floating in the middle of
+   what's left of the screen: centring put a short card a long way down, and
+   moved every card as the next one's height changed. Top-aligned, the card's
+   top edge stays put across a whole swipe session, and one taller than the
+   screen simply scrolls instead of being clipped above the fold. */
+.deckwrap{display:flex}
 .deckwrap.hid{display:none}
-.deckwrap .deck{width:100%;margin:auto 0}
+.deckwrap .deck{width:100%}
 .deck{position:relative}
 .deck::before,.deck::after{
   content:'';position:absolute;left:0;right:0;top:0;bottom:0;
@@ -226,21 +245,20 @@ video.ffs{object-fit:cover !important}
 <div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" hidden></div>
 <div class="wrap">
 <header>
-  <div class="sub" id="sub">{{if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<span id="unreadn">{{.Unread}}</span> unread {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{end}}</div>
-{{if .Health}}<div class="health">{{range .Health}}<span class="svc" title="{{.Title}}"><span class="hdot {{if .OK}}ok{{else}}bad{{end}}"></span>{{.Label}}</span>{{end}}</div>
-{{end}}</header>
+  <div class="sub" id="sub">{{if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<button class="refresh" id="refresh" type="button" title="fetch every service now"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{end}}</div>
+</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
 {{end}}{{if .SavedView}}{{if not .Cards}}<div class="note">Nothing saved yet. Tap <b>save</b> on any item to keep it here.</div>
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">Inbox zero across every timeline.</div>
 {{if .OfferForYou}}<div class="note offer">All caught up. {{template "foryou" .}}</div>
-{{end}}{{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}{{$kind := .Kind}}<div class="fgroup">{{range .Chips}}<button class="fchip" type="button" data-kind="{{$kind}}" data-key="{{.Key}}" data-on="0">{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn">{{.Count}}</span></button>{{end}}</div>{{end}}<button class="fchip fclear hid" type="button" id="fclear">clear</button></div>
-<div class="note hid" id="noMatch">Nothing saved matches those filters.</div>
+{{end}}{{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}{{$kind := .Kind}}<div class="fgroup">{{range .Chips}}<button class="fchip" type="button" data-kind="{{$kind}}" data-key="{{.Key}}" data-on="0"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span></button>{{end}}</div>{{end}}<button class="fchip fclear hid" type="button" id="fclear">clear</button></div>
+<div class="note hid" id="noMatch">Nothing here matches those filters.</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
 {{end}}<div class="stamp" id="stamp"></div></div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.{{if .XForYou}} {{template "foryou" .}}{{end}}</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button">✓ mark all read</button>
+{{end}}{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-more="{{if .More}}1{{else}}0{{end}}">✓ mark {{if .More}}these <span id="markn">{{.Shown}}</span>{{else}}all{{end}} read{{if .More}} <span class="behind">{{.Behind}} more behind</span>{{end}}</button>
 {{end}}{{if and .XForYou .Cards (not .Swipe)}}<div class="note offer hid" id="forYouNote">All read. {{template "foryou" .}}</div>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -257,27 +275,66 @@ var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview')
 // Marks are batched per app so a fast scroll is one --mark-read call per app.
 var pending = {};   // app -> ids that scrolled off, awaiting a flush
 var flushTimer = null;
+// Returns when every mark it sent has landed, so a caller that is about to
+// throw the page away (clearing the filters reloads) can wait for it first.
 function flushPending(){
   flushTimer = null;
   var apps = Object.keys(pending);
   var dirty = apps.some(function(a){ return pending[a].length > 0; });
-  if(!dirty) return;
+  if(!dirty) return Promise.resolve();
+  var calls = [];
   apps.forEach(function(app){
     var ids = pending[app]; if(!ids.length) return;
     pending[app] = [];
     var fd = new FormData(); fd.append('app', app); fd.append('json','1');
     ids.forEach(function(id){ fd.append('id', id); });
-    fetch('/mark',{method:'POST',body:fd})
+    calls.push(fetch('/mark',{method:'POST',body:fd})
       .then(function(res){ return res.json(); })
       .then(function(d){ if(!d.ok) throw 0; decCount(ids.length); })
-      .catch(function(){ toast('could not save some reads'); });
+      .catch(function(){ toast('could not save some reads'); }));
   });
+  return Promise.all(calls);
 }
 function decCount(n){
   var s = document.getElementById('unreadn'); if(!s) return;
   var c = (parseInt(s.textContent, 10) || 0) - n; if(c < 0) c = 0;
   s.textContent = c;
   if(c === 0) maybeOfferForYou();   // whole list read
+}
+// A chip's number is what it would leave *unread*, so reading takes it down
+// with the header's. Counted over every card, not just the ones a pick is
+// currently showing, or choosing "video" would zero the "text" chip. Debounced:
+// a fast scroll marks cards faster than there is any point recounting.
+var recountTimer = null;
+function scheduleRecount(){
+  if(recountTimer) return;
+  recountTimer = setTimeout(recountChips, 150);
+}
+function recountChips(){
+  recountTimer = null;
+  relabelMarkAll();
+  var bar = document.getElementById('filters');
+  if(!bar) return;
+  var unread = document.querySelectorAll('article.card:not(.read)');
+  var byApp = {}, byType = {};
+  unread.forEach(function(c){
+    byApp[c.dataset.app] = (byApp[c.dataset.app] || 0) + 1;
+    byType[c.dataset.type] = (byType[c.dataset.type] || 0) + 1;
+  });
+  bar.querySelectorAll('.fchip[data-kind]').forEach(function(chip){
+    var n = chip.querySelector('.fn');
+    if(!n) return;
+    var from = chip.dataset.kind === 'app' ? byApp : byType;
+    n.textContent = from[chip.dataset.key] || 0;
+  });
+}
+// The mark-all button names how many it is about to clear, so that number has
+// to come down as you read too — otherwise it keeps offering the pageful it
+// started with. Only while it still has something to do.
+function relabelMarkAll(){
+  var b = document.getElementById('markAll'), n = document.getElementById('markn');
+  if(!b || !n || b.disabled) return;
+  n.textContent = document.querySelectorAll('article.card:not(.read):not(.fout)').length;
 }
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
 // queueRead marks one card read: muted in place and batched for the next flush.
@@ -288,6 +345,7 @@ function queueRead(el){
   el.classList.add('read');
   (pending[app] = pending[app] || []).push(id);
   if(!flushTimer) flushTimer = setTimeout(flushPending, 400);
+  scheduleRecount();
   return true;
 }
 var obs = new IntersectionObserver(function(entries){
@@ -296,7 +354,13 @@ var obs = new IntersectionObserver(function(entries){
   entries.forEach(function(en){
     if(en.isIntersecting) return;                 // still visible
     var el = en.target;
-    if(el.getBoundingClientRect().bottom > 0) return; // below, not yet scrolled past
+    // Filtering a card out also stops it intersecting, and a display:none box
+    // measures as a zero rect — which reads exactly like "scrolled past". You
+    // did not read it; leave it alone.
+    if(el.classList.contains('fout')) return;
+    var r = el.getBoundingClientRect();
+    if(r.height === 0 && r.top === 0) return;
+    if(r.bottom > 0) return;                      // below, not yet scrolled past
     queueRead(el);
   });
 },{threshold:0});
@@ -850,30 +914,68 @@ document.addEventListener('click', function(e){
   var less = card.querySelector('.footer > button.expand');
   if (less) less.classList.toggle('hid', !expanded);
 });
-// Mark everything read with one tap (scroll can't reach the last cards).
+// Mark everything read with one tap (scroll can't reach the last cards). It
+// clears what is on screen, which with a filter on means the sources you have
+// picked and nothing else — the point of being able to pick them.
 var markAllBtn = document.getElementById('markAll');
 if(markAllBtn) markAllBtn.addEventListener('click', function(){
   var groups = {};
-  document.querySelectorAll('article.card:not(.read)').forEach(function(card){
+  document.querySelectorAll('article.card:not(.read):not(.fout)').forEach(function(card){
     var app = card.dataset.app, id = card.dataset.id;
     if(!app || !id) return;
     (groups[app] = groups[app] || []).push(id);
     card.classList.add('read');
   });
-  var n = 0;
+  var n = 0, calls = [];
   Object.keys(groups).forEach(function(app){
     var ids = groups[app]; n += ids.length;
     var fd = new FormData(); fd.append('app', app); fd.append('json','1');
     ids.forEach(function(id){ fd.append('id', id); });
-    fetch('/mark',{method:'POST',body:fd})
+    calls.push(fetch('/mark',{method:'POST',body:fd})
       .then(function(res){ return res.json(); })
       .then(function(d){ if(!d.ok) throw 0; })
-      .catch(function(){ toast('could not save all reads'); });
+      .catch(function(){ toast('could not save all reads'); }));
   });
   decCount(n);
+  recountChips();
   markAllBtn.textContent = '✓ all read';
   markAllBtn.disabled = true;
   if (SWIPE) markAllBtn.classList.add('hid'); // a floating button with nothing to do is just in the way
+  // The page carries a window of the backlog, not all of it. Clearing the
+  // window and there being more behind it means the next one is a reload away,
+  // so go and get it rather than leaving an emptied page that looks finished.
+  if (markAllBtn.dataset.more === '1' && !document.querySelector('.fchip[data-on="1"]')) {
+    Promise.all(calls).then(function(){ location.reload(); });
+  }
+});
+// The server fetches on its own jittered schedule; this asks for one now. The
+// request returns as soon as the sweep is under way, and a sweep can take
+// minutes, so watch /status and reload when it is actually done rather than
+// guessing at a delay. Give up watching after a while: the numbers will be
+// there on the next load either way.
+var refreshBtn = document.getElementById('refresh');
+if(refreshBtn) refreshBtn.addEventListener('click', function(){
+  var upd = document.getElementById('upd'), waited = 0;
+  refreshBtn.disabled = true;
+  if (upd) upd.textContent = 'fetching…';
+  function watch(){
+    if (waited > 300000){ if (upd) upd.textContent = 'still fetching'; return; }
+    setTimeout(function(){
+      waited += 2000;
+      fetch('/status')
+        .then(function(res){ return res.json(); })
+        .then(function(d){ if (d.fetching) watch(); else location.reload(); })
+        .catch(function(){ watch(); });
+    }, 2000);
+  }
+  fetch('/refresh',{method:'POST'})
+    .then(function(res){ return res.json(); })
+    .then(function(d){ if(!d.ok) throw 0; watch(); })
+    .catch(function(){
+      refreshBtn.disabled = false;
+      if (upd) upd.textContent = 'not now';
+      toast('could not ask for a fetch');
+    });
 });
 
 // The deck (--swipe): one card on screen, dealt with by hand. Throw it left to
@@ -884,10 +986,25 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
 if (SWIPE) (function(){
   var deck = document.getElementById('deck');
   if (!deck) return;
-  var cards = [].slice.call(deck.querySelectorAll('article.card'));
+  var all = [].slice.call(deck.querySelectorAll('article.card'));
+  var cards = all;
   var stamp = document.getElementById('stamp');
   var endEl = document.getElementById('deckEnd');
   var at = 0;
+
+  // A filter changes what the deck is dealing from. Stay on the card in play if
+  // it survived the pick; otherwise cut to the first one not yet read, which is
+  // what a fresh pick is asking for.
+  window.onFilterChange = function(){
+    var cur = cards[at];
+    cards = all.filter(function(c){ return !c.classList.contains('fout'); });
+    at = cur ? cards.indexOf(cur) : -1;
+    if (at < 0){
+      at = cards.findIndex(function(c){ return !c.classList.contains('read'); });
+      if (at < 0) at = cards.length;
+    }
+    show();
+  };
 
   function current(){ return at < cards.length ? cards[at] : null; }
   function show(){
@@ -900,7 +1017,9 @@ if (SWIPE) (function(){
     // Hide the centering wrapper, not just the deck, or its height would leave
     // a hole above the end note. Reversible: walking back brings it out again.
     deck.parentNode.classList.toggle('hid', done);
-    if (endEl) endEl.classList.toggle('hid', !done);
+    // "That's every card" is only true if there were cards. A filter that
+    // matches nothing has its own note, and two at once contradict each other.
+    if (endEl) endEl.classList.toggle('hid', !done || cards.length === 0);
     // Nothing left to mark once the deck is dealt out.
     if (markAllBtn) markAllBtn.classList.toggle('hid', done);
   }
@@ -1017,11 +1136,11 @@ if (SWIPE) (function(){
   show();
 })();
 
-// Every feed page is scraped from the services before a byte of it is sent —
-// a slow x can take most of a minute — and until then the browser just sits on
-// the page you tapped from. Cover it as the tap happens, so the wait looks like
-// a wait. Only links that refetch: the saved list is served from disk, and
-// anything opening a new tab leaves this page alone.
+// A feed page comes off the backlog cache and is instant, but x's For You is
+// still scraped live before a byte of it is sent, and until then the browser
+// just sits on the page you tapped from. Cover it as the tap happens, so the
+// wait looks like a wait. Only links that could refetch: the saved list is
+// served from disk, and anything opening a new tab leaves this page alone.
 document.addEventListener('click', function(e){
   var a = e.target.closest ? e.target.closest('a[href]') : null;
   if (!a || a.target || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
@@ -1032,10 +1151,11 @@ document.addEventListener('click', function(e){
 // Coming back through history restores this page as it was left, cover and all.
 window.addEventListener('pageshow', function(){ document.getElementById('loading').classList.add('hid'); });
 
-// The saved list's filter chips. The whole list is already in the page, so a
-// pick is a matter of hiding cards, not a round trip: within a group the picks
-// are alternatives (x or reddit), and each group is a condition of its own
-// (reddit *and* video). A group with nothing picked asks nothing.
+// Filter chips, on the feed as well as the saved list now that both are served
+// whole from disk. A pick is a matter of hiding cards, not a round trip: within
+// a group the picks are alternatives (x or reddit), and each group is a
+// condition of its own (reddit *and* video). A group with nothing picked asks
+// nothing. Hiding uses .fout rather than .hid, which the deck owns.
 (function(){
   var bar = document.getElementById('filters');
   if (!bar) return;
@@ -1049,18 +1169,29 @@ window.addEventListener('pageshow', function(){ document.getElementById('loading
     document.querySelectorAll('article.card').forEach(function(c){
       var ok = (!apps.length || apps.indexOf(c.dataset.app) >= 0) &&
                (!types.length || types.indexOf(c.dataset.type) >= 0);
-      c.classList.toggle('hid', !ok);
+      c.classList.toggle('fout', !ok);
       if (ok) shown++;
     });
     var any = apps.length + types.length > 0;
     clear.classList.toggle('hid', !any);
     none.classList.toggle('hid', shown > 0);
+    relabelMarkAll(); // a pick changes what mark-all is about to clear
+    if (window.onFilterChange) window.onFilterChange(); // the deck deals from what's left
   }
   bar.addEventListener('click', function(e){
     var b = e.target.closest('.fchip');
     if (!b) return;
-    if (b === clear) bar.querySelectorAll('.fchip').forEach(function(c){ c.dataset.on = '0'; });
-    else b.dataset.on = b.dataset.on === '1' ? '0' : '1';
+    if (b === clear){
+      // Clearing is "start over", and by then the page is stale: cards have
+      // been read, and a windowed feed has more waiting behind the ones it
+      // sent. So reload rather than un-hide what is left — but not before the
+      // marks that haven't reached the server yet have gone.
+      document.getElementById('loading').classList.remove('hid');
+      if (flushTimer) clearTimeout(flushTimer);
+      flushPending().then(function(){ location.reload(); });
+      return;
+    }
+    b.dataset.on = b.dataset.on === '1' ? '0' : '1';
     apply();
   });
 })();

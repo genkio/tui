@@ -154,6 +154,7 @@ type (
 		token string // "12", "75+", "0"; empty when the count failed
 		err   bool
 		stale bool // the failure is an expired session, fixable by --auth
+		web   bool // the count came from the web server's backlog, not the service
 	}
 )
 
@@ -178,6 +179,9 @@ func scheduleClock() tea.Cmd {
 func fetchCount(a app) tea.Cmd {
 	name, dir := a.name, a.dir
 	return func() tea.Msg {
+		if tok, ok := backlogCount(name); ok {
+			return countMsg{name: name, token: tok, web: true}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, self(), name, "--count")
@@ -194,6 +198,27 @@ func fetchCount(a app) tea.Cmd {
 		}
 		return countMsg{name: name, token: tok}
 	}
+}
+
+// backlogCount answers for a drained service from the web server's cache
+// instead of asking the service. Once `tui --web` has told Inoreader that what
+// it fetched is read, Inoreader's own count is zero and the cache is the only
+// place the real backlog is written down. Read-only, and only for a cache that
+// has actually been swept, so a machine that never runs --web is unaffected.
+func backlogCount(app string) (string, bool) {
+	if !drainApps[app] {
+		return "", false
+	}
+	c := loadFeedCache("")
+	if c.sweptAt().IsZero() {
+		return "", false
+	}
+	n, capped := c.unreadApp(app)
+	tok := strconv.Itoa(n)
+	if capped {
+		tok += "+"
+	}
+	return tok, true
 }
 
 var reCountToken = regexp.MustCompile(`^\d+\+?$`)
@@ -236,6 +261,7 @@ type model struct {
 	counts     map[string]string // app name -> last count token
 	countErr   map[string]bool   // app name -> last poll failed
 	countStale map[string]bool   // app name -> last poll failed on an expired session
+	countWeb   map[string]bool   // app name -> that count is the web backlog, not the service
 	running    bool              // a child TUI/auth flow is active; pause polling
 	lastFetch  time.Time         // when the most recent count landed, for the freshness label
 }
@@ -247,6 +273,7 @@ func newModel(root string, pollEvery time.Duration) model {
 		counts:     map[string]string{},
 		countErr:   map[string]bool{},
 		countStale: map[string]bool{},
+		countWeb:   map[string]bool{},
 		all:        newAllModel(root),
 	}
 	m.authed = make([]bool, len(m.apps))
@@ -457,6 +484,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.counts[msg.name] = msg.token
 			m.countErr[msg.name] = false
 			m.countStale[msg.name] = false
+			m.countWeb[msg.name] = msg.web
 			m.lastFetch = time.Now()
 		}
 		return m, nil
@@ -579,11 +607,18 @@ func (m model) badge(i int) string {
 		return badStyle.Render("● unreachable")
 	}
 	tok, ok := m.counts[name]
+	// A drained service answers zero to its own --count, so its badge is the
+	// web server's backlog instead. Say so: those items are triaged on --web,
+	// and opening the app here won't show them.
+	where := " unread"
+	if m.countWeb[name] {
+		where = " unread on --web"
+	}
 	switch {
 	case ok && tok == "0":
 		return dimStyle.Render("● all read")
 	case ok:
-		return okStyle.Render("● ") + countStyle.Render(tok) + dimStyle.Render(" unread")
+		return okStyle.Render("● ") + countStyle.Render(tok) + dimStyle.Render(where)
 	case m.pollEvery > 0:
 		return dimStyle.Render("● checking…")
 	default:
@@ -673,7 +708,9 @@ func main() {
 	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
 	web := flag.Bool("web", false, "run the web UI (all timeline) instead of the terminal app")
 	webAddr := flag.String("web-addr", "0.0.0.0:8080", "address:port to bind the web UI to")
-	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild) and cache fetched items briefly")
+	webFetch := flag.Duration("web-fetch", 10*time.Minute, "with --web: how often the server fetches every service into its backlog cache (jittered ±15%; 0 fetches only on demand)")
+	webDrain := flag.Bool("web-drain", true, "with --web: let the server mark a fetched Inoreader article read there, the only way past its first page (off keeps Inoreader's own unread list intact)")
+	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild)")
 	swipe := flag.Bool("swipe", false, "with --web: swipe through one card at a time (left marks read, right goes back) instead of the scrolling feed")
 	stateDir := flag.String("state-dir", os.Getenv("TUI_STATE_DIR"), "single dir for credentials, read state, and configs (e.g. ~/Dropbox/tui to sync between devices); env TUI_STATE_DIR")
 	flag.Parse()
@@ -698,7 +735,7 @@ func main() {
 		os.Exit(1)
 	}
 	if *web {
-		if err := runWeb(root, *webAddr, *dev, *swipe); err != nil {
+		if err := runWeb(root, *webAddr, *dev, *swipe, *webDrain, *webFetch); err != nil {
 			fmt.Fprintln(os.Stderr, "tui --web: "+err.Error())
 			os.Exit(1)
 		}

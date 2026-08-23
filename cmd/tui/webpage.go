@@ -57,6 +57,7 @@ func (l *pageLoader) load() (*template.Template, error) {
 // the saved view fill in different halves of it.
 type pageInput struct {
 	items     []core.Item
+	total     int // the whole backlog, of which items is at most a window
 	apps      []string
 	failed    []string
 	now       time.Time
@@ -65,14 +66,22 @@ type pageInput struct {
 	saved     *savedStore
 	savedView bool
 	swipe     bool // --swipe: one card at a time instead of the scrolling feed
+	updated   time.Time
+	fetching  bool // a sweep is in flight, so the count is about to move
+	capped    bool // a service's backlog runs deeper than the sweep reached
 }
 
 type pageData struct {
-	Unread      int  // shown only when HasApps; JS decrements it in place
+	Unread      int  // the whole backlog; JS decrements it in place
+	Shown       int  // how much of it this page carries
+	More        bool // ...and there is more behind it, so reload after clearing
+	Behind      int  // how much more, stated on the button so the two numbers add up
+	Capped      bool // even the backlog is short of the truth; render it as "N+"
+	Updated     string
+	Fetching    bool
 	Saved       int  // size of the saved list, in the header and its link
 	SavedView   bool // rendering the saved list rather than the live feed
 	Swipe       bool // deck of one card at a time, swiped through
-	Health      []healthEntry
 	Warn        string
 	HasApps     bool
 	OfferForYou bool // empty feed: offer x's For You right away
@@ -82,7 +91,7 @@ type pageData struct {
 	Cards       []cardData
 }
 
-// filterGroup is one axis the saved list can be narrowed along; its chips are
+// filterGroup is one axis a list can be narrowed along; its chips are
 // alternatives, and the groups are conditions that all have to hold.
 type filterGroup struct {
 	Kind  string // "app" or "type", the card attribute the chips test
@@ -94,12 +103,12 @@ type filterChip struct {
 	Label string
 	Color string // the source's own chip color; blank for the content types
 	Count int
-}
-
-type healthEntry struct {
-	Label string
-	Title string
-	OK    bool
+	// A source chip is also that service's status light: its count is drawn
+	// green when the last sweep worked and red when it didn't, which is the job
+	// the header's separate row of dots used to do. Empty for a chip that isn't
+	// a service (the content types, and the saved list, which is read off disk).
+	State string // "ok", "bad", or ""
+	Title string // what the state means, for a hover or long press
 }
 
 type cardData struct {
@@ -178,18 +187,6 @@ func buildPageData(in pageInput) pageData {
 	for _, f := range in.failed {
 		bad[f] = true
 	}
-	var health []healthEntry
-	for _, a := range in.apps {
-		label := healthLabels[a]
-		if label == "" {
-			label = a
-		}
-		h := healthEntry{Label: label, Title: a + ": live", OK: true}
-		if bad[a] {
-			h.Title, h.OK = a+": failed to load", false
-		}
-		health = append(health, h)
-	}
 
 	// The saved list is for re-reading, not triage: no deck there, whatever the
 	// server was started with.
@@ -217,20 +214,29 @@ func buildPageData(in pageInput) pageData {
 		savedCount = in.saved.count()
 	}
 
-	// Only the saved list gets the filter cloud: it is served whole from disk,
-	// so slicing it is a matter of hiding cards the browser already has.
-	var filters []filterGroup
-	if in.savedView {
-		filters = savedFilters(cards)
+	// Both lists are served whole from disk now, so both can be sliced where
+	// they sit: picking a chip hides cards the browser already has. On the feed
+	// the source chips are also the per-service status, so they are drawn for
+	// every logged-in app whether or not it has anything on this page.
+	filters := cardFilters(cards, in.apps, bad)
+
+	updated := ""
+	if !in.updated.IsZero() {
+		updated = humanAgo(in.updated)
 	}
 
 	return pageData{
-		Unread:    len(in.items),
+		Unread:    in.total,
+		Shown:     len(in.items),
+		More:      in.total > len(in.items),
+		Behind:    max(0, in.total-len(in.items)),
+		Capped:    in.capped,
+		Updated:   updated,
+		Fetching:  in.fetching,
 		Saved:     savedCount,
 		SavedView: in.savedView,
 		Filters:   filters,
 		Swipe:     swipe,
-		Health:    health,
 		Warn:      in.warn,
 		HasApps:   len(in.apps) > 0,
 		// With x authed and nothing left to read, give a direct way into For
@@ -368,32 +374,59 @@ func cardType(c cardData, it core.Item) string {
 	}
 }
 
-// savedFilters builds the chip cloud over the saved list: one group per axis
-// (which service it came from, what it carries), each chip counting the cards
-// it stands for. A group whose chips are the whole list narrows nothing, so it
-// is left out — and with both left out there is no cloud to draw.
-func savedFilters(cards []cardData) []filterGroup {
-	apps, types := map[string]int{}, map[string]int{}
+// cardFilters builds the chip cloud over a list: one group per axis (which
+// service it came from, what it carries), each chip counting the unread cards
+// it stands for, so reading takes the counts down alongside the header's. The
+// counts are this page's, which on a windowed feed is what a chip would
+// actually leave on screen; the header's number is the whole backlog.
+//
+// apps is the logged-in services, which the feed passes and the saved list
+// doesn't. Given them, every one gets a chip whether or not it has anything on
+// this page, because a source chip is also that service's status light — a
+// service that failed to fetch has nothing to show and is exactly the one worth
+// seeing. Without them (the saved list, read off disk, no service to be up or
+// down) a group that would light up the whole list narrows nothing and is left
+// out, and with both left out there is no cloud to draw.
+func cardFilters(cards []cardData, apps []string, bad map[string]bool) []filterGroup {
+	counts, types := map[string]int{}, map[string]int{}
 	for _, c := range cards {
-		apps[c.App]++
+		counts[c.App]++
 		types[c.Type]++
 	}
+
 	var out []filterGroup
-	if len(apps) > 1 {
+	if len(apps) > 0 {
+		// Every logged-in service, plus anything the list carries from one that
+		// isn't (items cached before a logout are still items to filter by).
 		g := filterGroup{Kind: "app"}
-		for a, n := range apps {
+		live := map[string]bool{}
+		for _, a := range apps {
+			live[a] = true
+			chip := filterChip{
+				Key: a, Label: appLabel(a), Color: appColor(a), Count: counts[a],
+				State: "ok", Title: a + ": live",
+			}
+			if bad[a] {
+				chip.State, chip.Title = "bad", a+": failed to load"
+			}
+			g.Chips = append(g.Chips, chip)
+		}
+		for a, n := range counts {
+			if !live[a] {
+				g.Chips = append(g.Chips, filterChip{Key: a, Label: appLabel(a), Color: appColor(a), Count: n})
+			}
+		}
+		sortChips(g.Chips)
+		out = append(out, g)
+	} else if len(counts) > 1 {
+		g := filterGroup{Kind: "app"}
+		for a, n := range counts {
 			g.Chips = append(g.Chips, filterChip{Key: a, Label: appLabel(a), Color: appColor(a), Count: n})
 		}
-		// biggest source first, alphabetical between ties, so the row is stable
-		// from load to load
-		sort.Slice(g.Chips, func(i, j int) bool {
-			if g.Chips[i].Count != g.Chips[j].Count {
-				return g.Chips[i].Count > g.Chips[j].Count
-			}
-			return g.Chips[i].Key < g.Chips[j].Key
-		})
+		sortChips(g.Chips)
 		out = append(out, g)
 	}
+
 	if len(types) > 1 {
 		g := filterGroup{Kind: "type"}
 		for _, t := range []string{"text", "video", "audio"} { // always this order, whatever the counts
@@ -404,6 +437,17 @@ func savedFilters(cards []cardData) []filterGroup {
 		out = append(out, g)
 	}
 	return out
+}
+
+// sortChips puts the busiest source first, alphabetical between ties, so the
+// row is stable from load to load.
+func sortChips(chips []filterChip) {
+	sort.Slice(chips, func(i, j int) bool {
+		if chips[i].Count != chips[j].Count {
+			return chips[i].Count > chips[j].Count
+		}
+		return chips[i].Key < chips[j].Key
+	})
 }
 
 // buildQuote shapes an embedded post into the nested card, clipped tighter than

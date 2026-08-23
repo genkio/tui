@@ -12,13 +12,16 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/genkio/tui/core"
@@ -44,28 +47,21 @@ var appLabels = map[string]string{
 	"bilibili":  "bili",
 }
 
-// healthLabels are the header's per-service dot labels, kept to two characters
-// so the strip stays narrow next to the unread/saved counts. Cards use the
-// roomier appLabels for their chips.
-var healthLabels = map[string]string{
-	"x":         "𝕏",
-	"inoreader": "in",
-	"folo":      "fo",
-	"reddit":    "rd",
-	"douban":    "db",
-	"bilibili":  "bl",
-}
-
 // runWeb serves the merged "all" timeline over HTTP, bound to addr (default
-// 0.0.0.0:8080) so other devices on the tailnet can reach it. It reuses the
-// same subprocess contract as the terminal all view — each authed app's
-// `--json` for the list and `--mark-read` for triage — so read state stays
-// consistent between the TUI and the web page. Only the all view is exposed.
-// dev turns on the client hot-reload loop: page.tmpl is re-read per request
-// and fetched items are cached briefly so refreshes don't re-scrape services.
+// 0.0.0.0:8080) so other devices on the tailnet can reach it.
+//
+// A page load reads the backlog cache off disk; it does not scrape anything. A
+// background sweeper owns the fetching, on a jittered interval, and it is the
+// only writer of that cache. Read marks land in the cache first and are carried
+// to each app's own `--mark-read` in the background, so the TUI still agrees
+// about what has been read. Only the all view is exposed.
+//
+// dev re-reads page.tmpl per request so template edits show up on refresh.
 // swipe serves the same feed as a deck of one card at a time instead of a
-// scrolling list.
-func runWeb(root, addr string, dev, swipe bool) error {
+// scrolling list. drain lets the sweeper tell a service that cannot page (see
+// drainApps) that what it handed over has been read, which is the only way to
+// reach the rest of its backlog.
+func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) error {
 	devPath := ""
 	if dev {
 		devPath = filepath.Join(root, "cmd", "tui", "page.tmpl")
@@ -74,12 +70,16 @@ func runWeb(root, addr string, dev, swipe bool) error {
 	if err != nil {
 		return err
 	}
-	var cache *fetchCache
-	if dev {
-		cache = &fetchCache{}
-	}
 	saved := loadSaved("")
 	rendered := newRenderedItems()
+	cache := loadFeedCache("")
+	flusher := newMarkFlusher(root, cache)
+	sweep := newSweeper(root, cache, flusher, drain, every)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go flusher.run(ctx)
+	go sweep.run(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +87,7 @@ func runWeb(root, addr string, dev, swipe bool) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, saved, rendered, swipe)
+		handleAll(w, r, root, loader, cache, sweep, saved, rendered, swipe)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -95,7 +95,24 @@ func runWeb(root, addr string, dev, swipe bool) error {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handleMark(w, r, root)
+		handleMark(w, r, cache, flusher)
+	})
+	mux.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		sweep.kick()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	})
+	// How the page knows when a fetch it asked for has finished: a sweep can
+	// take minutes, so the alternative is guessing at a delay and reloading into
+	// the same numbers.
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"fetching":%t,"unread":%d}`, sweep.sweeping(), cache.unreadCount())
 	})
 	mux.HandleFunc("/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -103,7 +120,7 @@ func runWeb(root, addr string, dev, swipe bool) error {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handleSave(w, r, saved, rendered)
+		handleSave(w, r, saved, cache, rendered)
 	})
 	mux.HandleFunc("/pos", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -137,12 +154,30 @@ func runWeb(root, addr string, dev, swipe bool) error {
 	if u := tailscaleURL(host, port); u != "" {
 		fmt.Printf("  tailnet:  %s\n", u)
 	}
+	if every > 0 {
+		fmt.Printf("  fetching every %s (±%d%%) into %s\n", every, int(sweepJitter*100), cache.path)
+	} else {
+		fmt.Printf("  fetching on demand only into %s\n", cache.path)
+	}
+	if drain {
+		fmt.Println("  draining: a fetched Inoreader article is marked read there so the rest of the backlog can be reached")
+	}
 	if dev {
-		fmt.Printf("  dev: edit %s and refresh — items cached %s between fetches\n", devPath, devCacheTTL)
+		fmt.Printf("  dev: edit %s and refresh\n", devPath)
 	}
 	fmt.Println("  (ctrl-c to stop)")
 
-	return http.Serve(ln, mux)
+	srv := &http.Server{Handler: mux}
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
+	}()
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 // tailscaleURL returns the device's Tailscale IPv4 URL for port when tailscale
@@ -158,9 +193,10 @@ func tailscaleURL(host, port string) string {
 	return ""
 }
 
-// fetchAllItems runs each authed feed app's `--json` concurrently (the same
-// contract the all-view TUI uses) and returns the merged, newest-first items
-// plus the names of any apps that failed to load.
+// fetchAllItems runs each named app's `--json` concurrently and returns the
+// merged, newest-first items plus the names of any that failed. The sweeper
+// feeds the cache instead; this is left for the live paths that deliberately
+// bypass the backlog, i.e. x's For You firehose.
 func fetchAllItems(ctx context.Context, root string, apps []string, xTab string, now time.Time) ([]core.Item, []string, string) {
 	var (
 		mu     sync.Mutex
@@ -173,37 +209,17 @@ func fetchAllItems(ctx context.Context, root string, apps []string, xTab string,
 		wg.Add(1)
 		go func(app string) {
 			defer wg.Done()
-			appCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-			defer cancel()
-			args := []string{app, "--json"}
-			if app == "x" {
-				args = append(args, "--tab", xTab) // For You / Following
-			}
-			cmd := exec.CommandContext(appCtx, self(), args...)
-			cmd.Env = appEnv(filepath.Join(root, "plugins", app))
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-			out, err := cmd.Output()
+			items, stale, err := fetchApp(ctx, root, app, xTab, 0, now)
+			mu.Lock()
+			defer mu.Unlock()
 			if err != nil {
-				mu.Lock()
-				// every plugin emits this marker for an expired session
-				if bytes.Contains(stderr.Bytes(), []byte("session is stale")) {
+				if stale {
 					warn = strings.TrimSpace(warn + " " + app + " session is stale — re-run `tui " + app + " --auth`.")
 				}
 				failed = append(failed, app)
-				mu.Unlock()
 				return
 			}
-			items, perr := core.ParseItems(out, now)
-			if perr != nil {
-				mu.Lock()
-				failed = append(failed, app)
-				mu.Unlock()
-				return
-			}
-			mu.Lock()
 			all = append(all, items...)
-			mu.Unlock()
 		}(app)
 	}
 	wg.Wait()
@@ -223,43 +239,25 @@ func authedFeedApps(root string) []string {
 	return out
 }
 
-// devCacheTTL is how long --dev reuses fetched items between page loads, so a
-// style-tweak refresh loop doesn't re-scrape every service.
-const devCacheTTL = 60 * time.Second
-
-// fetchCache remembers the last fetch per x tab; --dev only.
-type fetchCache struct {
-	mu     sync.Mutex
-	xTab   string
-	at     time.Time
-	items  []core.Item
-	failed []string
-	warn   string
-}
-
-func (c *fetchCache) get(xTab string, now time.Time) ([]core.Item, []string, string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.xTab != xTab || c.at.IsZero() || now.Sub(c.at) > devCacheTTL {
-		return nil, nil, "", false
-	}
-	// copy: callers sort in place, and concurrent requests share this cache
-	return append([]core.Item(nil), c.items...), c.failed, c.warn, true
-}
-
-func (c *fetchCache) put(xTab string, now time.Time, items []core.Item, failed []string, warn string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.xTab, c.at, c.items, c.failed, c.warn = xTab, now, items, failed, warn
-}
+// feedWindow caps how many cards one feed page carries. The backlog can run to
+// thousands; a phone rendering all of them — bodies, posters, players — would
+// crawl. The header still counts the whole thing, and marking the window read
+// brings the next one, so the number is honest and the page stays light.
+//
+// Set well above a normal day's backlog, because a windowed page is the
+// confusing case: the header says one number and the mark-all button another,
+// and the difference has to be explained. Stills are lazy and players preload
+// nothing, so the cost of a card nobody scrolls to is a few dozen DOM nodes.
+const feedWindow = 500
 
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
-// with ?json=1). Default order is oldest-first; ?order=desc flips to newest-first.
-// ?x=foryou serves x's For You timeline instead of the Following default (used
-// only ephemerally; the page resets to following on reload).
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *fetchCache, saved *savedStore, rendered *renderedItems, swipe bool) {
-	// In --dev a template typo should show up immediately, not after a full
-	// fetch, so load (and in dev, re-parse) the template first.
+// with ?json=1), served from the backlog cache rather than a fetch. Default
+// order is oldest-first; ?order=desc flips to newest-first. ?x=foryou serves x's
+// For You timeline instead, which is fetched live and deliberately left out of
+// the backlog: it is an endless firehose, not a list to get to the end of.
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, rendered *renderedItems, swipe bool) {
+	// In --dev a template typo should show up immediately, so load (and in dev,
+	// re-parse) the template first.
 	tmpl, err := loader.load()
 	if err != nil {
 		http.Error(w, "page template: "+err.Error(), http.StatusInternalServerError)
@@ -278,7 +276,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 			writeJSONItems(w, items, nil)
 			return
 		}
-		writePage(w, tmpl, pageInput{items: items, now: now, saved: saved, savedView: true, swipe: swipe})
+		writePage(w, tmpl, pageInput{items: items, total: len(items), now: now, saved: saved, savedView: true, swipe: swipe})
 		return
 	}
 
@@ -292,19 +290,19 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	var items []core.Item
 	var failed []string
 	var warn string
-	if len(apps) > 0 {
-		cached := false
-		if cache != nil {
-			items, failed, warn, cached = cache.get(xTab, now)
-		}
-		if !cached {
-			fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
-			defer cancel()
-			items, failed, warn = fetchAllItems(fetchCtx, root, apps, xTab, now)
-			if cache != nil {
-				cache.put(xTab, now, items, failed, warn)
-			}
-		}
+	var capped bool
+	if xTab == "foryou" {
+		// The backlog minus x, plus a live look at For You. Nothing from it is
+		// cached, so it never turns into a backlog you owe yourself.
+		items = cache.unread(now, "x")
+		fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
+		defer cancel()
+		live, f, wn := fetchAllItems(fetchCtx, root, []string{"x"}, xTab, now)
+		items = append(items, live...)
+		failed, warn = f, wn
+	} else {
+		items = cache.unread(now, "")
+		failed, warn, capped = cache.trouble(apps)
 	}
 	sortItems(items, asc)
 
@@ -314,13 +312,18 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		return
 	}
 
-	// Remember what this page showed so its save buttons can post back just an
-	// app+id and still persist the whole item.
+	total := len(items)
+	if len(items) > feedWindow {
+		items = items[:feedWindow]
+	}
+	// Remember what this page showed so a save button can post back just an
+	// app+id and still persist the whole item, even for the uncached For You.
 	rendered.put(items)
 
 	writePage(w, tmpl, pageInput{
-		items: items, apps: apps, failed: failed, now: now,
+		items: items, total: total, apps: apps, failed: failed, now: now,
 		xTab: xTab, warn: warn, saved: saved, swipe: swipe,
+		updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
 }
 
@@ -337,9 +340,10 @@ func writePage(w http.ResponseWriter, tmpl *template.Template, in pageInput) {
 }
 
 // handleSave stars or unstars one item. Saving needs the whole item, which the
-// button doesn't carry, so it comes from what this process last rendered; a
-// miss means the page predates a restart and the client is told to reload.
-func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, rendered *renderedItems) {
+// button doesn't carry, so it comes from the backlog cache, or from what this
+// process last rendered when the item was never cached (For You). A miss in
+// both means the page predates a restart, and the client is told to reload.
+func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, cache *feedCache, rendered *renderedItems) {
 	app, id := r.FormValue("app"), r.FormValue("id")
 	if app == "" || id == "" {
 		http.Error(w, "missing app or id", http.StatusBadRequest)
@@ -347,12 +351,16 @@ func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, rende
 	}
 	var err error
 	if r.FormValue("save") == "1" {
-		it, ok := rendered.get(app, id)
+		now := time.Now()
+		it, ok := cache.item(app, id, now)
+		if !ok {
+			it, ok = rendered.get(app, id)
+		}
 		if !ok {
 			http.Error(w, "item is no longer in view; reload the page", http.StatusConflict)
 			return
 		}
-		err = saved.add(it, time.Now())
+		err = saved.add(it, now)
 	} else {
 		err = saved.remove(app, id)
 	}
@@ -420,10 +428,12 @@ func sortItems(items []core.Item, asc bool) {
 	})
 }
 
-// handleMark marks one or more items read and, unless it asked for JSON,
-// redirects back to the page, reusing each app's `--mark-read` so the change is
-// consistent with the TUI's read state.
-func handleMark(w http.ResponseWriter, r *http.Request, root string) {
+// handleMark marks one or more items read. The cache takes the mark and the
+// request returns: carrying it to the app itself is the flusher's job, retried
+// until it lands, because a service that spends a round trip per id cannot
+// answer for a few hundred of them inside one request. An id the cache never
+// saw goes straight to the flusher's own queue instead.
+func handleMark(w http.ResponseWriter, r *http.Request, cache *feedCache, flusher *markFlusher) {
 	app := r.FormValue("app")
 	ids := r.Form["id"] // one or many 'id' values
 	clean := ids[:0]
@@ -436,10 +446,13 @@ func handleMark(w http.ResponseWriter, r *http.Request, root string) {
 		http.Error(w, "missing app or id", http.StatusBadRequest)
 		return
 	}
-	if err := runMarkRead(root, app, clean, 30*time.Second); err != nil {
+	unknown := cache.markRead(app, clean, time.Now())
+	if err := cache.save(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	flusher.push(app, unknown) // also kicks the flush for what the cache took
+	flusher.kick()
 	if r.FormValue("json") == "1" {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"ok":true}`)

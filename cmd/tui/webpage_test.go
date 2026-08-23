@@ -27,7 +27,26 @@ func renderPage(t *testing.T, items []core.Item, apps, failed []string, xTab, wa
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	in := pageInput{items: items, apps: apps, failed: failed, now: time.Now(), xTab: xTab, warn: warn}
+	in := pageInput{items: items, total: len(items), apps: apps, failed: failed, now: time.Now(), xTab: xTab, warn: warn, updated: time.Now()}
+	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// renderInput renders one hand-built pageInput, for the cases a fixed helper
+// can't reach (a windowed backlog, a sweep in flight).
+func renderInput(t *testing.T, in pageInput) string {
+	t.Helper()
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +66,8 @@ func renderSavedPage(t *testing.T, store *savedStore) string {
 	}
 	now := time.Now()
 	var b strings.Builder
-	in := pageInput{items: store.list(now), now: now, saved: store, savedView: true}
+	items := store.list(now)
+	in := pageInput{items: items, total: len(items), now: now, saved: store, savedView: true}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +90,7 @@ func renderSwipePage(t *testing.T, items []core.Item, apps ...string) string {
 	if len(apps) == 0 {
 		apps = []string{"x", "reddit"}
 	}
-	in := pageInput{items: items, apps: apps, now: time.Now(), xTab: "following", swipe: true}
+	in := pageInput{items: items, total: len(items), apps: apps, now: time.Now(), xTab: "following", swipe: true}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -380,22 +400,201 @@ func TestRenderPageEmptyAndNote(t *testing.T) {
 	}
 }
 
-func TestRenderPageHealthDots(t *testing.T) {
-	// Every logged-in service gets a labeled dot: green when it loaded, red
-	// when its fetch failed. The dots replace the refresh button.
-	p := renderPage(t, nil, []string{"x", "reddit"}, []string{"reddit"}, "following", "")
-	if !strings.Contains(p, `title="x: live"`) || !strings.Contains(p, `hdot ok`) {
-		t.Fatal("expected a green dot for the healthy service")
+// A source chip's count is that service's status light: green when the last
+// sweep of it worked, red when it didn't and the number is therefore stale.
+func TestSourceChipCarriesServiceHealth(t *testing.T) {
+	p := renderPage(t,
+		[]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}},
+		[]string{"x", "reddit"}, []string{"reddit"}, "following", "")
+	if !strings.Contains(p, `title="x: live"`) || !strings.Contains(p, `class="fn ok">1<`) {
+		t.Fatal("expected a green count on the healthy service's chip: " + p)
 	}
-	if !strings.Contains(p, `title="reddit: failed to load"`) || !strings.Contains(p, `hdot bad`) {
-		t.Fatal("expected a red dot for the failed service")
+	if !strings.Contains(p, `title="reddit: failed to load"`) || !strings.Contains(p, `class="fn bad">1<`) {
+		t.Fatal("expected a red count on the failed service's chip: " + p)
 	}
-	if strings.Contains(p, `class="refresh"`) {
-		t.Fatal("refresh button should be replaced by the health dots")
+
+	// A service that failed has nothing on the page, and is exactly the one
+	// worth seeing: it still gets a chip, reading zero, in red.
+	p = renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x", "folo"}, []string{"folo"}, "following", "")
+	if !strings.Contains(p, `data-key="folo"`) || !strings.Contains(p, `class="fn bad">0<`) {
+		t.Fatal("a service with nothing to show should still report itself: " + p)
 	}
-	// No logged-in services: no health strip at all.
-	if strings.Contains(renderPage(t, nil, nil, nil, "following", ""), `class="health"`) {
-		t.Fatal("health strip should be absent with no logged-in services")
+
+	// No logged-in services: nothing to draw.
+	if strings.Contains(renderPage(t, nil, nil, nil, "following", ""), `id="filters"`) {
+		t.Fatal("no logged-in service means no chips")
+	}
+
+	// Items cached before a logout are still items to filter by, so their app
+	// keeps a chip — just without a status, having no session to report on.
+	p = renderPage(t,
+		[]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "douban", ID: "2", Title: "b"}},
+		[]string{"x"}, nil, "following", "")
+	if !strings.Contains(p, `data-kind="app" data-key="douban" data-on="0">`) {
+		t.Fatal("a logged-out app with cached items should keep its chip: " + p)
+	}
+	if strings.Contains(p, `title="douban: live"`) {
+		t.Fatal("a logged-out app has no session to call live: " + p)
+	}
+
+	// The saved list is read off disk: no service to be up or down, so its
+	// chips carry no state at all.
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	now := time.Now()
+	for _, it := range []core.Item{
+		{App: "x", ID: "1", Title: "a"},
+		{App: "reddit", ID: "2", Title: "b"},
+	} {
+		if err := store.add(it, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := renderSavedPage(t, store)
+	if !strings.Contains(saved, `data-kind="app" data-key="x"`) {
+		t.Fatal("the saved list still gets source chips: " + saved)
+	}
+	if strings.Contains(saved, `class="fn ok"`) || strings.Contains(saved, `class="fn bad"`) {
+		t.Fatal("a saved-list chip has no service health to report: " + saved)
+	}
+}
+
+// The chip row is one wrapping line of chips: a nested flex box per group broke
+// the line at the group boundary and left the rest of it empty.
+func TestChipGroupsShareOneRow(t *testing.T) {
+	p := renderPage(t,
+		[]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "x", ID: "2", Title: "b", Audio: "https://ex.com/e.mp3"}},
+		[]string{"x"}, nil, "following", "")
+	if !strings.Contains(p, ".fgroup{display:contents}") {
+		t.Error("groups should not be flex boxes of their own")
+	}
+	if !strings.Contains(p, ".fgroup+.fgroup>.fchip:first-child{margin-left:8px}") {
+		t.Error("a later group needs its gap on its first chip, not on the group box")
+	}
+	// Both groups are there to share the row: two types on this page.
+	if !strings.Contains(p, `data-kind="type" data-key="audio"`) {
+		t.Fatal("expected the type group alongside the source group: " + p)
+	}
+}
+
+// A swiped card starts where the chips end. Centring it in the leftover
+// viewport put a short card a long way down and moved every card as the next
+// one's height changed.
+func TestDeckIsNotCentred(t *testing.T) {
+	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
+	if strings.Contains(p, "100dvh") {
+		t.Error("the deck should not reserve a viewport's worth of height to centre in")
+	}
+	if strings.Contains(p, "margin:auto 0") {
+		t.Error("the deck should be top-aligned, not centred")
+	}
+	if !strings.Contains(p, ".deckwrap .deck{width:100%}") {
+		t.Error("the deck should still fill the width")
+	}
+}
+
+// Reading takes the chip counts down with the header's, so a chip never claims
+// more than it would leave.
+func TestChipCountsFollowReading(t *testing.T) {
+	p := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
+	if !strings.Contains(p, "function recountChips()") {
+		t.Error("expected the chip recount")
+	}
+	if !strings.Contains(p, "scheduleRecount();") {
+		t.Error("marking a card read should schedule a recount")
+	}
+	if !strings.Contains(p, "article.card:not(.read)") {
+		t.Error("the recount should count unread cards")
+	}
+}
+
+// The page is served from the backlog cache, so it says how old that is and
+// offers a fetch on the spot. Both live on the unread count itself, which is
+// the only header element the number belongs next to.
+func TestRenderPageFreshness(t *testing.T) {
+	p := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
+	if !strings.Contains(p, `id="refresh"`) {
+		t.Fatal("expected the tap-to-fetch control: " + p)
+	}
+	if !strings.Contains(p, `id="upd">just now`) {
+		t.Fatal("expected the freshness label: " + p)
+	}
+
+	// A sweep in flight says so rather than showing an age about to change.
+	in := pageInput{
+		items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 1,
+		apps: []string{"x"}, now: time.Now(), xTab: "following",
+		updated: time.Now().Add(-9 * time.Minute), fetching: true,
+	}
+	if got := renderInput(t, in); !strings.Contains(got, `id="upd">fetching…`) {
+		t.Fatal("a sweep in flight should say so: " + got)
+	}
+
+	// Nothing swept yet (a cold cache): no age to state.
+	in.updated, in.fetching = time.Time{}, false
+	if got := renderInput(t, in); strings.Contains(got, `id="upd"`) {
+		t.Fatal("a never-swept cache has no age to show: " + got)
+	}
+}
+
+// A page carries a window of the backlog, not all of it: the count is the whole
+// thing, the button says what it is actually about to clear, and it flags that
+// a reload brings more.
+func TestRenderPageWindowedBacklog(t *testing.T) {
+	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "x", ID: "2", Title: "b"}}
+	in := pageInput{items: items, total: 812, apps: []string{"x"}, now: time.Now(), xTab: "following", updated: time.Now()}
+	p := renderInput(t, in)
+	if !strings.Contains(p, `<span id="unreadn">812</span>`) {
+		t.Fatal("the count is the whole backlog, not the window: " + p)
+	}
+	if !strings.Contains(p, `data-more="1"`) || !strings.Contains(p, `mark these <span id="markn">2</span> read`) {
+		t.Fatal("expected a windowed mark-all button: " + p)
+	}
+	// The two numbers have to add up, or the button reads as a bug next to the
+	// header's count.
+	if !strings.Contains(p, `<span class="behind">810 more behind</span>`) {
+		t.Fatal("a windowed button should say how much is behind it: " + p)
+	}
+	if !strings.Contains(p, "function relabelMarkAll()") {
+		t.Error("the button's number should come down as cards are read")
+	}
+
+	// The whole backlog on one page: plain "mark all read", no number to keep
+	// honest and nothing more behind.
+	in.total = len(items)
+	p = renderInput(t, in)
+	if !strings.Contains(p, `data-more="0"`) || !strings.Contains(p, `mark all read`) {
+		t.Fatal("expected the unwindowed mark-all button: " + p)
+	}
+	if strings.Contains(p, `id="markn"`) || strings.Contains(p, "more behind") {
+		t.Fatal("an unwindowed page has nothing behind it to explain: " + p)
+	}
+}
+
+// Clearing the filters starts over, and by then the page is stale: cards have
+// been read and a windowed feed has more behind the ones it sent. So it
+// reloads, after the marks that haven't reached the server yet have gone.
+func TestClearFiltersReloads(t *testing.T) {
+	p := renderPage(t,
+		[]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}},
+		[]string{"x", "reddit"}, nil, "following", "")
+	if !strings.Contains(p, "flushPending().then(function(){ location.reload(); })") {
+		t.Error("clear should flush pending marks and then reload")
+	}
+	if !strings.Contains(p, "return Promise.all(calls)") {
+		t.Error("flushPending has to be awaitable for that to be safe")
+	}
+}
+
+// A capped count is short of the truth (a drain stopped at its round cap), so
+// it renders the way the picker's does: "N+".
+func TestRenderPageCappedCount(t *testing.T) {
+	in := pageInput{
+		items: []core.Item{{App: "inoreader", ID: "1", Title: "a"}}, total: 400,
+		apps: []string{"inoreader"}, now: time.Now(), xTab: "following",
+		updated: time.Now(), capped: true,
+	}
+	if got := renderInput(t, in); !strings.Contains(got, `<span id="unreadn">400</span>+ unread`) {
+		t.Fatal("expected a capped count: " + got)
 	}
 }
 
@@ -1030,7 +1229,7 @@ func TestCardType(t *testing.T) {
 	}
 }
 
-func TestSavedFilters(t *testing.T) {
+func TestCardFilters(t *testing.T) {
 	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
 	now := time.Now()
 	items := []core.Item{
@@ -1067,16 +1266,66 @@ func TestSavedFilters(t *testing.T) {
 		t.Errorf("expected a count on the reddit chip: %s", page)
 	}
 
-	// The live feed is fetched per load and marked read by scrolling; filtering
-	// belongs to the saved list.
-	if feed := renderPage(t, items, []string{"reddit", "x"}, nil, "following", ""); strings.Contains(feed, `id="filters"`) {
-		t.Error("the filter cloud is for the saved list, not the feed")
+	// The feed is served from the backlog cache, so it arrives whole too and
+	// gets the same cloud: same groups, same counts, same markup.
+	feed := renderPage(t, items, []string{"reddit", "x"}, nil, "following", "")
+	for _, want := range []string{
+		`<div class="filters" id="filters">`,
+		`data-kind="app" data-key="reddit" data-on="0"`,
+		`data-kind="type" data-key="video"`,
+		`data-kind="type" data-key="audio"`,
+		`id="noMatch"`,
+	} {
+		if !strings.Contains(feed, want) {
+			t.Errorf("feed page missing %s:\n%s", want, feed)
+		}
+	}
+}
+
+// Filtering hides cards with .fout, not .hid: the swipe deck toggles .hid on
+// every card but the one in play, so sharing the class would have the two
+// fighting over what is on screen.
+func TestFilterHidingIsNotTheDecksHiding(t *testing.T) {
+	page := renderSwipePage(t,
+		[]core.Item{
+			{App: "x", ID: "1", Title: "post"},
+			{App: "reddit", ID: "2", Title: "clip", Video: "https://video.twimg.com/a.mp4"},
+		}, "x", "reddit")
+	if !strings.Contains(page, `id="filters"`) {
+		t.Fatalf("the deck gets the same chips as the feed:\n%s", page)
+	}
+	if !strings.Contains(page, `classList.toggle('fout', !ok)`) {
+		t.Error("the filter should hide with .fout")
+	}
+	if !strings.Contains(page, ".card.fout{display:none!important}") {
+		t.Error("expected the .fout rule")
+	}
+	if !strings.Contains(page, "window.onFilterChange") {
+		t.Error("the deck should re-deal from what the filter leaves")
+	}
+	// A filter that matches nothing has its own note; "that's every card" would
+	// contradict it.
+	if !strings.Contains(page, "!done || cards.length === 0") {
+		t.Error("the deck-end note should stay hidden when a filter empties the deck")
+	}
+}
+
+// Mark-all clears what is on screen. With a filter on, that is the sources you
+// picked and nothing else, and a card the filter hid is never counted as read
+// by the scroll observer either.
+func TestMarkAllRespectsFilters(t *testing.T) {
+	page := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
+	if !strings.Contains(page, `article.card:not(.read):not(.fout)`) {
+		t.Error("mark-all should skip filtered-out cards")
+	}
+	if !strings.Contains(page, `if(el.classList.contains('fout')) return;`) {
+		t.Error("the scroll observer should skip filtered-out cards")
 	}
 }
 
 // A group whose chips would all stay lit filters nothing, so it isn't drawn —
 // and a saved list of one kind from one app gets no cloud at all.
-func TestSavedFiltersSkipPointlessGroups(t *testing.T) {
+func TestCardFiltersSkipPointlessGroups(t *testing.T) {
 	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
 	now := time.Now()
 	for _, it := range []core.Item{
@@ -1259,12 +1508,20 @@ func TestPosHandler(t *testing.T) {
 
 var long = strings.Repeat("u", maxPosSrc+1)
 
-func TestHealthLabelsAreShort(t *testing.T) {
+// Every logged-in service gets a chip, using the same label its cards do:
+// there is one row of sources now, not a row of chips and a row of dots.
+func TestEveryLoggedInServiceGetsAChip(t *testing.T) {
 	p := renderPage(t, nil, []string{"inoreader", "reddit", "douban", "folo"}, nil, "following", "")
-	for _, want := range []string{">in<", ">rd<", ">db<", ">fo<"} {
-		if !strings.Contains(p, want) {
-			t.Errorf("expected two-letter health label %q: %s", want, p)
+	for _, app := range []string{"inoreader", "reddit", "douban", "folo"} {
+		if !strings.Contains(p, `data-kind="app" data-key="`+app+`"`) {
+			t.Errorf("expected a chip for %s: %s", app, p)
 		}
+		if !strings.Contains(p, `>`+appLabel(app)+`<`) {
+			t.Errorf("expected %s's chip to carry its card label %q", app, appLabel(app))
+		}
+	}
+	if strings.Contains(p, `class="health"`) || strings.Contains(p, "hdot") {
+		t.Error("the separate row of status dots should be gone")
 	}
 }
 
