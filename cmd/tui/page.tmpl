@@ -114,13 +114,27 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 /* why the button's number is smaller than the header's: the page carries a
    window of the backlog, and this is the rest of it */
 .markall .behind{font-weight:600;font-size:12px;color:var(--muted);margin-left:6px}
-/* in a deck there is no end of the feed to park this at, so it floats */
+/* In a deck there is no end of the feed to park these at, so they float in the
+   bottom corners, one under each thumb: a tick for this card on the left, two
+   for the whole deck on the right. Ticks rather than words because the gestures
+   they stand in for have no words either, and because a label long enough to
+   explain itself would reach halfway across the card. */
 .markall.fab{
-  position:fixed;z-index:20;width:auto;margin:0;
-  right:14px;bottom:calc(14px + env(safe-area-inset-bottom));
-  padding:0 16px;min-height:42px;border-radius:999px;border:1px solid var(--line);
-  font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,.3);
+  position:fixed;z-index:20;margin:0;
+  bottom:calc(14px + env(safe-area-inset-bottom));
+  width:52px;height:52px;min-height:0;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-radius:999px;
+  box-shadow:0 6px 18px rgba(0,0,0,.3);
 }
+.markall.fab#markOne{left:14px}
+.markall.fab#markAll{right:14px}
+/* Both marks are drawn rather than typeset. There is no double-tick character
+   worth the name — setting two ✓ side by side reads as two glyphs that happen
+   to be neighbours — and a drawn pair shares one stroke weight and one scale,
+   which two font glyphs never would. Height is what's fixed, so the wider
+   double keeps the same stroke as the single. */
+.markall.fab svg{display:block;height:22px;width:auto}
 .markall.hid{display:none} /* .hid alone loses to .markall.fab */
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
@@ -283,7 +297,8 @@ video.ffs{object-fit:cover !important}
 {{end}}<div class="stamp" id="stamp"></div></div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Cards (not .SavedView) (not .BlockedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-more="{{if .More}}1{{else}}0{{end}}">✓ mark {{if .More}}these <span id="markn">{{.Shown}}</span>{{else}}all{{end}} read{{if .More}} <span class="behind">{{.Behind}} more behind</span>{{end}}</button>
+{{end}}{{end}}{{if and .Swipe .Cards}}<button id="markOne" class="markall fab" type="button" title="mark this card read and deal the next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg></button>
+{{end}}{{if and .Cards (not .SavedView) (not .BlockedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-more="{{if .More}}1{{else}}0{{end}}"{{if .Swipe}} title="mark the whole deck read{{if .More}}, then deal the {{.Behind}} behind it{{end}}"{{end}}>{{if .Swipe}}<svg viewBox="0 0 27 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12.5L7 17.5L16 6.5"/><path d="M11 12.5L16 17.5L25 6.5"/></svg>{{else}}✓ mark {{if .More}}these <span id="markn">{{.Shown}}</span>{{else}}all{{end}} read{{if .More}} <span class="behind">{{.Behind}} more behind</span>{{end}}{{end}}</button>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -1019,9 +1034,11 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
   Promise.all(calls).then(function(){ if(failed) resync(); });
   decCount(n);
   recountChips();
-  markAllBtn.textContent = '✓ all read';
   markAllBtn.disabled = true;
-  if (SWIPE) markAllBtn.classList.add('hid'); // a floating button with nothing to do is just in the way
+  // In a deck it goes away rather than restating itself: a floating button with
+  // nothing to do is in the way, and it is a drawn mark, not a label to rewrite.
+  if (SWIPE) markAllBtn.classList.add('hid');
+  else markAllBtn.textContent = '✓ all read';
   // The page carries a window of the backlog, not all of it. Clearing the
   // window and there being more behind it means the next one is a reload away,
   // so go and get it rather than leaving an emptied page that looks finished.
@@ -1071,6 +1088,7 @@ if (SWIPE) (function(){
   var cards = [].slice.call(deck.querySelectorAll('article.card'));
   var stamp = document.getElementById('stamp');
   var endEl = document.getElementById('deckEnd');
+  var oneBtn = document.getElementById('markOne');
   var at = 0;
 
   function current(){ return at < cards.length ? cards[at] : null; }
@@ -1087,6 +1105,7 @@ if (SWIPE) (function(){
     if (endEl) endEl.classList.toggle('hid', !done);
     // Nothing left to mark once the deck is dealt out.
     if (markAllBtn) markAllBtn.classList.toggle('hid', done);
+    if (oneBtn) oneBtn.classList.toggle('hid', done);
   }
   // A card that leaves the screen takes its audio with it.
   function quiet(card){
@@ -1146,6 +1165,12 @@ if (SWIPE) (function(){
     if (text) stamp.textContent = text;
     stamp.style.opacity = amount;
   }
+  // The tick in the left corner is the throw, for a thumb that would rather
+  // tap: the same card read, the same next one dealt.
+  if (oneBtn) oneBtn.addEventListener('click', function(){
+    var card = current();
+    if (card) mark(card);
+  });
 
   function thX(){ return Math.min(120, window.innerWidth * 0.28); } // read per gesture: the phone may have rotated
   var drag = null;

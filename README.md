@@ -354,19 +354,26 @@ the first one (they stay read — it's a second look, not an undo). **→**/**l*
 deals the next one and **←**/**h** walks back, and a mouse can drag. Only
 sideways is a
 gesture: up and down scroll the page as usual, and everything else is a footer
-button, saving included. Once the deck is dealt out the floating **mark all
-read** goes away and a note says so; where to go next is the chip row, which the
-deck carries above it like the feed does.
+button, saving included. Once the deck is dealt out the two floating ticks go
+away and a note says so; where to go next is the chip row, which the deck
+carries above it like the feed does.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
 to roughly a screenful, so the footer actions — open, save, share, image
 toggle, video controls, the video **keep** download — are always in reach
 (swipe the row itself sideways when they outrun the screen; only the card
 behind it throws).
-Anything past the clip sits behind the same "+N words" toggle. **Mark all
-read** floats as a pill in the bottom-right corner. The saved list is for
-re-reading rather than triage, so it stays a scrolling list even in swipe
-mode.
+Anything past the clip sits behind the same "+N words" toggle.
+
+The two gestures also have buttons, floating in the bottom corners under either
+thumb: a **tick** on the left marks the card on screen read and deals the next,
+the same as a left swipe, and a **double tick** on the right clears the whole
+deck. Marks rather than words, because the gestures they stand in for have no
+words either and a label long enough to explain itself would reach halfway
+across the card; a long press says which is which. Both are drawn as SVG rather
+than set in ✓ characters, so the pair shares one stroke weight and one scale.
+The saved list is for re-reading rather than triage, so it stays a scrolling
+list even in swipe mode.
 
 ### macOS firewall vs. source builds
 

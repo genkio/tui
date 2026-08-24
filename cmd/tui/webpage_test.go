@@ -281,6 +281,56 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	}
 }
 
+// The deck's two corner buttons: one tick on the left for this card, two on the
+// right for the lot. A thumb that would rather tap than throw needs the same
+// two things the gestures already do.
+func TestDeckCornerTicks(t *testing.T) {
+	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}
+	deck := renderSwipePage(t, items)
+	if !strings.Contains(deck, `id="markOne" class="markall fab" type="button" title="mark this card read and deal the next"><svg`) {
+		t.Fatalf("expected a single-tick button for the card on screen: %s", deck)
+	}
+	// Drawn, not typeset: one path for the single, two for the double, and the
+	// same stroke on both — which is the whole reason they aren't ✓ and ✓✓.
+	if strings.Count(deck, `<path d="M5 12.5L10 17.5L19 6.5"/>`) != 1 {
+		t.Errorf("expected one drawn tick on the left button: %s", deck)
+	}
+	if !strings.Contains(deck, `<path d="M2 12.5L7 17.5L16 6.5"/><path d="M11 12.5L16 17.5L25 6.5"/>`) {
+		t.Errorf("expected two drawn ticks on the right button: %s", deck)
+	}
+	if strings.Count(deck, `stroke-width="2.4"`) != 2 {
+		t.Errorf("both marks have to carry the same stroke or the pair looks wrong: %s", deck)
+	}
+	// Height is what's pinned, so the wider double keeps the single's stroke.
+	if !strings.Contains(deck, ".markall.fab svg{display:block;height:22px;width:auto}") {
+		t.Errorf("the two marks have to be scaled off their height: %s", deck)
+	}
+	if strings.Contains(deck, "mark all read") {
+		t.Error("the deck's fab has no room for words; the title attribute carries them")
+	}
+	if !strings.Contains(deck, `title="mark the whole deck read"`) {
+		t.Errorf("a wordless button still has to say what it does on a long press: %s", deck)
+	}
+	// Both hide together when the deck is dealt out: neither has anything left
+	// to act on.
+	if !strings.Contains(deck, `if (oneBtn) oneBtn.classList.toggle('hid', done);`) {
+		t.Error("the single tick should go away with the deck")
+	}
+	if !strings.Contains(deck, ".markall.fab#markOne{left:14px}") || !strings.Contains(deck, ".markall.fab#markAll{right:14px}") {
+		t.Errorf("the two ticks belong in opposite corners: %s", deck)
+	}
+
+	// The scrolling feed keeps its wordy button: there is no card on screen
+	// there to mark, and the button sits in the flow where a label fits.
+	feed := renderPage(t, items, []string{"x", "reddit"}, nil, "following", "")
+	if strings.Contains(feed, `id="markOne"`) {
+		t.Error("a scrolling feed has no current card, so no single-tick button")
+	}
+	if !strings.Contains(feed, "mark all read") {
+		t.Errorf("the feed's mark-all keeps its label: %s", feed)
+	}
+}
+
 // x's For You is a chip of its own, in black so the two x chips are told apart:
 // the blue one is the cached Following backlog, the black one is fetched on the
 // spot. It replaces the end-of-feed offers, which are gone.
