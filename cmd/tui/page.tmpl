@@ -109,6 +109,16 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .fchip .fn.ok{color:var(--ok);opacity:1}
 .fchip .fn.bad{color:var(--bad);opacity:1}
 .fclear{margin-left:auto;color:var(--accent)}
+/* the second layer, under the source row: which subreddit, which rss feed. Only
+   the busiest of them fit — a source can have dozens, and a wall of them would
+   push the first card off the screen — so the script keeps one row and the rest
+   are behind "more". Pulled up tight against the row it narrows, so the two read
+   as one control rather than two. */
+.subs{margin-top:-6px}
+/* a feed title runs as long as its owner felt like; the chip is capped and the
+   whole of it stays in the tooltip */
+.subs .slabel{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmore{color:var(--accent)}
 .card.read{opacity:.45}
 /* the unread count doubles as the refresh control: the server fetches on its
    own schedule, so the only thing the page wants of it is "now" */
@@ -314,18 +324,19 @@ video.ffs{object-fit:cover !important}
 }
 </style>
 </head><body>
-<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-sel="{{.Sel}}" hidden></div>
+<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-sel="{{.Sel}}" data-sub="{{.Sub}}" hidden></div>
 <div class="wrap">
 <header>
   <div class="sub" id="sub">{{if .BlockedView}}<a class="viewlink" href="/">unread</a> <span id="blockedn">{{.Blocked}}</span> blocked <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{else if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<button class="refresh" id="refresh" type="button" title="fetch every service now"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a> <a class="viewlink" href="/?blocked=1"><span id="blockedn">{{.Blocked}}</span> blocked</a>{{end}}</div>
   {{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
+{{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
+{{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
-{{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
 {{end}}<div class="stamp" id="stamp"></div></div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
@@ -348,6 +359,10 @@ var BLOCKED_VIEW = document.getElementById('state').getAttribute('data-blockedvi
 // chip's items and nothing else, which is what stops the recount below from
 // speaking for the chips it cannot see.
 var SEL = document.getElementById('state').getAttribute('data-sel') || '';
+// ...and the subcategory narrowing it further, blank when none is. With one on
+// the page is a slice of a slice, which is narrower still than what the source
+// and type chips stand for.
+var SUB = document.getElementById('state').getAttribute('data-sub') || '';
 
 // Reading = scrolling: the moment a card is fully off-screen (its bottom edge
 // clears the top of the viewport) it is marked read and muted in place — it
@@ -431,16 +446,50 @@ function scheduleRecount(){
   if(recountTimer) return;
   recountTimer = setTimeout(recountChips, 150);
 }
+// What the server said each chip holds, kept before anything writes over it.
+// A page narrowed to one subcategory cannot be recounted into a number about
+// the whole source, so those chips are walked down from here instead.
+(function(){
+  document.querySelectorAll('#filters .fchip[data-kind], #subs .fchip[data-kind]').forEach(function(chip){
+    var n = chip.querySelector('.fn');
+    if(n) chip.dataset.n0 = n.textContent;
+  });
+})();
 function recountChips(){
   recountTimer = null;
   relabelMarkAll();
   var bar = document.getElementById('filters');
   if(!bar) return;
+  var sbar = document.getElementById('subs');
+  // With a subcategory on, this page is one stream of a source while every chip
+  // above it counts the whole source: recounting them from what is here would
+  // report the stream's number as the source's. So they come down by what has
+  // been read rather than up from what is left — which is also the one way the
+  // source chip moves at all while a stream of it is the page.
+  if(SUB){
+    var gone = {app:{}, type:{}, sub:{}};
+    document.querySelectorAll('article.card.read').forEach(function(c){
+      gone.app[c.dataset.app] = (gone.app[c.dataset.app] || 0) + 1;
+      gone.type[c.dataset.type] = (gone.type[c.dataset.type] || 0) + 1;
+      if(c.dataset.sub) gone.sub[c.dataset.sub] = (gone.sub[c.dataset.sub] || 0) + 1;
+    });
+    [bar, sbar].forEach(function(b){
+      if(!b) return;
+      b.querySelectorAll('.fchip[data-kind]').forEach(function(chip){
+        var n = chip.querySelector('.fn'), base = parseInt(chip.dataset.n0, 10);
+        var off = gone[chip.dataset.kind];
+        if(!n || isNaN(base) || !off) return;
+        n.textContent = Math.max(0, base - (off[chip.dataset.key] || 0));
+      });
+    });
+    return;
+  }
   var unread = document.querySelectorAll('article.card:not(.read)');
-  var byApp = {}, byType = {};
+  var byApp = {}, byType = {}, bySub = {};
   unread.forEach(function(c){
     byApp[c.dataset.app] = (byApp[c.dataset.app] || 0) + 1;
     byType[c.dataset.type] = (byType[c.dataset.type] || 0) + 1;
+    if(c.dataset.sub) bySub[c.dataset.sub] = (bySub[c.dataset.sub] || 0) + 1;
   });
   bar.querySelectorAll('.fchip[data-kind]').forEach(function(chip){
     var n = chip.querySelector('.fn');
@@ -453,6 +502,11 @@ function recountChips(){
     if(chip.dataset.kind === 'x'){ n.textContent = unread.length; return; }
     var from = chip.dataset.kind === 'app' ? byApp : byType;
     n.textContent = from[chip.dataset.key] || 0;
+  });
+  // The second row. With the whole source on the page, every one of its chips
+  // is countable from what is here.
+  if(sbar) sbar.querySelectorAll('.fchip[data-kind]').forEach(function(chip){
+    chip.querySelector('.fn').textContent = bySub[chip.dataset.key] || 0;
   });
 }
 // The mark-all button names how many it is about to clear, so that number has
@@ -1319,14 +1373,70 @@ window.addEventListener('pageshow', function(){ document.getElementById('loading
 // leaving the page is exactly when a mark that hasn't reached the server yet
 // would be lost.
 (function(){
-  var bar = document.getElementById('filters');
-  if (!bar) return;
-  bar.addEventListener('click', function(e){
-    var a = e.target.closest ? e.target.closest('a.fchip') : null;
-    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
-    e.preventDefault();
-    leaveFor(a.getAttribute('href'));
+  ['filters','subs'].forEach(function(id){
+    var bar = document.getElementById(id);
+    if (!bar) return;
+    bar.addEventListener('click', function(e){
+      var a = e.target.closest ? e.target.closest('a.fchip') : null;
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+      e.preventDefault();
+      leaveFor(a.getAttribute('href'));
+    });
   });
+})();
+
+// The subcategory row is kept to a single line: a source can carry dozens of
+// them, and a block of chips that pushes the first card off the screen is worse
+// than not offering the narrowing at all. Which ones fit is a question only the
+// laid-out page can answer, so the server sends them all, busiest first, and
+// this hides whatever wrapped — behind a "more" that has to fit on the line too,
+// which is why the trim runs until the button lands back on the first row.
+(function(){
+  var bar = document.getElementById('subs');
+  if (!bar) return;
+  var more = document.getElementById('fmore');
+  var chips = Array.prototype.slice.call(bar.querySelectorAll('a.fchip'));
+  if (!chips.length) return;
+  var open = false;
+  // Expanding is a choice about this page, so it sticks until it is taken back:
+  // the button that opened the row is the one that closes it again.
+  function expand(forced){
+    open = true;
+    chips.forEach(function(c){ c.classList.remove('hid'); });
+    // Forced open because the chip that is on would have been hidden: there is
+    // no collapsing back to a row that denies the page you are looking at, so
+    // don't offer it.
+    if (forced){ more.classList.add('hid'); return; }
+    more.classList.remove('hid');
+    more.textContent = 'less';
+    more.title = 'back to one row';
+  }
+  function layout(){
+    if (open) return;
+    chips.forEach(function(c){ c.classList.remove('hid'); });
+    more.classList.remove('hid');
+    more.textContent = 'more'; // a width to measure against; the count comes below
+    var top = chips[0].offsetTop, cut = chips.length;
+    for (var i = 0; i < chips.length; i++){
+      if (chips[i].offsetTop > top){ cut = i; break; }
+    }
+    if (cut === chips.length && more.offsetTop <= top){ more.classList.add('hid'); return; }
+    for (var j = cut; j < chips.length; j++) chips[j].classList.add('hid');
+    while (cut > 1 && more.offsetTop > top){ cut--; chips[cut].classList.add('hid'); }
+    // The chip that is on says what you are looking at; hiding it would leave
+    // the row denying the page it belongs to.
+    for (var k = cut; k < chips.length; k++){
+      if (chips[k].dataset.on === '1'){ expand(true); return; }
+    }
+    more.textContent = '+' + (chips.length - cut) + ' more';
+    more.title = 'show the rest of them';
+  }
+  more.addEventListener('click', function(){
+    if (open){ open = false; layout(); return; }
+    expand(false);
+  });
+  layout();
+  window.addEventListener('resize', layout);
 })();
 
 // The order toggle: a link to this same page the other way round, so the sorting
@@ -1344,4 +1454,4 @@ window.addEventListener('pageshow', function(){ document.getElementById('loading
 })();
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if not .Compact}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if not .Compact}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if not .Compact}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if not .Compact}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

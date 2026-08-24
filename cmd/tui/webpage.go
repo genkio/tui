@@ -57,9 +57,14 @@ func (l *pageLoader) load() (*template.Template, error) {
 // of that chip's items and nothing else: Kind is "app", "type", "x" (x's For
 // You, which is fetched live rather than read from the backlog), or "" for the
 // whole list.
+//
+// Sub is the one thing that stacks on top of a pick rather than replacing it:
+// with a source chip on, the row under it narrows that source further — to one
+// subreddit, to one rss feed. It means nothing without an app pick to sit on.
 type feedSel struct {
 	Kind string
 	Key  string
+	Sub  string
 }
 
 func (s feedSel) on() bool { return s.Kind != "" }
@@ -79,10 +84,24 @@ func (s feedSel) String() string {
 type feedTally struct {
 	apps  map[string]int
 	types map[string]int
+	// app -> subcategory -> count, for the services that have one (see subApps).
+	// Nested rather than flat because two services can name a stream the same
+	// thing, and a subcategory only ever narrows its own source.
+	subs map[string]map[string]int
 }
 
 func newTally() feedTally {
-	return feedTally{apps: map[string]int{}, types: map[string]int{}}
+	return feedTally{apps: map[string]int{}, types: map[string]int{}, subs: map[string]map[string]int{}}
+}
+
+func (t feedTally) addSub(app, sub string) {
+	if t.subs == nil || !subApps[app] || sub == "" {
+		return
+	}
+	if t.subs[app] == nil {
+		t.subs[app] = map[string]int{}
+	}
+	t.subs[app][sub]++
 }
 
 // tallyItems counts a whole list; the feed hands this in from before it applied
@@ -92,6 +111,7 @@ func tallyItems(items []core.Item) feedTally {
 	for _, it := range items {
 		t.apps[it.App]++
 		t.types[itemType(it)]++
+		t.addSub(it.App, it.Source)
 	}
 	return t
 }
@@ -111,6 +131,7 @@ func tallyCards(cards []cardData) feedTally {
 	for _, c := range cards {
 		t.apps[c.App]++
 		t.types[c.Type]++
+		t.addSub(c.App, c.Source)
 	}
 	return t
 }
@@ -169,9 +190,13 @@ type pageData struct {
 	Warn      string
 	HasApps   bool
 	Sel       string // the chip that is on ("app:x"), blank for the whole list
+	Sub       string // ...and the subcategory narrowing it further, blank when none is
 	ClearHref string // ...and where to go to put it back, blank when none is on
 	Filters   []filterGroup
-	Cards     []cardData
+	// The second row: this source's subcategories, busiest first. Only ever
+	// filled when a source chip that has them is the one on.
+	Subs  []filterChip
+	Cards []cardData
 }
 
 // filterGroup is one axis a list can be narrowed along. Its chips are all
@@ -326,6 +351,7 @@ func buildPageData(in pageInput) pageData {
 		tally = *in.tally
 	}
 	filters := chipRow(tally, in.apps, bad, xAuth, in.sel, in.query, in.total)
+	subs := subChips(tally, in.sel, in.query)
 	clear := ""
 	if in.sel.on() {
 		clear = chipHref(in.query, feedSel{})
@@ -359,7 +385,9 @@ func buildPageData(in pageInput) pageData {
 		Keywords:    in.block.keywordCount(),
 		KeywordText: keywordText,
 		Filters:     filters,
+		Subs:        subs,
 		Sel:         in.sel.String(),
+		Sub:         in.sel.Sub,
 		ClearHref:   clear,
 		Asc:         in.asc,
 		SortHref:    flip,
@@ -623,6 +651,46 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel fe
 	return out
 }
 
+// subApps are the services whose items arrive already sorted into streams worth
+// picking between: reddit's subreddits, inoreader's feeds. Everywhere else the
+// source name is a person or a single site, and a chip per one of them would be
+// a row as long as the backlog.
+var subApps = map[string]bool{"reddit": true, "inoreader": true}
+
+// subChips is the second row: with a source chip on, its own subcategories,
+// busiest first so the ones worth a tap are the ones that fit before the row
+// wraps (the page hides the overflow behind a "more"). Counted over the whole
+// backlog like every other chip, so the numbers hold still whether or not one
+// of them is already picked.
+//
+// Nothing to draw unless a source that has them is the chip that is on, and
+// nothing to draw for a single subcategory either: picking the only one there
+// is narrows nothing.
+func subChips(t feedTally, sel feedSel, q url.Values) []filterChip {
+	if sel.Kind != "app" || !subApps[sel.Key] {
+		return nil
+	}
+	subs := t.subs[sel.Key]
+	if len(subs) < 2 {
+		return nil
+	}
+	out := make([]filterChip, 0, len(subs))
+	for name, n := range subs {
+		out = append(out, filterChip{Kind: "sub", Key: name, Label: name, Count: n, Title: name})
+	}
+	sortChips(out)
+	for i := range out {
+		c := &out[i]
+		c.On = sel.Sub == c.Key
+		next := feedSel{Kind: sel.Kind, Key: sel.Key, Sub: c.Key}
+		if c.On {
+			next.Sub = "" // tapping the one that is on hands the whole source back
+		}
+		c.Href = chipHref(q, next)
+	}
+	return out
+}
+
 // withForYou slots x's For You chip in after x's own, or leaves the row alone
 // when x has no chip there to sit beside.
 //
@@ -658,7 +726,7 @@ func chipHref(q url.Values, sel feedSel) string {
 	out := url.Values{}
 	for k, v := range q {
 		switch k {
-		case "app", "type", "x", "json": // the filter params this replaces, and one no page carries
+		case "app", "type", "x", "sub", "json": // the filter params this replaces, and one no page carries
 		default:
 			out[k] = v
 		}
@@ -666,6 +734,9 @@ func chipHref(q url.Values, sel feedSel) string {
 	switch sel.Kind {
 	case "app", "type", "x":
 		out.Set(sel.Kind, sel.Key)
+	}
+	if sel.Kind == "app" && sel.Sub != "" {
+		out.Set("sub", sel.Sub)
 	}
 	if len(out) == 0 {
 		return "/"
@@ -702,7 +773,11 @@ func parseSel(q url.Values) feedSel {
 		return feedSel{Kind: "x", Key: "foryou"}
 	}
 	if a := q.Get("app"); a != "" {
-		return feedSel{Kind: "app", Key: a}
+		sel := feedSel{Kind: "app", Key: a}
+		if subApps[a] {
+			sel.Sub = q.Get("sub")
+		}
+		return sel
 	}
 	switch ty := q.Get("type"); ty {
 	case "text", "video", "audio":
@@ -721,7 +796,7 @@ func selectItems(items []core.Item, sel feedSel) []core.Item {
 	for _, it := range items {
 		switch sel.Kind {
 		case "app":
-			if it.App == sel.Key {
+			if it.App == sel.Key && (sel.Sub == "" || it.Source == sel.Sub) {
 				out = append(out, it)
 			}
 		case "type":
@@ -733,8 +808,10 @@ func selectItems(items []core.Item, sel feedSel) []core.Item {
 	return out
 }
 
-// sortChips puts the busiest source first, alphabetical between ties, so the
-// row is stable from load to load.
+// sortChips puts the busiest first, alphabetical between ties, so the row is
+// stable from load to load. It orders the subcategory row too, where the order
+// is load-bearing: only the first line of it is shown, so busiest-first is what
+// decides which ones you get without tapping "more".
 func sortChips(chips []filterChip) {
 	sort.Slice(chips, func(i, j int) bool {
 		if chips[i].Count != chips[j].Count {

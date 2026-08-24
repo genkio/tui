@@ -1847,3 +1847,233 @@ func TestRenderedItemsEviction(t *testing.T) {
 		t.Error("newest entry should survive")
 	}
 }
+
+// A source that arrives already sorted into streams — reddit's subreddits,
+// inoreader's feeds — gets a second row of chips under the source row, which
+// narrows the pick it sits beneath rather than replacing it.
+func TestSubcategoryRow(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Source: "r/golang", Title: "a"},
+		{App: "reddit", ID: "2", Source: "r/ChatGPTCoding", Title: "b"},
+		{App: "reddit", ID: "3", Source: "r/ChatGPTCoding", Title: "c"},
+		{App: "reddit", ID: "4", Source: "r/rust", Title: "d"},
+		{App: "x", ID: "5", Source: "@someone", Title: "e"},
+	}
+	tally := tallyItems(items)
+	q := url.Values{"app": {"reddit"}}
+
+	// Nothing to draw until a source that has them is the chip that is on.
+	if got := subChips(tally, feedSel{}, url.Values{}); got != nil {
+		t.Errorf("no pick, no second row: %+v", got)
+	}
+	if got := subChips(tally, feedSel{Kind: "app", Key: "x"}, url.Values{"app": {"x"}}); got != nil {
+		t.Errorf("x's sources are people, not streams to pick between: %+v", got)
+	}
+	if got := subChips(tally, feedSel{Kind: "type", Key: "video"}, url.Values{}); got != nil {
+		t.Errorf("a type pick has no source to break down: %+v", got)
+	}
+
+	chips := subChips(tally, feedSel{Kind: "app", Key: "reddit"}, q)
+	// Busiest first, alphabetical between ties, so the ones worth a tap are the
+	// ones that survive the row being trimmed to a single line.
+	want := []struct {
+		key   string
+		count int
+	}{{"r/ChatGPTCoding", 2}, {"r/golang", 1}, {"r/rust", 1}}
+	if len(chips) != len(want) {
+		t.Fatalf("got %d chips, want %d: %+v", len(chips), len(want), chips)
+	}
+	for i, w := range want {
+		if chips[i].Key != w.key || chips[i].Count != w.count {
+			t.Errorf("chip %d = %s/%d, want %s/%d", i, chips[i].Key, chips[i].Count, w.key, w.count)
+		}
+		if chips[i].On {
+			t.Errorf("nothing is picked yet, so %s should be off", chips[i].Key)
+		}
+	}
+	// The link stacks on the source pick rather than replacing it.
+	if chips[0].Href != "/?app=reddit&sub=r%2FChatGPTCoding" {
+		t.Errorf("subcategory link should keep the source: %s", chips[0].Href)
+	}
+
+	// With one on, it is the way back to the whole source.
+	on := subChips(tally, feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"}, url.Values{"app": {"reddit"}, "sub": {"r/golang"}})
+	for _, c := range on {
+		if (c.Key == "r/golang") != c.On {
+			t.Errorf("%s: On = %t", c.Key, c.On)
+		}
+		if c.On && c.Href != "/?app=reddit" {
+			t.Errorf("tapping the one that is on hands the source back: %s", c.Href)
+		}
+	}
+	// Its count is still the whole subcategory's, not what the narrowed page
+	// carries, so the numbers hold still across a pick.
+	if on[0].Count != 2 {
+		t.Errorf("counts come from before the pick: %+v", on[0])
+	}
+
+	// One subcategory narrows nothing, so no row.
+	lone := tallyItems([]core.Item{{App: "reddit", ID: "1", Source: "r/golang"}})
+	if got := subChips(lone, feedSel{Kind: "app", Key: "reddit"}, q); got != nil {
+		t.Errorf("a row of one is no choice at all: %+v", got)
+	}
+}
+
+// The second layer is a query param of its own, read and written alongside the
+// source pick it hangs off.
+func TestSubcategoryQuery(t *testing.T) {
+	sels := []struct {
+		q    string
+		want feedSel
+	}{
+		{"app=reddit&sub=r%2Fgolang", feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"}},
+		{"app=inoreader&sub=Hacker+News", feedSel{Kind: "app", Key: "inoreader", Sub: "Hacker News"}},
+		// A source with no streams of its own has nothing for it to mean.
+		{"app=x&sub=r%2Fgolang", feedSel{Kind: "app", Key: "x"}},
+		{"sub=r%2Fgolang", feedSel{}},
+		{"type=video&sub=r%2Fgolang", feedSel{Kind: "type", Key: "video"}},
+	}
+	for _, c := range sels {
+		q, err := url.ParseQuery(c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := parseSel(q); got != c.want {
+			t.Errorf("parseSel(%q) = %+v, want %+v", c.q, got, c.want)
+		}
+	}
+
+	// Picking anything else drops it: it belonged to the source that is going.
+	q := url.Values{"app": {"reddit"}, "sub": {"r/golang"}, "order": {"desc"}}
+	if got := chipHref(q, feedSel{Kind: "app", Key: "inoreader"}); got != "/?app=inoreader&order=desc" {
+		t.Errorf("another source, another set of streams: %s", got)
+	}
+	if got := chipHref(q, feedSel{}); got != "/?order=desc" {
+		t.Errorf("clear should clear both layers: %s", got)
+	}
+	// ...but turning the feed around keeps it, the way it keeps the source.
+	if got := orderHref(q, true); got != "/?app=reddit&order=desc&sub=r%2Fgolang" {
+		t.Errorf("the order toggle is not a pick: %s", got)
+	}
+
+	// And it narrows the list.
+	items := []core.Item{
+		{App: "reddit", ID: "1", Source: "r/golang"},
+		{App: "reddit", ID: "2", Source: "r/rust"},
+		{App: "x", ID: "3", Source: "r/golang"}, // same name, another service
+	}
+	got := selectItems(items, feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"})
+	if len(got) != 1 || got[0].ID != "1" {
+		t.Errorf("a subcategory only ever narrows its own source: %+v", got)
+	}
+}
+
+// The row renders under the source row it narrows, with every chip sent and the
+// trimming left to the page — only the laid-out row knows how many fit.
+func TestSubcategoryRowRenders(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Source: "r/golang", Title: "a"},
+		{App: "reddit", ID: "2", Source: "r/ChatGPTCoding", Title: "b"},
+	}
+	page := renderInput(t, pageInput{
+		items: items, total: len(items), apps: []string{"reddit"}, now: time.Now(),
+		sel: feedSel{Kind: "app", Key: "reddit"}, query: url.Values{"app": {"reddit"}},
+	})
+	subs := strings.Index(page, `id="subs"`)
+	if subs < 0 {
+		t.Fatalf("no second row:\n%s", page)
+	}
+	if filters := strings.Index(page, `id="filters"`); filters > subs {
+		t.Error("the second row belongs under the row it narrows")
+	}
+	for _, want := range []string{`data-kind="sub"`, `data-key="r/golang"`, `id="fmore"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %s:\n%s", want, page)
+		}
+	}
+	// A card says which stream it came from, so reading takes that chip's number
+	// down with the rest.
+	if !strings.Contains(page, `data-sub="r/golang"`) {
+		t.Errorf("cards should carry their subcategory:\n%s", page)
+	}
+
+	// Without a source pick there is no second row to draw.
+	whole := renderInput(t, pageInput{
+		items: items, total: len(items), apps: []string{"reddit"}, now: time.Now(), query: url.Values{},
+	})
+	if strings.Contains(whole, `id="subs"`) {
+		t.Errorf("the whole list has no one source to break down:\n%s", whole)
+	}
+}
+
+// An empty pick still draws the chips, and they come first: the note explains
+// why the page is empty, and the row is what you act on to fix it.
+func TestEmptyNoteSitsUnderTheChips(t *testing.T) {
+	page := renderInput(t, pageInput{
+		total: 0, apps: []string{"reddit", "x"}, now: time.Now(),
+		sel: feedSel{Kind: "app", Key: "reddit"}, query: url.Values{"app": {"reddit"}},
+	})
+	chips, note := strings.Index(page, `id="filters"`), strings.Index(page, "Nothing unread from that chip.")
+	if chips < 0 || note < 0 {
+		t.Fatalf("want both a chip row and a note:\n%s", page)
+	}
+	if note < chips {
+		t.Error("the note belongs under the chips, not over them")
+	}
+}
+
+// The trimmed row opens and closes again: the button that showed the rest is
+// the one that puts them back.
+func TestSubcategoryRowFoldsBothWays(t *testing.T) {
+	page := renderInput(t, pageInput{
+		items: []core.Item{
+			{App: "reddit", ID: "1", Source: "r/golang", Title: "a"},
+			{App: "reddit", ID: "2", Source: "r/rust", Title: "b"},
+		},
+		total: 2, apps: []string{"reddit"}, now: time.Now(),
+		sel: feedSel{Kind: "app", Key: "reddit"}, query: url.Values{"app": {"reddit"}},
+	})
+	if !strings.Contains(page, `id="fmore"`) {
+		t.Fatalf("no fold control:\n%s", page)
+	}
+	for _, want := range []string{`more.textContent = 'less'`, `'+' + (chips.length - cut) + ' more'`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the button should say both things; missing %s", want)
+		}
+	}
+}
+
+// A page narrowed to one stream cannot be recounted into a number about the
+// whole source, so the source chip walks down from what the server sent by
+// what has been read since — otherwise reading moves the header and the
+// subcategory chip and leaves the source chip stuck.
+func TestSourceChipFollowsReadingUnderASubcategory(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Source: "r/golang", Title: "a"},
+		{App: "reddit", ID: "2", Source: "r/golang", Title: "b"},
+	}
+	deep := tallyItems(append(items,
+		core.Item{App: "reddit", ID: "3", Source: "r/rust", Title: "c"},
+		core.Item{App: "reddit", ID: "4", Source: "r/rust", Title: "d"},
+	))
+	page := renderInput(t, pageInput{
+		items: items, total: len(items), apps: []string{"reddit"}, now: time.Now(),
+		sel:   feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"},
+		tally: &deep, query: url.Values{"app": {"reddit"}, "sub": {"r/golang"}},
+	})
+	// The source chip states the whole source, not the stream on the page.
+	if !strings.Contains(page, `data-key="reddit" data-on="1" title="reddit: live"><span class="chip" style="background:#ff6b33">rdt</span><span class="fn ok">4</span>`) {
+		t.Errorf("the source chip counts the whole source:\n%s", page)
+	}
+	if !strings.Contains(page, `data-sub="r/golang"`) {
+		t.Errorf("the page should know which stream it is:\n%s", page)
+	}
+	for _, want := range []string{
+		"chip.dataset.n0 = n.textContent", // the baseline, stashed before anything writes over it
+		"article.card.read",               // ...and what comes off it
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %s from the recount", want)
+		}
+	}
+}
