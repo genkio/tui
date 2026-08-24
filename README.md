@@ -221,6 +221,17 @@ of it). Green when the fetch landed, red when it didn't. Tapping it
 again is another round: it's an endless firehose, not a list you get to the end
 of, which is why nothing from it enters the backlog.
 
+Two sources arrive already sorted into streams, and picking one of them opens a
+**second row** underneath: reddit's subreddits, Inoreader's feeds, each with its
+own count (`?app=reddit&sub=r%2Fgolang`). It stacks on the source pick rather
+than replacing it, so the row is a way into one subreddit without leaving
+reddit, and tapping the one that is on hands the whole source back. They are
+sorted busiest first and trimmed to a **single line** — a source can carry
+dozens, and a block of chips that pushes the first card off the screen is worse
+than not offering the narrowing at all — with the rest behind **+N more**, which
+says **less** once it's open. Reading a card there takes the stream's chip, the
+source chip and the header's count down together.
+
 On the feed a source chip is also that service's **status light**: its count is
 green when the last sweep of it worked and red when it didn't, so a stale number
 looks stale. Every logged-in app gets a chip whether or not it has anything on
