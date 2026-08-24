@@ -159,7 +159,7 @@ func newTestSweeper(t *testing.T, drain bool, pages [][]core.Item) (*sweeper, *f
 	c := loadFeedCache(filepath.Join(t.TempDir(), "feed.json"))
 	m := &fakeMark{}
 	fetches := 0
-	s := newSweeper(t.TempDir(), c, nil, drain, 0)
+	s := newSweeper(t.TempDir(), c, nil, nil, drain, 0)
 	s.mark = m.fn
 	s.fetch = func(context.Context, string, string, int, time.Time) ([]core.Item, bool, error) {
 		if fetches >= len(pages) {
@@ -323,7 +323,7 @@ func TestDrainOffLeavesInoreaderAlone(t *testing.T) {
 // carries the stale-session flag the page turns into a re-auth hint.
 func TestSweepAppRecordsFailure(t *testing.T) {
 	c := loadFeedCache(filepath.Join(t.TempDir(), "feed.json"))
-	s := newSweeper(t.TempDir(), c, nil, true, 0)
+	s := newSweeper(t.TempDir(), c, nil, nil, true, 0)
 	s.mark = (&fakeMark{}).fn
 	c.setStatus("x", appStatus{At: "2026-01-01T00:00:00Z"})
 	s.fetch = func(context.Context, string, string, int, time.Time) ([]core.Item, bool, error) {
@@ -411,7 +411,7 @@ func TestFlusherPushIgnoresNothing(t *testing.T) {
 // sweep runs is dropped, because the one in flight is already the answer.
 func TestKickDoesNotBlock(t *testing.T) {
 	c := loadFeedCache(filepath.Join(t.TempDir(), "feed.json"))
-	s := newSweeper(t.TempDir(), c, nil, false, time.Minute)
+	s := newSweeper(t.TempDir(), c, nil, nil, false, time.Minute)
 	done := make(chan struct{})
 	go func() {
 		for range 100 {

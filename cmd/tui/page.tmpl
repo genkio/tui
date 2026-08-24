@@ -130,6 +130,34 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .loop[data-on="1"]{color:var(--accent)}
 .save[data-saved="1"]{color:var(--accent)}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
+/* the keywords link is a button (it opens a dialog, it doesn't go anywhere),
+   so it has to be talked back into looking like the links beside it */
+button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);padding:0;font:inherit;cursor:pointer}
+/* which word caught a blocked post, on its row: the list's whole job is to be
+   scanned, so this reads as a tag rather than as more of the post */
+.kw{padding:0 7px;border-radius:999px;border:1px solid var(--line);font-size:12px;font-weight:600}
+/* the block list, edited in the browser's own modal */
+.kwdlg{
+  width:min(92vw,460px);padding:16px;color:var(--fg);background:var(--card);
+  border:1px solid var(--line);border-radius:14px;font:inherit;
+}
+.kwdlg::backdrop{background:rgba(0,0,0,.55)}
+.kwdlg h2{margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:-.02em}
+.kwdlg .kwhelp{margin:0 0 10px;color:var(--muted);font-size:13px;line-height:1.45}
+/* 16px, not the 14px the rest of this dialog is set in: mobile Safari zooms the
+   page into any text field it focuses that is set smaller, and the way out of
+   that is a readable field, not a viewport that refuses to be pinched */
+.kwdlg textarea{
+  display:block;width:100%;padding:10px;color:var(--fg);background:var(--bg);
+  border:1px solid var(--line);border-radius:10px;resize:vertical;
+  font:16px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.kwdlg menu{display:flex;justify-content:flex-end;gap:10px;margin:12px 0 0;padding:0}
+.kwdlg menu button{
+  padding:8px 14px;min-height:40px;cursor:pointer;font:inherit;font-size:14px;font-weight:600;
+  color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:10px;
+}
+.kwdlg menu button#kwsave{color:var(--accent);border-color:var(--accent)}
 .hid{display:none}
 .empty{color:var(--muted);font-style:italic}
 .note{padding:16px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:15px}
@@ -240,13 +268,14 @@ video.ffs{object-fit:cover !important}
 }
 </style>
 </head><body>
-<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-sel="{{.Sel}}" hidden></div>
+<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-sel="{{.Sel}}" hidden></div>
 <div class="wrap">
 <header>
-  <div class="sub" id="sub">{{if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<button class="refresh" id="refresh" type="button" title="fetch every service now"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{end}}</div>
+  <div class="sub" id="sub">{{if .BlockedView}}<a class="viewlink" href="/">unread</a> <span id="blockedn">{{.Blocked}}</span> blocked <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{else if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<button class="refresh" id="refresh" type="button" title="fetch every service now"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a> <a class="viewlink" href="/?blocked=1"><span id="blockedn">{{.Blocked}}</span> blocked</a>{{end}}</div>
 </header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if .SavedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
+{{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
+{{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
 {{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
@@ -254,7 +283,8 @@ video.ffs{object-fit:cover !important}
 {{end}}<div class="stamp" id="stamp"></div></div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Cards (not .SavedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-more="{{if .More}}1{{else}}0{{end}}">✓ mark {{if .More}}these <span id="markn">{{.Shown}}</span>{{else}}all{{end}} read{{if .More}} <span class="behind">{{.Behind}} more behind</span>{{end}}</button>
+{{end}}{{end}}{{if and .Cards (not .SavedView) (not .BlockedView)}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-more="{{if .More}}1{{else}}0{{end}}">✓ mark {{if .More}}these <span id="markn">{{.Shown}}</span>{{else}}all{{end}} read{{if .More}} <span class="behind">{{.Behind}} more behind</span>{{end}}</button>
+{{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
 <script>
@@ -263,6 +293,9 @@ video.ffs{object-fit:cover !important}
 // between the two modes; only the layout and what marks a card read differ.
 var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
 var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview') === 'true';
+// The blocked list: rows the feed never carried, so nothing here is unread, and
+// each one is a title alone rather than a card to play or expand.
+var BLOCKED_VIEW = document.getElementById('state').getAttribute('data-blockedview') === 'true';
 // Which chip is on ("app:x"), blank for the whole list. The page carries that
 // chip's items and nothing else, which is what stops the recount below from
 // speaking for the chips it cannot see.
@@ -405,9 +438,10 @@ var obs = new IntersectionObserver(function(entries){
     queueRead(el);
   });
 },{threshold:0});
-// The saved list is for re-reading, so scrolling through it must not mark
-// anything read; in swipe mode the throw does the marking, not the scroll.
-if (!SWIPE && !SAVED_VIEW) {
+// The saved list is for re-reading and the blocked one for looking over, so
+// scrolling through either must not mark anything read; in swipe mode the throw
+// does the marking, not the scroll.
+if (!SWIPE && !SAVED_VIEW && !BLOCKED_VIEW) {
   document.querySelectorAll('article.card').forEach(function(c){ obs.observe(c); });
 }
 
@@ -616,7 +650,9 @@ function ytPlay(thumb, id){
     wrap._ytPlayer = p; // fake fullscreen finds the player via its wrapper
   });
 }
-document.querySelectorAll('article.card').forEach(function(card){
+// Not on the blocked list: a row there is a title and a link out, and growing a
+// player under it would undo the whole point of the row being one line.
+if (!BLOCKED_VIEW) document.querySelectorAll('article.card').forEach(function(card){
   var seen = {};
   card.querySelectorAll('a[href]').forEach(function(a){
     var id = ytId(a.href); if(!id || seen[id]) return; seen[id] = true;
@@ -1179,11 +1215,35 @@ document.addEventListener('click', function(e){
   var a = e.target.closest ? e.target.closest('a[href]') : null;
   if (!a || a.target || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
   var u = new URL(a.getAttribute('href'), location.href);
-  if (u.origin !== location.origin || u.pathname !== '/' || u.searchParams.get('saved') === '1') return;
+  if (u.origin !== location.origin || u.pathname !== '/') return;
+  if (u.searchParams.get('saved') === '1' || u.searchParams.get('blocked') === '1') return;
   document.getElementById('loading').classList.remove('hid');
 });
 // Coming back through history restores this page as it was left, cover and all.
 window.addEventListener('pageshow', function(){ document.getElementById('loading').classList.add('hid'); });
+
+// The block list, edited in the browser's own <dialog>: a textarea of one
+// keyword per line, which is the shape the list already has, so there is
+// nothing to add or delete a row at a time. Cancel puts back what the server
+// sent rather than keeping a half-edit for the next open, and a save reloads —
+// the words change the counts in the header and the rows on the page, and the
+// server is the one that knows what they came to.
+(function(){
+  var dlg = document.getElementById('kwdlg'), open = document.getElementById('kwopen');
+  if (!dlg || !open) return;
+  var text = document.getElementById('kwtext');
+  var sent = text.value;
+  open.addEventListener('click', function(){ dlg.showModal(); });
+  dlg.addEventListener('close', function(){
+    if (dlg.returnValue !== 'save'){ text.value = sent; return; }
+    var fd = new FormData();
+    fd.append('words', text.value);
+    fetch('/keywords', {method:'POST', body:fd})
+      .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
+      .then(function(){ location.reload(); })
+      .catch(function(err){ toast((err && err.message || '').trim() || 'could not save the keywords'); });
+  });
+})();
 
 // The chips, on the feed as well as the saved list. One is on at a time and
 // picking it is a page load of that chip's items alone, so each chip is a plain
@@ -1206,4 +1266,4 @@ window.addEventListener('pageshow', function(){ document.getElementById('loading
 })();
 </script>
 </div></body></html>
-{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div><div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if not .Compact}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if not .Compact}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

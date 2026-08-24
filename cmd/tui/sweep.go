@@ -88,6 +88,7 @@ type sweeper struct {
 	root  string
 	cache *feedCache
 	flush *markFlusher
+	block *blocker
 	drain bool
 	every time.Duration
 	fetch fetchFunc
@@ -97,9 +98,9 @@ type sweeper struct {
 	wake chan struct{}
 }
 
-func newSweeper(root string, cache *feedCache, flush *markFlusher, drain bool, every time.Duration) *sweeper {
+func newSweeper(root string, cache *feedCache, flush *markFlusher, block *blocker, drain bool, every time.Duration) *sweeper {
 	return &sweeper{
-		root: root, cache: cache, flush: flush, drain: drain, every: every,
+		root: root, cache: cache, flush: flush, block: block, drain: drain, every: every,
 		fetch: subprocessFetch(root), mark: subprocessMark(root),
 		wake: make(chan struct{}, 1),
 	}
@@ -207,7 +208,8 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 		logf("%s: %v", app, err)
 		return
 	}
-	s.cache.upsert(items, now)
+	kept, _ := s.screen(items, now)
+	s.cache.upsert(kept, now)
 	if err := s.cache.save(); err != nil {
 		logf("%s: save cache: %v", app, err)
 		s.cache.setStatus(app, appStatus{At: s.cache.statusOf(app).At, Err: "cache write failed"})
@@ -249,7 +251,8 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 			logf("%s: drain refetch: %v", app, err)
 			break
 		}
-		fresh := s.cache.upsert(items, now)
+		kept, blocked := s.screen(items, now)
+		fresh := s.cache.upsert(kept, now) + blocked
 		if err := s.cache.save(); err != nil {
 			logf("%s: save cache: %v", app, err)
 			break
@@ -260,6 +263,27 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 		}
 	}
 	s.cache.setStatus(app, appStatus{At: stamp, Capped: capped})
+}
+
+// screen files whatever the block list caught and hands back the rest, so a
+// blocked post never becomes backlog. The count is how many of them were new,
+// which the drain adds to the cache's own: a round that brought nothing but
+// blocked posts still brought something, and calling it exhausted there would
+// leave the rest of the backlog unreachable.
+//
+// The ids the drain marks upstream are the whole fetch, blocked ones included.
+// They were fetched; a service that only pages by being told what it handed
+// over has been read has to hear about them too.
+func (s *sweeper) screen(items []core.Item, now time.Time) ([]core.Item, int) {
+	keep, caught := s.block.split(items, now)
+	if len(caught) == 0 {
+		return keep, 0
+	}
+	fresh, err := s.block.file(caught)
+	if err != nil {
+		logf("blocked list: %v", err)
+	}
+	return keep, fresh
 }
 
 func itemIDs(items []core.Item) []string {

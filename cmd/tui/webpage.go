@@ -129,10 +129,14 @@ type pageInput struct {
 	warn      string
 	saved     *savedStore
 	savedView bool
-	swipe     bool // --swipe: one card at a time instead of the scrolling feed
-	updated   time.Time
-	fetching  bool // a sweep is in flight, so the count is about to move
-	capped    bool // a service's backlog runs deeper than the sweep reached
+	// The block list, on every view: the header counts it from the feed and the
+	// saved list, and the blocked view renders it.
+	block       *blocker
+	blockedView bool
+	swipe       bool // --swipe: one card at a time instead of the scrolling feed
+	updated     time.Time
+	fetching    bool // a sweep is in flight, so the count is about to move
+	capped      bool // a service's backlog runs deeper than the sweep reached
 }
 
 type pageData struct {
@@ -148,13 +152,20 @@ type pageData struct {
 	Fetching  bool
 	Saved     int  // size of the saved list, in the header and its link
 	SavedView bool // rendering the saved list rather than the live feed
-	Swipe     bool // deck of one card at a time, swiped through
-	Warn      string
-	HasApps   bool
-	Sel       string // the chip that is on ("app:x"), blank for the whole list
-	ClearHref string // ...and where to go to put it back, blank when none is on
-	Filters   []filterGroup
-	Cards     []cardData
+	// The block list. Blocked is its size, in the header and its link on every
+	// view; Keywords is how many words fill it, and KeywordText is those words
+	// as the modal's textarea shows them — one per line, blocked view only.
+	Blocked     int
+	BlockedView bool
+	Keywords    int
+	KeywordText string
+	Swipe       bool // deck of one card at a time, swiped through
+	Warn        string
+	HasApps     bool
+	Sel         string // the chip that is on ("app:x"), blank for the whole list
+	ClearHref   string // ...and where to go to put it back, blank when none is on
+	Filters     []filterGroup
+	Cards       []cardData
 }
 
 // filterGroup is one axis a list can be narrowed along. Its chips are all
@@ -209,6 +220,10 @@ type cardData struct {
 	Saved       bool    // starred: the footer button offers to unsave it
 	Pos         float64 // seconds into PosSrc to resume at; 0 when there is nothing to resume
 	PosSrc      string  // the stream that position belongs to
+	// A blocked row: the title and where it came from, without the content that
+	// is the part you asked not to see, and the keyword that caught it.
+	Compact bool
+	Keyword string
 }
 
 // cardImages prepares an app's stills for the card, sending the ones the
@@ -261,15 +276,19 @@ func buildPageData(in pageInput) pageData {
 		bad[f] = true
 	}
 
-	// The saved list is for re-reading, not triage: no deck there, whatever the
-	// server was started with.
-	swipe := in.swipe && !in.savedView
+	// The saved and blocked lists are for looking back over, not triage: no deck
+	// on either, whatever the server was started with.
+	swipe := in.swipe && !in.savedView && !in.blockedView
 	cl := listClips
 	if swipe {
 		cl = swipeClips
 	}
 	cards := make([]cardData, 0, len(in.items))
 	for _, it := range in.items {
+		if in.blockedView {
+			cards = append(cards, buildBlockedCard(it, in.block.caughtBy(it.App, it.ID)))
+			continue
+		}
 		// In the saved view every card is saved by definition; in the feed ask
 		// the store.
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
@@ -285,6 +304,10 @@ func buildPageData(in pageInput) pageData {
 	savedCount := 0
 	if in.saved != nil {
 		savedCount = in.saved.count()
+	}
+	keywordText := ""
+	if in.blockedView {
+		keywordText = in.block.keywordText()
 	}
 
 	// A pick is a page load of one chip's items, so the counts have to come from
@@ -308,22 +331,26 @@ func buildPageData(in pageInput) pageData {
 	}
 
 	return pageData{
-		Unread:    tally.unread(),
-		Shown:     len(in.items),
-		More:      in.total > len(in.items),
-		Behind:    max(0, in.total-len(in.items)),
-		Capped:    in.capped,
-		Updated:   updated,
-		Fetching:  in.fetching,
-		Saved:     savedCount,
-		SavedView: in.savedView,
-		Filters:   filters,
-		Sel:       in.sel.String(),
-		ClearHref: clear,
-		Swipe:     swipe,
-		Warn:      in.warn,
-		HasApps:   len(in.apps) > 0,
-		Cards:     cards,
+		Unread:      tally.unread(),
+		Shown:       len(in.items),
+		More:        in.total > len(in.items),
+		Behind:      max(0, in.total-len(in.items)),
+		Capped:      in.capped,
+		Updated:     updated,
+		Fetching:    in.fetching,
+		Saved:       savedCount,
+		SavedView:   in.savedView,
+		Blocked:     in.block.count(),
+		BlockedView: in.blockedView,
+		Keywords:    in.block.keywordCount(),
+		KeywordText: keywordText,
+		Filters:     filters,
+		Sel:         in.sel.String(),
+		ClearHref:   clear,
+		Swipe:       swipe,
+		Warn:        in.warn,
+		HasApps:     len(in.apps) > 0,
+		Cards:       cards,
 	}
 }
 
@@ -344,14 +371,48 @@ func appColor(app string) string {
 	return "#4a9eff"
 }
 
+// itemTitle is the title a card shows: blank for a post that carries its whole
+// text as both title and body (x), which has no headline of its own to draw
+// above the text. It is also what the block list reads — one rule for what
+// counts as a title, so the words match what you can see.
+func itemTitle(it core.Item) string {
+	title := strings.TrimSpace(it.Title)
+	if body := strings.TrimSpace(it.Body); body != "" && body == title {
+		return ""
+	}
+	return title
+}
+
+// buildBlockedCard is the compact row the blocked list renders: where it came
+// from, its title, and the keyword that caught it. No body, no player, no
+// stills — that is the part you asked not to see, and leaving it out is what
+// keeps a long list scannable.
+func buildBlockedCard(it core.Item, why string) cardData {
+	author := it.Author
+	if author == it.Source {
+		author = ""
+	}
+	return cardData{
+		App:     it.App,
+		ID:      it.ID,
+		Chip:    appLabel(it.App),
+		Color:   appColor(it.App),
+		Source:  it.Source,
+		Author:  author,
+		Age:     it.Age,
+		Title:   itemTitle(it),
+		URL:     it.URL,
+		Type:    itemType(it),
+		Keyword: why,
+		Compact: true,
+	}
+}
+
 func buildCard(it core.Item, starred bool, cl clips) cardData {
 	chip, color := appLabel(it.App), appColor(it.App)
 
-	title := strings.TrimSpace(it.Title)
+	title := itemTitle(it)
 	body := strings.TrimSpace(it.Body)
-	if body != "" && body == title {
-		title = "" // x carries the full text as both title and body
-	}
 	author := it.Author
 	if author == it.Source {
 		author = ""

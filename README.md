@@ -45,6 +45,8 @@ $TUI_STATE_DIR/
   state/<app>-tui/read.json    read state (x, reddit, douban, bilibili)
   state/tui/saved.json         the web view's saved list
   state/tui/feed.json          the web view's backlog cache and read marks
+  state/tui/keywords.json      the web view's block list
+  state/tui/blocked.json       what those keywords kept out of the feed
   config/<app>-tui/config.toml per-app settings
 ```
 
@@ -311,6 +313,35 @@ copy here is lost backlog rather than an annoyance. And it's bounded — read
 entries are pruned after two weeks, and past 6000 entries the oldest read ones
 go first, unread ones only as a last resort, with a line on stderr when that
 happens.
+
+### Blocking by keyword
+
+Some things you don't want to triage, you want to never see. The header's
+**N blocked** link opens a list of exactly that, and the **N keywords** link on
+it opens the browser's own modal with the list of words in a textarea, one per
+line. Edit, save, done — there is no per-row add and delete, because the list
+already is a list.
+
+A sweep screens what it fetched before the cache sees any of it: a post whose
+**title** carries one of the words is kept out of `feed.json` and filed in
+`blocked.json` instead, so it never becomes backlog you have to clear. Matching
+is plain case-insensitive substring anywhere in the title, which is what
+"keep posts about X out" means for a Chinese title as much as an English one.
+Only the title is read — a post that carries its whole text as its title (an x
+post has no headline of its own) is never blocked, and matching a body would
+block a great deal more than you asked for.
+
+Saving the list also re-screens the backlog you already have, since a word is
+added because of something on the screen right now. Nothing upstream is told
+anything: the post stays unread there, and it is simply fetched and filed again
+each sweep, deduplicated by app and id.
+
+The blocked list renders as **titles alone** — no body, no player, no stills —
+with the keyword that caught each one on its row, so a long list stays
+scannable and it's obvious which word is doing too much work. The chips narrow
+it the way they narrow the saved list, and nothing on it can be marked read,
+because none of it was ever unread. `blocked.json` is a plain record you can
+delete whenever you've seen enough of it; it holds 2000 posts, oldest first out.
 
 ### Swipe mode
 

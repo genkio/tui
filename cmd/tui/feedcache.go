@@ -188,6 +188,35 @@ func (c *feedCache) unreadApp(app string) (int, bool) {
 	return n, c.status[app].Capped
 }
 
+// drop removes these entries outright and reports how many it found. It is for
+// items that should never have been backlog at all — a block keyword added
+// after the fact catches what is already cached — rather than for anything you
+// have read, which prune deals with in its own time.
+func (c *feedCache) drop(keys []string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	gone := map[string]bool{}
+	for _, k := range keys {
+		if _, ok := c.byKey[k]; ok {
+			gone[k] = true
+			delete(c.byKey, k)
+		}
+	}
+	if len(gone) == 0 {
+		return 0
+	}
+	kept := c.entries[:0]
+	for _, e := range c.entries {
+		if gone[core.Key(e.App, e.ID)] {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	c.entries = kept
+	c.rev++
+	return len(gone)
+}
+
 // item returns one cached item, for a save button that posts back only app+id.
 func (c *feedCache) item(app, id string, now time.Time) (core.Item, bool) {
 	c.mu.Lock()

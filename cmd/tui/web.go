@@ -71,10 +71,11 @@ func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) erro
 		return err
 	}
 	saved := loadSaved("")
+	block := loadBlocker("", "")
 	rendered := newRenderedItems()
 	cache := loadFeedCache("")
 	flusher := newMarkFlusher(root, cache)
-	sweep := newSweeper(root, cache, flusher, drain, every)
+	sweep := newSweeper(root, cache, flusher, block, drain, every)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -87,7 +88,7 @@ func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) erro
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, sweep, saved, rendered, swipe)
+		handleAll(w, r, root, loader, cache, sweep, saved, block, rendered, swipe)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -121,6 +122,14 @@ func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) erro
 			return
 		}
 		handleSave(w, r, saved, cache, rendered)
+	})
+	mux.HandleFunc("/keywords", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleKeywords(w, r, block, cache)
 	})
 	mux.HandleFunc("/pos", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -260,7 +269,7 @@ const feedWindow = 500
 // live and deliberately left out of the backlog, being an endless firehose
 // rather than a list to get to the end of, so that chip serves only what the
 // fetch brings back.
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, rendered *renderedItems, swipe bool) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, block *blocker, rendered *renderedItems, swipe bool) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
 	tmpl, err := loader.load()
@@ -287,7 +296,25 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, savedView: true,
-			swipe: swipe, sel: sel, tally: &tally, query: q,
+			block: block, swipe: swipe, sel: sel, tally: &tally, query: q,
+		})
+		return
+	}
+
+	// The blocked view, likewise off disk: what the keywords kept out of the
+	// feed, newest block first, as titles alone.
+	if q.Get("blocked") == "1" {
+		all := block.list(now)
+		tally := tallyItems(all)
+		items := selectItems(all, sel)
+		if q.Get("json") == "1" {
+			w.Header().Set("Content-Type", "application/json")
+			writeJSONItems(w, items, nil)
+			return
+		}
+		writePage(w, tmpl, pageInput{
+			items: items, total: len(items), now: now, block: block, blockedView: true,
+			sel: sel, tally: &tally, query: q,
 		})
 		return
 	}
@@ -343,7 +370,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	writePage(w, tmpl, pageInput{
 		items: items, total: total, apps: apps, failed: failed, now: now,
-		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, swipe: swipe,
+		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block, swipe: swipe,
 		updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
 }
@@ -391,6 +418,29 @@ func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, cache
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"saved":%d}`, saved.count())
+}
+
+// handleKeywords replaces the block list with what the modal's textarea holds,
+// one keyword per line. Saving also re-screens the backlog that is already
+// cached: a word is added because of something you are looking at right now, so
+// leaving that very thing on the page is the one outcome it can't have.
+func handleKeywords(w http.ResponseWriter, r *http.Request, block *blocker, cache *feedCache) {
+	words := parseKeywords(r.FormValue("words"))
+	if err := validKeywords(words); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := block.setKeywords(words); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	moved, err := block.purge(cache, time.Now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"keywords":%d,"blocked":%d,"moved":%d}`, len(words), block.count(), moved)
 }
 
 // maxPosSrc caps the stream URL a position is pinned to, so a stray post can't
