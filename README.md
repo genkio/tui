@@ -190,10 +190,14 @@ feed. It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
 the TUI and the page — mark something read and it's read in the app too (see
 **The backlog cache** below for the one place that changes). Items are sorted
-**oldest-first** (triage in the order they arrived;
-`?order=desc` flips it), and the saved list is ordered by **when you saved
-things, newest first**. The page uses the Inter webfont (with system
-fallbacks) for a polished read.
+**oldest-first** (triage in the order they arrived), and the saved list is
+ordered by **when you saved things, newest first**. At the far end of the
+header is the order the feed is in — **↑ oldest** or **↓ newest** — and tapping
+it turns the whole backlog around, whichever chip is on (`?order=desc` is the
+same thing by hand). The order is the server's to do, since a page carries only
+a window of the backlog, but the browser remembers which one you asked for and
+asks for it again on the next visit. The page uses the Inter webfont (with
+system fallbacks) for a polished read.
 
 Above the first card is one wrapping row of **chips**: a group for the
 **source** (`𝕏`, `rdt`, `ino`, …) followed by one for what the item carries

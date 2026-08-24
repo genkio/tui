@@ -261,7 +261,9 @@ const feedWindow = 500
 
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
 // with ?json=1), served from the backlog cache rather than a fetch. Default
-// order is oldest-first; ?order=desc flips to newest-first.
+// order is oldest-first; ?order=desc flips to newest-first, which is what the
+// header's toggle asks for — the page carries a window of the backlog, so the
+// sorting has to happen here, over the whole of it.
 //
 // A chip in the header narrows the page to one source (?app=reddit) or one kind
 // of thing (?type=video) — one at a time, which is why it is a page load and not
@@ -371,7 +373,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	writePage(w, tmpl, pageInput{
 		items: items, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block, swipe: swipe,
-		updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
+		asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
 }
 

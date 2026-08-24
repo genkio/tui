@@ -3,6 +3,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
+<script>
+// Which way the feed runs is this browser's to remember; doing the sorting is
+// the server's, because a page carries a window of the backlog and turning
+// around the cards already here would reorder a slice rather than the feed. So
+// the order lives in the URL, and this is all localStorage has to do with it:
+// ask for the remembered one when the URL names none, before anything is drawn.
+// A URL that does name one is the answer instead, and becomes what is
+// remembered — including the one the toggle just sent us to.
+(function(){
+  try{
+    var u = new URL(location.href);
+    if (u.pathname !== '/') return;
+    if (u.searchParams.get('saved') === '1' || u.searchParams.get('blocked') === '1') return;
+    var named = u.searchParams.get('order');
+    if (named === 'asc' || named === 'desc'){ localStorage.setItem('tui:order', named); return; }
+    if (localStorage.getItem('tui:order') === 'desc'){
+      u.searchParams.set('order', 'desc');
+      location.replace(u.toString());
+    }
+  }catch(e){}
+})();
+</script>
 <title>all — tui</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='12'>🗞️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -144,6 +166,16 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .loop[data-on="1"]{color:var(--accent)}
 .save[data-saved="1"]{color:var(--accent)}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
+/* which way the feed runs, at the far end of the header: the word is the order
+   the page is already in, and the tap turns it around. It keeps its width while
+   the counts beside it are free to ellipsis, since a header narrow enough to
+   crop something should crop the numbers rather than the only control there. */
+.sortlink{
+  flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:4px;
+  color:var(--muted);font-size:13px;white-space:nowrap;text-decoration:none;
+  border-bottom:1px dotted var(--line);
+}
+.sortlink .sarrow{font-size:12px;opacity:.7}
 /* the keywords link is a button (it opens a dialog, it doesn't go anywhere),
    so it has to be talked back into looking like the links beside it */
 button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);padding:0;font:inherit;cursor:pointer}
@@ -286,7 +318,8 @@ video.ffs{object-fit:cover !important}
 <div class="wrap">
 <header>
   <div class="sub" id="sub">{{if .BlockedView}}<a class="viewlink" href="/">unread</a> <span id="blockedn">{{.Blocked}}</span> blocked <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{else if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<button class="refresh" id="refresh" type="button" title="fetch every service now"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a> <a class="viewlink" href="/?blocked=1"><span id="blockedn">{{.Blocked}}</span> blocked</a>{{end}}</div>
-</header>
+  {{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
+  {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
@@ -352,6 +385,15 @@ function flushPending(){
       .catch(function(){ pending[app] = ids.concat(pending[app]); failed = true; }));
   });
   return Promise.all(calls).then(function(){ if(failed) resync(); });
+}
+// Leaving this page for another of ours: whatever marks are still queued go
+// first, because leaving is exactly when one that hasn't reached the server
+// would be lost. The cover goes up as the tap lands, since the wait is the
+// flush plus whatever the next page costs to build.
+function leaveFor(href){
+  document.getElementById('loading').classList.remove('hid');
+  if (flushTimer) clearTimeout(flushTimer);
+  flushPending().then(function(){ location.assign(href); });
 }
 // A mark the server never took leaves the page lying to you: those cards are
 // greyed and off the counts over a state the server does not have, and swiping
@@ -1283,10 +1325,21 @@ window.addEventListener('pageshow', function(){ document.getElementById('loading
     var a = e.target.closest ? e.target.closest('a.fchip') : null;
     if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
     e.preventDefault();
-    var href = a.getAttribute('href');
-    document.getElementById('loading').classList.remove('hid');
-    if (flushTimer) clearTimeout(flushTimer);
-    flushPending().then(function(){ location.assign(href); });
+    leaveFor(a.getAttribute('href'));
+  });
+})();
+
+// The order toggle: a link to this same page the other way round, so the sorting
+// is the server's over the whole backlog rather than this page's over the window
+// of it that got sent. The URL it goes to names the order, and the script in the
+// head files that away as what this browser wants from here on.
+(function(){
+  var a = document.getElementById('sortlink');
+  if (!a) return;
+  a.addEventListener('click', function(e){
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+    e.preventDefault();
+    leaveFor(a.getAttribute('href'));
   });
 })();
 </script>

@@ -134,6 +134,7 @@ type pageInput struct {
 	block       *blocker
 	blockedView bool
 	swipe       bool // --swipe: one card at a time instead of the scrolling feed
+	asc         bool // oldest first, which the header's toggle flips
 	updated     time.Time
 	fetching    bool // a sweep is in flight, so the count is about to move
 	capped      bool // a service's backlog runs deeper than the sweep reached
@@ -160,12 +161,17 @@ type pageData struct {
 	Keywords    int
 	KeywordText string
 	Swipe       bool // deck of one card at a time, swiped through
-	Warn        string
-	HasApps     bool
-	Sel         string // the chip that is on ("app:x"), blank for the whole list
-	ClearHref   string // ...and where to go to put it back, blank when none is on
-	Filters     []filterGroup
-	Cards       []cardData
+	// Which way the feed runs, and the page that turns it around. SortHref is
+	// blank on the views the toggle has no say over (saved, blocked), which is
+	// how the template knows not to draw it.
+	Asc       bool
+	SortHref  string
+	Warn      string
+	HasApps   bool
+	Sel       string // the chip that is on ("app:x"), blank for the whole list
+	ClearHref string // ...and where to go to put it back, blank when none is on
+	Filters   []filterGroup
+	Cards     []cardData
 }
 
 // filterGroup is one axis a list can be narrowed along. Its chips are all
@@ -330,6 +336,14 @@ func buildPageData(in pageInput) pageData {
 		updated = humanAgo(in.updated)
 	}
 
+	// The saved and blocked lists are ordered by when you saved or blocked
+	// something, which is the only order they are any use in, so the toggle is
+	// left off those views rather than drawn there doing nothing.
+	flip := ""
+	if !in.savedView && !in.blockedView && len(in.apps) > 0 {
+		flip = orderHref(in.query, in.asc)
+	}
+
 	return pageData{
 		Unread:      tally.unread(),
 		Shown:       len(in.items),
@@ -347,6 +361,8 @@ func buildPageData(in pageInput) pageData {
 		Filters:     filters,
 		Sel:         in.sel.String(),
 		ClearHref:   clear,
+		Asc:         in.asc,
+		SortHref:    flip,
 		Swipe:       swipe,
 		Warn:        in.warn,
 		HasApps:     len(in.apps) > 0,
@@ -653,6 +669,28 @@ func chipHref(q url.Values, sel feedSel) string {
 	}
 	if len(out) == 0 {
 		return "/"
+	}
+	return "/?" + out.Encode()
+}
+
+// orderHref is where the header's sort toggle goes: this page with the order
+// turned around and everything else about it (the chip that is on, the view)
+// left where it was. The order it lands on is always spelled out, even when it
+// is the default one, so the page it opens states which way it runs whether or
+// not the browser got as far as remembering.
+func orderHref(q url.Values, asc bool) string {
+	out := url.Values{}
+	for k, v := range q {
+		switch k {
+		case "order", "json":
+		default:
+			out[k] = v
+		}
+	}
+	if asc {
+		out.Set("order", "desc")
+	} else {
+		out.Set("order", "asc")
 	}
 	return "/?" + out.Encode()
 }

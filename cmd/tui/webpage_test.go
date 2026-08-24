@@ -1534,6 +1534,58 @@ func TestChipQueryIsOnePick(t *testing.T) {
 	}
 }
 
+// The header's far end says which way the feed runs and turns it around, over
+// the whole backlog rather than the window of it this page carries — so it is a
+// link the server answers, and the order it lands on is always spelled out.
+func TestOrderToggle(t *testing.T) {
+	hrefs := []struct {
+		q    string
+		asc  bool
+		want string
+	}{
+		{"", true, "/?order=desc"},
+		{"", false, "/?order=asc"},
+		{"order=asc", true, "/?order=desc"},
+		{"order=desc", false, "/?order=asc"},
+		// A pick rides along: turning the feed around should not clear the chip.
+		{"order=desc&app=reddit", false, "/?app=reddit&order=asc"},
+		{"x=foryou", true, "/?order=desc&x=foryou"},
+	}
+	for _, c := range hrefs {
+		q, err := url.ParseQuery(c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := orderHref(q, c.asc); got != c.want {
+			t.Errorf("orderHref(%q, asc=%t) = %q, want %q", c.q, c.asc, got, c.want)
+		}
+	}
+
+	feed := func(asc bool) string {
+		return renderInput(t, pageInput{
+			items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 1,
+			apps: []string{"x"}, now: time.Now(), asc: asc, query: url.Values{},
+		})
+	}
+	// The word is the order the page is already in, not the one a tap would bring.
+	if p := feed(true); !strings.Contains(p, `href="/?order=desc"`) || !strings.Contains(p, `>oldest</a>`) {
+		t.Errorf("oldest-first should say so and offer newest: %s", p)
+	}
+	if p := feed(false); !strings.Contains(p, `href="/?order=asc"`) || !strings.Contains(p, `>newest</a>`) {
+		t.Errorf("newest-first should say so and offer oldest: %s", p)
+	}
+	// The saved and blocked lists are ordered by when you saved or blocked
+	// something, which the toggle has no say over, so it isn't drawn there.
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	if p := renderSavedPage(t, store); strings.Contains(p, `id="sortlink"`) {
+		t.Errorf("the saved list has an order of its own: %s", p)
+	}
+	// Nor with nothing logged in, where there is no feed to turn around.
+	if p := renderPage(t, nil, nil, nil, "following", ""); strings.Contains(p, `id="sortlink"`) {
+		t.Errorf("no apps, no feed, no toggle: %s", p)
+	}
+}
+
 // The deck gets the same chips as the feed, and nothing client-side is left to
 // hide cards with: the page it was served is already the pick.
 func TestDeckChipsAreLinksToo(t *testing.T) {
