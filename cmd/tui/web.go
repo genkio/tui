@@ -252,9 +252,14 @@ const feedWindow = 500
 
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
 // with ?json=1), served from the backlog cache rather than a fetch. Default
-// order is oldest-first; ?order=desc flips to newest-first. ?x=foryou serves x's
-// For You timeline instead, which is fetched live and deliberately left out of
-// the backlog: it is an endless firehose, not a list to get to the end of.
+// order is oldest-first; ?order=desc flips to newest-first.
+//
+// A chip in the header narrows the page to one source (?app=reddit) or one kind
+// of thing (?type=video) — one at a time, which is why it is a page load and not
+// a matter of hiding cards. ?x=foryou is the odd one out: x's For You is fetched
+// live and deliberately left out of the backlog, being an endless firehose
+// rather than a list to get to the end of, so that chip serves only what the
+// fetch brings back.
 func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, rendered *renderedItems, swipe bool) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
@@ -265,48 +270,64 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	}
 
 	now := time.Now()
-	asc := r.URL.Query().Get("order") != "desc" // oldest first by default
+	q := r.URL.Query()
+	asc := q.Get("order") != "desc" // oldest first by default
+	sel := parseSel(q)
 
 	// The saved view reads straight from the store: no fetch, so it loads
 	// instantly and still works when a service (or the network) is down.
-	if r.URL.Query().Get("saved") == "1" {
-		items := saved.list(now) // newest save first; publish order is not what you saved for
-		if r.URL.Query().Get("json") == "1" {
+	if q.Get("saved") == "1" {
+		all := saved.list(now) // newest save first; publish order is not what you saved for
+		tally := tallyItems(all)
+		items := selectItems(all, sel)
+		if q.Get("json") == "1" {
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONItems(w, items, nil)
 			return
 		}
-		writePage(w, tmpl, pageInput{items: items, total: len(items), now: now, saved: saved, savedView: true, swipe: swipe})
+		writePage(w, tmpl, pageInput{
+			items: items, total: len(items), now: now, saved: saved, savedView: true,
+			swipe: swipe, sel: sel, tally: &tally, query: q,
+		})
 		return
 	}
 
 	apps := authedFeedApps(root)
 
-	xTab := r.URL.Query().Get("x")
-	if xTab != "foryou" {
-		xTab = "following"
-	}
+	// The whole backlog, whichever chip is on: it is what the chips count, so
+	// every one of them still says what picking it would bring.
+	backlog := cache.unread(now, "")
+	tally := tallyItems(backlog)
 
 	var items []core.Item
 	var failed []string
 	var warn string
 	var capped bool
-	if xTab == "foryou" {
-		// The backlog minus x, plus a live look at For You. Nothing from it is
-		// cached, so it never turns into a backlog you owe yourself.
-		items = cache.unread(now, "x")
+	if sel.Kind == "x" {
+		// For You, and only For You: a live look at it, cached nowhere, so it
+		// never turns into a backlog you owe yourself.
 		fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
 		defer cancel()
-		live, f, wn := fetchAllItems(fetchCtx, root, []string{"x"}, xTab, now)
-		items = append(items, live...)
-		failed, warn = f, wn
+		items, failed, warn = fetchAllItems(fetchCtx, root, []string{"x"}, "foryou", now)
+		// Every other chip still stands for the backlog, so its status light is
+		// the cache's; x's here belongs to the fetch that just ran, which is also
+		// the only one that can speak for x's session.
+		others := make([]string, 0, len(apps))
+		for _, a := range apps {
+			if a != "x" {
+				others = append(others, a)
+			}
+		}
+		cached, cwarn, _ := cache.trouble(others)
+		failed = append(failed, cached...)
+		warn = strings.TrimSpace(warn + " " + cwarn)
 	} else {
-		items = cache.unread(now, "")
+		items = selectItems(backlog, sel)
 		failed, warn, capped = cache.trouble(apps)
 	}
 	sortItems(items, asc)
 
-	if r.URL.Query().Get("json") == "1" {
+	if q.Get("json") == "1" {
 		w.Header().Set("Content-Type", "application/json")
 		writeJSONItems(w, items, failed)
 		return
@@ -322,7 +343,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	writePage(w, tmpl, pageInput{
 		items: items, total: total, apps: apps, failed: failed, now: now,
-		xTab: xTab, warn: warn, saved: saved, swipe: swipe,
+		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, swipe: swipe,
 		updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
 }

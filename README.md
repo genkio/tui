@@ -182,15 +182,9 @@ downloads any of it, then counts down what's left of it once it's playing. A
 **loop** button at the end of the row repeats video (off by default). A footer
 with a player in it outgrows a phone, so the row scrolls sideways. Since
 scroll-to-read can't reach the last few cards, a **mark all read** button sits
-at the end of the feed to clear the tail in one tap. Once everything is read,
-if x is logged in, a link at the bottom offers to **continue on x For You**;
-following it switches
-x to For You (ephemerally — reloading the page returns to the Following
-default). The offer stands on For You too, worded as **another round**, since
-each visit refetches that timeline — so an emptied list is never a dead end. For
-You is the one thing fetched live rather than served from the backlog cache: it's
-an endless firehose, not a list you get to the end of, so nothing from it is
-cached. It reuses the same `--json` / `--mark-read`
+at the end of the feed to clear the tail in one tap. x's **For You** is a chip of
+its own in the header (see below) rather than something offered at the end of the
+feed. It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
 the TUI and the page — mark something read and it's read in the app too (see
 **The backlog cache** below for the one place that changes). Items are sorted
@@ -199,14 +193,27 @@ the TUI and the page — mark something read and it's read in the app too (see
 things, newest first**. The page uses the Inter webfont (with system
 fallbacks) for a polished read.
 
-Both lists are read from disk rather than scraped, so both arrive whole and can
-be sliced where they sit: one wrapping row of **filter chips** above the first
-card, a group for the **source** (`𝕏`, `rdt`, `ino`, …) followed by one for what
-the item carries (**text**, **video**, **audio**), each chip counting the unread
-items it would leave — so reading takes the chip numbers down alongside the
-header's. Picks inside a group are alternatives (x *or* reddit) and the groups
-all have to hold (reddit *and* video), so several can be on at once; **clear**
-drops them all. Filtering hides cards the page already has, no round trip.
+Above the first card is one wrapping row of **chips**: a group for the
+**source** (`𝕏`, `rdt`, `ino`, …) followed by one for what the item carries
+(**text**, **video**, **audio**), each chip counting the unread items it would
+bring — so reading takes the chip numbers down alongside the header's. One is on
+at a time, and tapping it loads a page of that chip's items and nothing else
+(`?app=reddit`, `?type=video`), so the counts always say what a pick would bring
+rather than what is left of it. The header's own count stays every source's
+unread whichever chip is on — the chips already say what each one holds, and
+repeating the picked one there would leave nothing stating the whole. Tapping the
+chip that is on, or **clear**, brings the whole list back. Any marks that haven't
+reached the server yet are flushed before the page goes.
+
+Next to x's own blue chip sits a second, **black** one: the same `𝕏`, no label.
+That is x's other timeline, and it is the one pick that fetches rather than
+reads. From anywhere else it is the icon alone — none of that timeline is kept,
+so there is nothing to count; on the page the fetch serves, it states the round
+it just brought, next to the icon like every other chip's number, and takes it
+down as you read (the header's backlog count stays put there: a round is no part
+of it). Green when the fetch landed, red when it didn't. Tapping it
+again is another round: it's an endless firehose, not a list you get to the end
+of, which is why nothing from it enters the backlog.
 
 On the feed a source chip is also that service's **status light**: its count is
 green when the last sweep of it worked and red when it didn't, so a stale number
@@ -218,10 +225,10 @@ no service to be up or down, the chips are plain: there, a group that would ligh
 up the whole list narrows nothing and isn't drawn, so a saved list of one kind
 from one app gets no chips at all.
 
-The chips are also what **mark all read** applies to: with a filter on it clears
-the sources you've picked and leaves the rest unread, so you can sweep reddit
-away and keep the articles for later. A card the filter hides isn't marked read
-by scrolling either, since you haven't read it.
+The chips are also what **mark all read** applies to: with one on, the page is
+that chip's items alone, so it clears those and leaves the rest unread — you can
+sweep reddit away and keep the articles for later. The pick lives in the URL, so
+the reload that fetches the next window of a deep backlog comes back to it.
 
 A saved item also remembers **where you left off**. The position in its player
 is posted back as you watch or listen and rides along in `saved.json`, so
@@ -235,8 +242,8 @@ resume too when the item is already saved.
 
 The page is server-rendered and responsive (cards stack full-width, tap-sized
 targets, follows your phone's light/dark theme). A feed page comes off the
-cache and is instant, but For You is still scraped live, so following a link
-that refetches puts a **loading…** cover over the page you tapped from rather
+cache and is instant, but the For You chip scrapes x live, so a tap that
+refetches puts a **loading…** cover over the page you tapped from rather
 than leaving it looking idle. `?json=1` returns the whole backlog as JSON for
 scripts (no window). Runs indefinitely until you Ctrl-C.
 
@@ -317,8 +324,8 @@ deals the next one and **←**/**h** walks back, and a mouse can drag. Only
 sideways is a
 gesture: up and down scroll the page as usual, and everything else is a footer
 button, saving included. Once the deck is dealt out the floating **mark all
-read** goes away and, if x is logged in, the end note offers **For You** as
-somewhere to go next — another round of it if that is where you already were.
+read** goes away and a note says so; where to go next is the chip row, which the
+deck carries above it like the feed does.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
 to roughly a screenful, so the footer actions — open, save, share, image

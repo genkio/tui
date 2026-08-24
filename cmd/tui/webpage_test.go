@@ -15,7 +15,8 @@ import (
 )
 
 // renderPage / renderCard execute the embedded page template the way handleAll
-// does, so the tests cover the real markup.
+// does, so the tests cover the real markup. xTab is which x timeline the page is
+// showing: "foryou" renders it as the For You chip's page.
 func renderPage(t *testing.T, items []core.Item, apps, failed []string, xTab, warn string) string {
 	t.Helper()
 	loader, err := newPageLoader("")
@@ -27,7 +28,10 @@ func renderPage(t *testing.T, items []core.Item, apps, failed []string, xTab, wa
 		t.Fatal(err)
 	}
 	var b strings.Builder
-	in := pageInput{items: items, total: len(items), apps: apps, failed: failed, now: time.Now(), xTab: xTab, warn: warn, updated: time.Now()}
+	in := pageInput{items: items, total: len(items), apps: apps, failed: failed, now: time.Now(), warn: warn, updated: time.Now()}
+	if xTab == "foryou" {
+		in.sel = feedSel{Kind: "x", Key: "foryou"}
+	}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +71,10 @@ func renderSavedPage(t *testing.T, store *savedStore) string {
 	now := time.Now()
 	var b strings.Builder
 	items := store.list(now)
-	in := pageInput{items: items, total: len(items), now: now, saved: store, savedView: true}
+	in := pageInput{
+		items: items, total: len(items), now: now, saved: store, savedView: true,
+		query: url.Values{"saved": {"1"}}, // the route's own param, which the chips keep
+	}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +97,7 @@ func renderSwipePage(t *testing.T, items []core.Item, apps ...string) string {
 	if len(apps) == 0 {
 		apps = []string{"x", "reddit"}
 	}
-	in := pageInput{items: items, total: len(items), apps: apps, now: time.Now(), xTab: "following", swipe: true}
+	in := pageInput{items: items, total: len(items), apps: apps, now: time.Now(), swipe: true}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -260,15 +267,10 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	if !strings.Contains(deck, `class="markall fab"`) {
 		t.Errorf("mark-all-read should float in a deck: %s", deck)
 	}
-	// The end of the deck offers x's other timeline, since x is authed here and
-	// on Following.
-	if !strings.Contains(deck, `id="deckEnd"`) || !strings.Contains(deck, `href="/?x=foryou"`) {
-		t.Errorf("expected an end state offering For You: %s", deck)
-	}
-	// Without x there is nowhere else to go, so the end state is a plain note.
-	noX := renderSwipePage(t, []core.Item{{App: "reddit", ID: "1", Title: "a"}}, "reddit")
-	if strings.Contains(noX, `href="/?x=foryou"`) {
-		t.Errorf("no x, no For You offer: %s", noX)
+	// The end of the deck says so and nothing more: where to go next is the chip
+	// row's business now, not a link buried in an end state.
+	if !strings.Contains(deck, `id="deckEnd">Deck's empty — that's every card.</div>`) {
+		t.Errorf("expected a plain end state: %s", deck)
 	}
 	feed := renderPage(t, items, []string{"x", "reddit"}, nil, "following", "")
 	if strings.Contains(feed, `class="deck"`) || strings.Contains(feed, `id="deckEnd"`) {
@@ -279,33 +281,60 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	}
 }
 
-// Reaching the end of the feed offers x's other timeline as a link at the
-// bottom rather than a modal, and only where there is one to offer.
-func TestForYouNoteReplacesTheDialog(t *testing.T) {
+// x's For You is a chip of its own, in black so the two x chips are told apart:
+// the blue one is the cached Following backlog, the black one is fetched on the
+// spot. It replaces the end-of-feed offers, which are gone.
+func TestForYouIsAChip(t *testing.T) {
 	items := []core.Item{{App: "x", ID: "1", Title: "a"}}
 	feed := renderPage(t, items, []string{"x"}, nil, "following", "")
-	if strings.Contains(feed, "<dialog") {
-		t.Errorf("the For You dialog should be gone: %s", feed)
+	if !strings.Contains(feed, `href="/?x=foryou" data-kind="x" data-key="foryou" data-on="0"`) {
+		t.Errorf("expected a For You chip the page is not on: %s", feed)
 	}
-	if !strings.Contains(feed, `class="note offer hid" id="forYouNote"`) {
-		t.Errorf("expected a hidden For You note the read count uncovers: %s", feed)
+	if !strings.Contains(feed, `style="background:#000000"`) {
+		t.Errorf("the For You chip should be black: %s", feed)
 	}
-	// Already on For You: still offered, worded as the next round rather than a
-	// switch, since every visit refetches the timeline.
-	onForYou := renderPage(t, items, []string{"x"}, nil, "foryou", "")
-	if !strings.Contains(onForYou, `id="forYouNote"`) || !strings.Contains(onForYou, "Another round of For You") {
-		t.Errorf("For You should offer another round of itself: %s", onForYou)
+	// It is scraped, not cached, so from here there is nothing to count: the
+	// chip is the icon alone.
+	if !strings.Contains(feed, `style="background:#000000">𝕏</span></a>`) {
+		t.Errorf("the For You chip carries no count until it has fetched: %s", feed)
 	}
-	if strings.Contains(feed, "Another round") {
-		t.Errorf("from Following it is a switch, not a round: %s", feed)
+	// It sits beside x's own chip, which keeps its own color and count.
+	i, j := strings.Index(feed, `data-key="x"`), strings.Index(feed, `data-key="foryou"`)
+	if i < 0 || j < i {
+		t.Errorf("the For You chip belongs next to x's own: %s", feed)
 	}
-	// No x at all: nothing to offer.
-	if p := renderPage(t, items, []string{"reddit"}, nil, "following", ""); strings.Contains(p, `id="forYouNote"`) {
-		t.Errorf("no x, no offer: %s", p)
+	// On For You the chip is the one that is on, and tapping it again asks for
+	// another round — the link back to the whole list is the clear chip.
+	on := renderPage(t, items, []string{"x"}, nil, "foryou", "")
+	if !strings.Contains(on, `href="/?x=foryou" data-kind="x" data-key="foryou" data-on="1"`) {
+		t.Errorf("For You should render as the picked chip, still good for another round: %s", on)
 	}
-	// The deck carries the same link in its own end note instead.
-	if d := renderSwipePage(t, items); strings.Contains(d, `id="forYouNote"`) {
-		t.Errorf("the deck's end note already offers it: %s", d)
+	// Fetched: now it has a number, next to the icon like any other chip's, and
+	// it is that round's own — green, because the fetch landed.
+	if !strings.Contains(on, `style="background:#000000">𝕏</span><span class="fn ok">1</span>`) {
+		t.Errorf("a fetched round should state how much it brought: %s", on)
+	}
+	if failed := renderPage(t, nil, []string{"x"}, []string{"x"}, "foryou", ""); !strings.Contains(failed, `style="background:#000000">𝕏</span><span class="fn bad">0</span>`) {
+		t.Errorf("a round that failed should say so in red: %s", failed)
+	}
+	if !strings.Contains(on, `class="fchip fclear" href="/" id="fclear"`) {
+		t.Errorf("expected a way back to the whole list: %s", on)
+	}
+	// No x at all: no chip.
+	if p := renderPage(t, items, []string{"reddit"}, nil, "following", ""); strings.Contains(p, `data-key="foryou"`) {
+		t.Errorf("no x, no For You chip: %s", p)
+	}
+	// The header still counts the backlog, which the round is no part of, so
+	// reading a round leaves that number alone rather than dropping it to
+	// somewhere the next load would undo.
+	if !strings.Contains(on, `if(SEL === 'x:foryou') return;`) {
+		t.Errorf("reading a For You round should not move the backlog count: %s", on)
+	}
+	// The end-of-feed offers are gone; the chip is the only way in.
+	for _, p := range []string{feed, renderSwipePage(t, items)} {
+		if strings.Contains(p, `id="forYouNote"`) || strings.Contains(p, "Continue with For You") {
+			t.Errorf("the end-of-feed offer should be gone: %s", p)
+		}
 	}
 }
 
@@ -576,7 +605,7 @@ func TestRenderPageFreshness(t *testing.T) {
 	// A sweep in flight says so rather than showing an age about to change.
 	in := pageInput{
 		items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 1,
-		apps: []string{"x"}, now: time.Now(), xTab: "following",
+		apps: []string{"x"}, now: time.Now(),
 		updated: time.Now().Add(-9 * time.Minute), fetching: true,
 	}
 	if got := renderInput(t, in); !strings.Contains(got, `id="upd">fetching…`) {
@@ -595,7 +624,8 @@ func TestRenderPageFreshness(t *testing.T) {
 // a reload brings more.
 func TestRenderPageWindowedBacklog(t *testing.T) {
 	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "x", ID: "2", Title: "b"}}
-	in := pageInput{items: items, total: 812, apps: []string{"x"}, now: time.Now(), xTab: "following", updated: time.Now()}
+	deep := feedTally{apps: map[string]int{"x": 812}, types: map[string]int{"text": 812}}
+	in := pageInput{items: items, total: 812, apps: []string{"x"}, now: time.Now(), tally: &deep, updated: time.Now()}
 	p := renderInput(t, in)
 	if !strings.Contains(p, `<span id="unreadn">812</span>`) {
 		t.Fatal("the count is the whole backlog, not the window: " + p)
@@ -624,15 +654,15 @@ func TestRenderPageWindowedBacklog(t *testing.T) {
 	}
 }
 
-// Clearing the filters starts over, and by then the page is stale: cards have
-// been read and a windowed feed has more behind the ones it sent. So it
-// reloads, after the marks that haven't reached the server yet have gone.
-func TestClearFiltersReloads(t *testing.T) {
+// A chip is a link, so tapping one leaves the page — which is exactly when a
+// mark that hasn't reached the server yet would be lost. The click is
+// intercepted so the queue goes first.
+func TestChipTapFlushesBeforeLeaving(t *testing.T) {
 	p := renderPage(t,
 		[]core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}},
 		[]string{"x", "reddit"}, nil, "following", "")
-	if !strings.Contains(p, "flushPending().then(function(){ location.reload(); })") {
-		t.Error("clear should flush pending marks and then reload")
+	if !strings.Contains(p, "flushPending().then(function(){ location.assign(href); })") {
+		t.Error("a chip should flush pending marks and then navigate")
 	}
 	if !strings.Contains(p, "return Promise.all(calls)") {
 		t.Error("flushPending has to be awaitable for that to be safe")
@@ -642,9 +672,10 @@ func TestClearFiltersReloads(t *testing.T) {
 // A capped count is short of the truth (a drain stopped at its round cap), so
 // it renders the way the picker's does: "N+".
 func TestRenderPageCappedCount(t *testing.T) {
+	deep := feedTally{apps: map[string]int{"inoreader": 400}, types: map[string]int{"text": 400}}
 	in := pageInput{
 		items: []core.Item{{App: "inoreader", ID: "1", Title: "a"}}, total: 400,
-		apps: []string{"inoreader"}, now: time.Now(), xTab: "following",
+		apps: []string{"inoreader"}, now: time.Now(), tally: &deep,
 		updated: time.Now(), capped: true,
 	}
 	if got := renderInput(t, in); !strings.Contains(got, `<span id="unreadn">400</span>+ unread`) {
@@ -1306,7 +1337,9 @@ func TestCardFilters(t *testing.T) {
 		`data-kind="type" data-key="text"`,
 		`data-kind="type" data-key="video"`,
 		`data-kind="type" data-key="audio"`,
-		`id="noMatch"`,
+		// A pick is a page load, and on the saved list it stays on the saved list.
+		`href="/?app=reddit&amp;saved=1"`,
+		`href="/?saved=1&amp;type=video"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("saved page missing %s:\n%s", want, page)
@@ -1328,18 +1361,132 @@ func TestCardFilters(t *testing.T) {
 		`data-kind="app" data-key="reddit" data-on="0"`,
 		`data-kind="type" data-key="video"`,
 		`data-kind="type" data-key="audio"`,
-		`id="noMatch"`,
+		`href="/?app=reddit"`,
+		`href="/?type=video"`,
 	} {
 		if !strings.Contains(feed, want) {
 			t.Errorf("feed page missing %s:\n%s", want, feed)
 		}
 	}
+	// Nothing is on, so there is nothing to clear.
+	if strings.Contains(feed, `id="fclear"`) {
+		t.Errorf("the clear chip belongs to a page that picked something: %s", feed)
+	}
 }
 
-// Filtering hides cards with .fout, not .hid: the swipe deck toggles .hid on
-// every card but the one in play, so sharing the class would have the two
-// fighting over what is on screen.
-func TestFilterHidingIsNotTheDecksHiding(t *testing.T) {
+// A pick is served, not hidden: the page carries that chip's items alone, and
+// the chip counts still come from the whole list so each one says what picking
+// it would bring.
+func TestPickIsServedNotHidden(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Title: "read me"},
+		{App: "reddit", ID: "2", Title: "clip", Video: "https://video.twimg.com/a.mp4"},
+		{App: "x", ID: "3", Title: "post"},
+	}
+	all := tallyItems(items)
+	picked := selectItems(items, feedSel{Kind: "app", Key: "reddit"})
+	if len(picked) != 2 || picked[0].ID != "1" || picked[1].ID != "2" {
+		t.Fatalf("an app pick should leave that app's items: %+v", picked)
+	}
+	if v := selectItems(items, feedSel{Kind: "type", Key: "video"}); len(v) != 1 || v[0].ID != "2" {
+		t.Fatalf("a type pick should leave that kind: %+v", v)
+	}
+	// For You is fetched, not sliced out of anything here.
+	if f := selectItems(items, feedSel{Kind: "x", Key: "foryou"}); len(f) != 0 {
+		t.Fatalf("the For You pick takes no cached items: %+v", f)
+	}
+
+	p := renderInput(t, pageInput{
+		items: picked, total: len(picked), apps: []string{"reddit", "x"}, now: time.Now(),
+		sel: feedSel{Kind: "app", Key: "reddit"}, tally: &all, query: url.Values{"app": {"reddit"}},
+	})
+	if !strings.Contains(p, `data-kind="app" data-key="reddit" data-on="1"`) {
+		t.Errorf("the picked chip should render as on: %s", p)
+	}
+	// x still counts its one item, though this page shows none of it.
+	if !strings.Contains(p, `class="fn ok">1<`) {
+		t.Errorf("the chips count the whole list, not this page: %s", p)
+	}
+	// The header counts every source, or it would just repeat the picked chip
+	// and nothing on the page would state the whole.
+	if !strings.Contains(p, `<span id="unreadn">3</span>`) {
+		t.Errorf("the header should count all three, not the two picked: %s", p)
+	}
+	// The chip that is on links back to everything, as does the clear chip.
+	if !strings.Contains(p, `href="/" data-kind="app" data-key="reddit" data-on="1"`) {
+		t.Errorf("tapping the picked chip should put the whole list back: %s", p)
+	}
+	if !strings.Contains(p, `class="fchip fclear" href="/"`) {
+		t.Errorf("expected a clear chip: %s", p)
+	}
+	// One at a time: picking another app replaces this pick rather than adding to it.
+	if !strings.Contains(p, `href="/?app=x" data-kind="app" data-key="x"`) {
+		t.Errorf("another chip should replace the pick, not stack with it: %s", p)
+	}
+	// Nothing left after a pick says so, rather than claiming inbox zero.
+	empty := renderInput(t, pageInput{
+		items: nil, total: 0, apps: []string{"reddit", "x"}, now: time.Now(),
+		sel: feedSel{Kind: "app", Key: "reddit"}, tally: &all, query: url.Values{"app": {"reddit"}},
+	})
+	if !strings.Contains(empty, "Nothing unread from that chip.") {
+		t.Errorf("an emptied pick is not inbox zero: %s", empty)
+	}
+}
+
+// One chip at a time, so the request names one and the links swap it rather
+// than piling params up. For You wins the tie: it is the one pick that is not a
+// slice of the backlog.
+func TestChipQueryIsOnePick(t *testing.T) {
+	sels := []struct {
+		q    string
+		want feedSel
+	}{
+		{"", feedSel{}},
+		{"app=reddit", feedSel{Kind: "app", Key: "reddit"}},
+		{"type=video", feedSel{Kind: "type", Key: "video"}},
+		{"type=nonsense", feedSel{}},
+		{"x=foryou", feedSel{Kind: "x", Key: "foryou"}},
+		{"x=following", feedSel{}},
+		{"x=foryou&app=reddit&type=video", feedSel{Kind: "x", Key: "foryou"}},
+		{"app=reddit&type=video", feedSel{Kind: "app", Key: "reddit"}},
+	}
+	for _, c := range sels {
+		q, err := url.ParseQuery(c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := parseSel(q); got != c.want {
+			t.Errorf("parseSel(%q) = %+v, want %+v", c.q, got, c.want)
+		}
+	}
+
+	hrefs := []struct {
+		q    string
+		sel  feedSel
+		want string
+	}{
+		{"app=reddit", feedSel{Kind: "app", Key: "x"}, "/?app=x"},
+		{"type=video", feedSel{Kind: "app", Key: "x"}, "/?app=x"},
+		{"app=reddit", feedSel{}, "/"},
+		{"x=foryou", feedSel{}, "/"},
+		// The sort order and the saved view are not picks, so they ride along.
+		{"order=desc&app=x", feedSel{Kind: "type", Key: "audio"}, "/?order=desc&type=audio"},
+		{"saved=1", feedSel{Kind: "app", Key: "x"}, "/?app=x&saved=1"},
+	}
+	for _, c := range hrefs {
+		q, err := url.ParseQuery(c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := chipHref(q, c.sel); got != c.want {
+			t.Errorf("chipHref(%q, %+v) = %q, want %q", c.q, c.sel, got, c.want)
+		}
+	}
+}
+
+// The deck gets the same chips as the feed, and nothing client-side is left to
+// hide cards with: the page it was served is already the pick.
+func TestDeckChipsAreLinksToo(t *testing.T) {
 	page := renderSwipePage(t,
 		[]core.Item{
 			{App: "x", ID: "1", Title: "post"},
@@ -1348,32 +1495,29 @@ func TestFilterHidingIsNotTheDecksHiding(t *testing.T) {
 	if !strings.Contains(page, `id="filters"`) {
 		t.Fatalf("the deck gets the same chips as the feed:\n%s", page)
 	}
-	if !strings.Contains(page, `classList.toggle('fout', !ok)`) {
-		t.Error("the filter should hide with .fout")
+	if strings.Contains(page, "fout") {
+		t.Error("nothing filters cards in the browser any more")
 	}
-	if !strings.Contains(page, ".card.fout{display:none!important}") {
-		t.Error("expected the .fout rule")
+	if strings.Contains(page, "onFilterChange") {
+		t.Error("the deck deals from the page it was served")
 	}
-	if !strings.Contains(page, "window.onFilterChange") {
-		t.Error("the deck should re-deal from what the filter leaves")
-	}
-	// A filter that matches nothing has its own note; "that's every card" would
-	// contradict it.
-	if !strings.Contains(page, "!done || cards.length === 0") {
-		t.Error("the deck-end note should stay hidden when a filter empties the deck")
+	// Every card on the page is a card in the deck, so the end of it is the end.
+	if !strings.Contains(page, "endEl.classList.toggle('hid', !done)") {
+		t.Error("the end note should follow the end of the deck")
 	}
 }
 
-// Mark-all clears what is on screen. With a filter on, that is the sources you
-// picked and nothing else, and a card the filter hid is never counted as read
-// by the scroll observer either.
-func TestMarkAllRespectsFilters(t *testing.T) {
+// Mark-all clears what is on screen, which with a chip on is that chip's items
+// and nothing else — the page carries no others to clear by accident.
+func TestMarkAllClearsThePage(t *testing.T) {
 	page := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
-	if !strings.Contains(page, `article.card:not(.read):not(.fout)`) {
-		t.Error("mark-all should skip filtered-out cards")
+	if !strings.Contains(page, `document.querySelectorAll('article.card:not(.read)').forEach`) {
+		t.Error("mark-all should clear every unread card on the page")
 	}
-	if !strings.Contains(page, `if(el.classList.contains('fout')) return;`) {
-		t.Error("the scroll observer should skip filtered-out cards")
+	// A windowed page always has more behind it, chip or no chip, and the chip
+	// rides along in the URL, so the reload comes back to the same pick.
+	if !strings.Contains(page, `if (markAllBtn.dataset.more === '1') {`) {
+		t.Error("a windowed page should reload for the next window unconditionally")
 	}
 }
 
