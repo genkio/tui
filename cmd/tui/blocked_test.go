@@ -442,6 +442,6 @@ func TestBlockedViewNeverSwipes(t *testing.T) {
 		items: items, total: len(items), now: now, block: b, blockedView: true, swipe: true,
 	})
 	if d.Swipe {
-		t.Error("the blocked list should stay a scrolling list even under --swipe")
+		t.Error("the blocked list should stay a scrolling list even with the deck asked for")
 	}
 }

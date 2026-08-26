@@ -4,30 +4,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <script>
-// Which way the feed runs is this browser's to remember; doing the sorting is
-// the server's, because a page carries a window of the backlog and turning
-// around the cards already here would reorder a slice rather than the feed. So
-// the order lives in the URL, and this is all localStorage has to do with it:
-// ask for the remembered one when the URL names none, before anything is drawn.
-// A URL that does name one is the answer instead, and becomes what is
-// remembered — including the one the toggle just sent us to.
+// Which way the feed runs, and whether it is a list or a deck, are this
+// browser's to remember; doing the sorting and the laying out is the server's,
+// because a page carries a window of the backlog and rearranging the cards
+// already here would work on a slice rather than the feed. So both live in the
+// URL, and this is all localStorage has to do with them: ask for the remembered
+// ones when the URL names none, before anything is drawn. A URL that does name
+// one is the answer instead, and becomes what is remembered — including the one
+// a toggle just sent us to. Both are settled in one pass so a browser that
+// wants the other of each is one redirect, not two.
+//
+// The server serves the list to anyone who doesn't ask otherwise, so only the
+// deck is ever worth a redirect. A browser with nothing remembered yet gets one
+// guess from the device it is: a coarse pointer is a thumb, and a thumb wants a
+// card at a time. Guessing once beats a flag on the server, which could only
+// ever be right about one of the devices reading the same feed.
 (function(){
   try{
     var u = new URL(location.href);
     if (u.pathname !== '/') return;
     if (u.searchParams.get('saved') === '1' || u.searchParams.get('blocked') === '1') return;
-    // A card is marked read by scrolling past it, which makes where the page
-    // starts ours rather than the browser's to restore: Firefox puts a reload
-    // back at the old offset, and every card above it would then be reported as
-    // scrolled past by an observer that never saw you scroll. Start at the top,
-    // where what is left of the list begins.
+    // In the list a card is marked read by scrolling past it, which makes where
+    // the page starts ours rather than the browser's to restore: Firefox puts a
+    // reload back at the old offset, and every card above it would then be
+    // reported as scrolled past by an observer that never saw you scroll. Start
+    // at the top, where what is left of the list begins.
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-    var named = u.searchParams.get('order');
-    if (named === 'asc' || named === 'desc'){ localStorage.setItem('tui:order', named); return; }
-    if (localStorage.getItem('tui:order') === 'desc'){
-      u.searchParams.set('order', 'desc');
-      location.replace(u.toString());
+    var moved = false;
+    var order = u.searchParams.get('order');
+    if (order === 'asc' || order === 'desc') localStorage.setItem('tui:order', order);
+    else if (localStorage.getItem('tui:order') === 'desc'){ u.searchParams.set('order', 'desc'); moved = true; }
+    var deck = u.searchParams.get('deck');
+    if (deck === '1' || deck === '0') localStorage.setItem('tui:deck', deck);
+    else {
+      var kept = localStorage.getItem('tui:deck');
+      if (kept !== '1' && kept !== '0' && matchMedia('(pointer: coarse)').matches) kept = '1';
+      if (kept === '1'){ u.searchParams.set('deck', '1'); moved = true; }
     }
+    if (moved) location.replace(u.toString());
   }catch(e){}
 })();
 </script>
@@ -58,7 +72,9 @@ header{
   border-bottom:1px solid var(--line);margin-bottom:12px;
 }
 h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
-.sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the counts take the room the controls at the far end leave, and give it back
+   by cropping themselves rather than pushing them off */
+.sub{flex:1;min-width:0;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .warn{background:rgba(214,69,69,.12);border:1px solid rgba(214,69,69,.5);color:var(--fg);border-radius:10px;padding:10px 12px;margin:-4px 0 12px;font-size:14px}
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:14px;
@@ -182,16 +198,17 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .loop[data-on="1"]{color:var(--accent)}
 .save[data-saved="1"]{color:var(--accent)}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
-/* which way the feed runs, at the far end of the header: the word is the order
-   the page is already in, and the tap turns it around. It keeps its width while
-   the counts beside it are free to ellipsis, since a header narrow enough to
-   crop something should crop the numbers rather than the only control there. */
-.sortlink{
-  flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:4px;
+/* which way the feed runs and which shape it is in, at the far end of the
+   header: each word is what the page already is, and the tap turns it around.
+   They keep their width while the counts beside them are free to ellipsis,
+   since a header narrow enough to crop something should crop the numbers
+   rather than the only controls there. */
+.sortlink,.decklink{
+  flex:none;display:inline-flex;align-items:center;gap:4px;
   color:var(--muted);font-size:13px;white-space:nowrap;text-decoration:none;
   border-bottom:1px dotted var(--line);
 }
-.sortlink .sarrow{font-size:12px;opacity:.7}
+.sortlink .sarrow,.decklink .dmark{font-size:12px;opacity:.7}
 /* the keywords link is a button (it opens a dialog, it doesn't go anywhere),
    so it has to be talked back into looking like the links beside it */
 button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);padding:0;font:inherit;cursor:pointer}
@@ -334,7 +351,8 @@ video.ffs{object-fit:cover !important}
 <div class="wrap">
 <header>
   <div class="sub" id="sub">{{if .BlockedView}}<a class="viewlink" href="/">unread</a> <span id="blockedn">{{.Blocked}}</span> blocked <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{else if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else}}{{if .HasApps}}<button class="refresh" id="refresh" type="button" title="fetch every service now"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a> <a class="viewlink" href="/?blocked=1"><span id="blockedn">{{.Blocked}}</span> blocked</a>{{end}}</div>
-  {{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
+  {{if .DeckHref}}<a class="decklink" id="decklink" href="{{.DeckHref}}" title="{{if .Swipe}}a deck, one card at a time — tap for the scrolling list{{else}}a scrolling list — tap for the swipe deck{{end}}"><span class="dmark">{{if .Swipe}}▭{{else}}▤{{end}}</span>{{if .Swipe}}deck{{else}}list{{end}}</a>
+  {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
 {{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
@@ -353,7 +371,7 @@ video.ffs{object-fit:cover !important}
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
 <script>
-// --swipe serves the same cards as a deck: one on screen, thrown away by hand.
+// ?deck=1 serves the same cards as a deck: one on screen, thrown away by hand.
 // Everything else on the page (video, images, save, share, expand) is shared
 // between the two modes; only the layout and what marks a card read differ.
 var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
@@ -1224,7 +1242,7 @@ if(refreshBtn) refreshBtn.addEventListener('click', function(){
     });
 });
 
-// The deck (--swipe): one card on screen, dealt with by hand. Throw it left to
+// The deck (?deck=1): one card on screen, dealt with by hand. Throw it left to
 // mark it read and deal the next; pull right to walk back through what's
 // already been dealt, as far back as the first card. Up and down are left
 // alone so the page scrolls as it always did, and saving stays the footer
@@ -1490,19 +1508,21 @@ window.addEventListener('pageshow', function(){ document.getElementById('loading
   window.addEventListener('resize', layout);
 })();
 
-// The order toggle: a link to this same page the other way round, so the sorting
-// is the server's over the whole backlog rather than this page's over the window
-// of it that got sent. The URL it goes to names the order, and the script in the
-// head files that away as what this browser wants from here on.
-(function(){
-  var a = document.getElementById('sortlink');
+// The order and layout toggles: each a link to this same page the other way
+// round, so the sorting and the laying out stay the server's over the whole
+// backlog rather than this page's over the window of it that got sent. The URL
+// each goes to names what it picked, and the script in the head files that away
+// as what this browser wants from here on. Both leave through leaveFor, because
+// a queued read that hasn't reached the server yet would be lost otherwise.
+['sortlink', 'decklink'].forEach(function(id){
+  var a = document.getElementById(id);
   if (!a) return;
   a.addEventListener('click', function(e){
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
     e.preventDefault();
     leaveFor(a.getAttribute('href'));
   });
-})();
+});
 </script>
 </div></body></html>
 {{define "card"}}<article class="card" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if not .Compact}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if not .Compact}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

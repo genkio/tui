@@ -81,7 +81,7 @@ func renderSavedPage(t *testing.T, store *savedStore) string {
 	return b.String()
 }
 
-// renderSwipePage renders the feed the way --swipe serves it, for the given
+// renderSwipePage renders the feed the way ?deck=1 serves it, for the given
 // authed apps.
 func renderSwipePage(t *testing.T, items []core.Item, apps ...string) string {
 	t.Helper()
@@ -1583,6 +1583,99 @@ func TestOrderToggle(t *testing.T) {
 	// Nor with nothing logged in, where there is no feed to turn around.
 	if p := renderPage(t, nil, nil, nil, "following", ""); strings.Contains(p, `id="sortlink"`) {
 		t.Errorf("no apps, no feed, no toggle: %s", p)
+	}
+}
+
+// Which layout you get is the browser's to ask for, and there is no flag on the
+// server to argue with: the deck is asked for, and anything else is the list.
+func TestDeckWanted(t *testing.T) {
+	cases := []struct {
+		q    string
+		want bool
+	}{
+		{"", false},
+		{"deck=1", true},
+		{"deck=0", false},
+		{"deck=yes", false},
+		{"deck=", false},
+	}
+	for _, c := range cases {
+		q, err := url.ParseQuery(c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := deckWanted(q); got != c.want {
+			t.Errorf("deckWanted(%q) = %t, want %t", c.q, got, c.want)
+		}
+	}
+}
+
+func TestDeckToggle(t *testing.T) {
+	hrefs := []struct {
+		q    string
+		deck bool
+		want string
+	}{
+		{"", true, "/?deck=0"},
+		{"", false, "/?deck=1"},
+		{"deck=1", true, "/?deck=0"},
+		{"deck=0", false, "/?deck=1"},
+		// The pick and the order ride along: changing the shape of the page should
+		// not change which cards are on it or which way they run.
+		{"deck=1&app=reddit&order=desc", true, "/?app=reddit&deck=0&order=desc"},
+	}
+	for _, c := range hrefs {
+		q, err := url.ParseQuery(c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := deckHref(q, c.deck); got != c.want {
+			t.Errorf("deckHref(%q, deck=%t) = %q, want %q", c.q, c.deck, got, c.want)
+		}
+	}
+
+	page := func(deck bool) string {
+		return renderInput(t, pageInput{
+			items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 1,
+			apps: []string{"x"}, now: time.Now(), swipe: deck, query: url.Values{},
+		})
+	}
+	// The word is the layout the page is already in, not the one a tap would bring.
+	if p := page(false); !strings.Contains(p, `href="/?deck=1"`) || !strings.Contains(p, `>list</a>`) {
+		t.Errorf("the list should say so and offer the deck: %s", p)
+	}
+	if p := page(true); !strings.Contains(p, `href="/?deck=0"`) || !strings.Contains(p, `>deck</a>`) {
+		t.Errorf("the deck should say so and offer the list: %s", p)
+	}
+	// The saved and blocked lists are never dealt as a deck, so there is nothing
+	// to toggle on them — nor with nothing logged in.
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	if p := renderSavedPage(t, store); strings.Contains(p, `id="decklink"`) {
+		t.Errorf("the saved list has no layout to switch: %s", p)
+	}
+	if p := renderPage(t, nil, nil, nil, "following", ""); strings.Contains(p, `id="decklink"`) {
+		t.Errorf("no apps, no cards, no toggle: %s", p)
+	}
+}
+
+// A browser with nothing remembered guesses once from the device: a thumb gets
+// the deck, anything else the list the server already sends.
+func TestFirstVisitFollowsThePointer(t *testing.T) {
+	page := renderInput(t, pageInput{
+		items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 1,
+		apps: []string{"x"}, now: time.Now(), query: url.Values{},
+	})
+	if !strings.Contains(page, `if (kept !== '1' && kept !== '0' && matchMedia('(pointer: coarse)').matches) kept = '1';`) {
+		t.Errorf("a first visit should read the pointer: %s", page)
+	}
+	// Only the deck is ever worth asking for, the list being what a request that
+	// says nothing already gets.
+	if !strings.Contains(page, `if (kept === '1'){ u.searchParams.set('deck', '1'); moved = true; }`) {
+		t.Errorf("the list costs no redirect: %s", page)
+	}
+	// The order and the layout are settled together rather than one redirect each.
+	if strings.Count(page, "location.replace") != 1 {
+		t.Errorf("the head should redirect at most once: %s", page)
 	}
 }
 

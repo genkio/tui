@@ -57,11 +57,13 @@ var appLabels = map[string]string{
 // about what has been read. Only the all view is exposed.
 //
 // dev re-reads page.tmpl per request so template edits show up on refresh.
-// swipe serves the same feed as a deck of one card at a time instead of a
-// scrolling list. drain lets the sweeper tell a service that cannot page (see
-// drainApps) that what it handed over has been read, which is the only way to
-// reach the rest of its backlog.
-func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) error {
+// drain lets the sweeper tell a service that cannot page (see drainApps) that
+// what it handed over has been read, which is the only way to reach the rest of
+// its backlog.
+//
+// The feed is served as a scrolling list or as a deck of one card at a time; see
+// deckWanted for why that is the browser's to say and not a flag here.
+func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 	devPath := ""
 	if dev {
 		devPath = filepath.Join(root, "cmd", "tui", "page.tmpl")
@@ -88,7 +90,7 @@ func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) erro
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, sweep, saved, block, rendered, swipe)
+		handleAll(w, r, root, loader, cache, sweep, saved, block, rendered)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -155,11 +157,7 @@ func runWeb(root, addr string, dev, swipe, drain bool, every time.Duration) erro
 	}
 	defer ln.Close()
 
-	mode := "scrolling feed"
-	if swipe {
-		mode = "swipe deck"
-	}
-	fmt.Printf("tui --web serving the all timeline (%s) on %s\n", mode, addr)
+	fmt.Printf("tui --web serving the all timeline on %s\n", addr)
 	if u := tailscaleURL(host, port); u != "" {
 		fmt.Printf("  tailnet:  %s\n", u)
 	}
@@ -271,7 +269,7 @@ const feedWindow = 500
 // live and deliberately left out of the backlog, being an endless firehose
 // rather than a list to get to the end of, so that chip serves only what the
 // fetch brings back.
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, block *blocker, rendered *renderedItems, swipe bool) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, block *blocker, rendered *renderedItems) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
 	tmpl, err := loader.load()
@@ -283,6 +281,9 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	now := time.Now()
 	q := r.URL.Query()
 	asc := q.Get("order") != "desc" // oldest first by default
+	// Which layout this client wants: one server serves a phone and a desktop at
+	// once, and they don't want the same shape.
+	deck := deckWanted(q)
 	sel := parseSel(q)
 
 	// The saved view reads straight from the store: no fetch, so it loads
@@ -298,7 +299,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, savedView: true,
-			block: block, swipe: swipe, sel: sel, tally: &tally, query: q,
+			block: block, swipe: deck, sel: sel, tally: &tally, query: q,
 		})
 		return
 	}
@@ -372,8 +373,8 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	writePage(w, tmpl, pageInput{
 		items: items, total: total, apps: apps, failed: failed, now: now,
-		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block, swipe: swipe,
-		asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
+		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
+		swipe: deck, asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
 }
 

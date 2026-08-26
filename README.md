@@ -149,7 +149,6 @@ triage from your phone or any other device on your Tailscale network:
 ```sh
 tui --web                    # serve the all timeline on 0.0.0.0:8080
 tui --web --web-addr :9000   # custom port
-tui --web --swipe            # one card at a time, swiped through (see below)
 tui --web --web-fetch 30m    # fetch less often (default 10m; 0 = on demand only)
 tui --web --web-drain=false  # leave Inoreader's own unread list alone (see below)
 ```
@@ -196,8 +195,9 @@ header is the order the feed is in — **↑ oldest** or **↓ newest** — and 
 it turns the whole backlog around, whichever chip is on (`?order=desc` is the
 same thing by hand). The order is the server's to do, since a page carries only
 a window of the backlog, but the browser remembers which one you asked for and
-asks for it again on the next visit. The page uses the Inter webfont (with
-system fallbacks) for a polished read.
+asks for it again on the next visit. Beside it is the shape the feed is in —
+**▤ list** or **▭ deck** — which works the same way (see **Swipe mode**). The
+page uses the Inter webfont (with system fallbacks) for a polished read.
 
 Where the page starts is the page's business, not the browser's: a card is
 marked read by scrolling past it, so a reload that came back at the old offset
@@ -369,8 +369,22 @@ delete whenever you've seen enough of it; it holds 2000 posts, oldest first out.
 
 ### Swipe mode
 
-`tui --web --swipe` serves the same feed as a deck instead of a scroll: one
-card at a time, centered on the screen, with the rest stacked behind it.
+The same feed can be dealt as a deck instead of scrolled: one card at a time,
+centered on the screen, with the rest stacked behind it.
+
+Which of the two you get is **the browser's to choose**, not the server's, and
+there's no flag for it. One server serves a phone and a desktop at once and they
+don't want the same shape, so a flag could only ever be right about one of them.
+The header's **▤ list** / **▭ deck** toggle switches it and the browser
+remembers, the way it remembers the feed order (`?deck=1` and `?deck=0` are the
+same thing by hand).
+
+A browser that has never said gets **one guess from the device it is**: a coarse
+pointer is a thumb, and a thumb wants a card at a time, so a phone opens the
+deck and everything else opens the list. One tap settles it either way, for good.
+The layout stays server-rendered — a swiped card gets a longer text budget than
+a listed one, and the clipping is done in Go — so switching is a page load, and
+a browser that wants the deck spends one redirect on arriving at a bare URL.
 
 **Swipe left** to mark the card read and deal the next one; **swipe right** to
 walk back through what you've already dealt, one card per pull, as far back as
@@ -396,8 +410,9 @@ deck. Marks rather than words, because the gestures they stand in for have no
 words either and a label long enough to explain itself would reach halfway
 across the card; a long press says which is which. Both are drawn as SVG rather
 than set in ✓ characters, so the pair shares one stroke weight and one scale.
-The saved list is for re-reading rather than triage, so it stays a scrolling
-list even in swipe mode.
+The saved and blocked lists are for looking back over rather than triage, so
+they stay scrolling lists whatever the feed is set to, and the toggle isn't
+drawn on them.
 
 ### macOS firewall vs. source builds
 

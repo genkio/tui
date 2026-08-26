@@ -154,7 +154,7 @@ type pageInput struct {
 	// saved list, and the blocked view renders it.
 	block       *blocker
 	blockedView bool
-	swipe       bool // --swipe: one card at a time instead of the scrolling feed
+	swipe       bool // this request's layout: one card at a time instead of the scrolling feed
 	asc         bool // oldest first, which the header's toggle flips
 	updated     time.Time
 	fetching    bool // a sweep is in flight, so the count is about to move
@@ -182,6 +182,9 @@ type pageData struct {
 	Keywords    int
 	KeywordText string
 	Swipe       bool // deck of one card at a time, swiped through
+	// Where to go for the other layout, blank on the views that have no say
+	// (saved, blocked, nothing logged in).
+	DeckHref string
 	// Which way the feed runs, and the page that turns it around. SortHref is
 	// blank on the views the toggle has no say over (saved, blocked), which is
 	// how the template knows not to draw it.
@@ -365,9 +368,13 @@ func buildPageData(in pageInput) pageData {
 	// The saved and blocked lists are ordered by when you saved or blocked
 	// something, which is the only order they are any use in, so the toggle is
 	// left off those views rather than drawn there doing nothing.
+	// Same two views the deck itself is kept off, plus the empty one: a layout
+	// toggle over nothing to lay out would be a control that does nothing.
 	flip := ""
+	deck := ""
 	if !in.savedView && !in.blockedView && len(in.apps) > 0 {
 		flip = orderHref(in.query, in.asc)
+		deck = deckHref(in.query, swipe)
 	}
 
 	return pageData{
@@ -392,6 +399,7 @@ func buildPageData(in pageInput) pageData {
 		Asc:         in.asc,
 		SortHref:    flip,
 		Swipe:       swipe,
+		DeckHref:    deck,
 		Warn:        in.warn,
 		HasApps:     len(in.apps) > 0,
 		Cards:       cards,
@@ -764,6 +772,38 @@ func orderHref(q url.Values, asc bool) string {
 		out.Set("order", "asc")
 	}
 	return "/?" + out.Encode()
+}
+
+// deckHref is where the header's layout toggle goes: this page as the other
+// layout, everything else about it left where it was. Spelled out either way,
+// like the order, so the page it opens states its own layout whether or not the
+// browser got as far as remembering.
+func deckHref(q url.Values, deck bool) string {
+	out := url.Values{}
+	for k, v := range q {
+		switch k {
+		case "deck", "json":
+		default:
+			out[k] = v
+		}
+	}
+	if deck {
+		out.Set("deck", "0")
+	} else {
+		out.Set("deck", "1")
+	}
+	return "/?" + out.Encode()
+}
+
+// deckWanted reads the layout a request asks for. Which of the two a client
+// wants is the client's business — one browser is a phone that wants a card at
+// a time, another the desktop that wants the list — so there is no server-side
+// flag for it: the page asks for ?deck=1, remembers what it asked, and asks
+// again next time. A request that says nothing gets the list, which is also
+// what a browser with nothing to remember starts from until the head script
+// makes its one guess from the pointer it's being touched with.
+func deckWanted(q url.Values) bool {
+	return q.Get("deck") == "1"
 }
 
 // parseSel reads the chip a request is asking for. x's For You wins over the

@@ -711,7 +711,6 @@ func main() {
 	webFetch := flag.Duration("web-fetch", 10*time.Minute, "with --web: how often the server fetches every service into its backlog cache (jittered ±15%; 0 fetches only on demand)")
 	webDrain := flag.Bool("web-drain", true, "with --web: let the server mark a fetched Inoreader article read there, the only way past its first page (off keeps Inoreader's own unread list intact)")
 	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild)")
-	swipe := flag.Bool("swipe", false, "with --web: swipe through one card at a time (left marks read, right goes back) instead of the scrolling feed")
 	stateDir := flag.String("state-dir", os.Getenv("TUI_STATE_DIR"), "single dir for credentials, read state, and configs (e.g. ~/Dropbox/tui to sync between devices); env TUI_STATE_DIR")
 	flag.Parse()
 
@@ -735,7 +734,7 @@ func main() {
 		os.Exit(1)
 	}
 	if *web {
-		if err := runWeb(root, *webAddr, *dev, *swipe, *webDrain, *webFetch); err != nil {
+		if err := runWeb(root, *webAddr, *dev, *webDrain, *webFetch); err != nil {
 			fmt.Fprintln(os.Stderr, "tui --web: "+err.Error())
 			os.Exit(1)
 		}
