@@ -1586,6 +1586,25 @@ func TestOrderToggle(t *testing.T) {
 	}
 }
 
+// Reading is scrolling past a card, so a page that arrives already scrolled -- a
+// Firefox reload restoring the offset, a back button -- must not count the whole
+// list above it as read.
+func TestScrollMarkIgnoresRestoredScroll(t *testing.T) {
+	feed := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
+	if !strings.Contains(feed, "history.scrollRestoration = 'manual'") {
+		t.Error("where the feed starts is ours to set, not the browser's to restore")
+	}
+	if !strings.Contains(feed, "if(el.dataset.behind) return;") {
+		t.Error("a card that was never on screen cannot have been scrolled past")
+	}
+	if !strings.Contains(feed, "if(en.isIntersecting){ delete el.dataset.behind; return; }") {
+		t.Error("a card that comes into view is readable again from there on")
+	}
+	if !strings.Contains(feed, "navigator.sendBeacon('/mark', fd)") {
+		t.Error("a refresh inside the queue's window must not lose the reads")
+	}
+}
+
 // The deck gets the same chips as the feed, and nothing client-side is left to
 // hide cards with: the page it was served is already the pick.
 func TestDeckChipsAreLinksToo(t *testing.T) {

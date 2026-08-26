@@ -16,6 +16,12 @@
     var u = new URL(location.href);
     if (u.pathname !== '/') return;
     if (u.searchParams.get('saved') === '1' || u.searchParams.get('blocked') === '1') return;
+    // A card is marked read by scrolling past it, which makes where the page
+    // starts ours rather than the browser's to restore: Firefox puts a reload
+    // back at the old offset, and every card above it would then be reported as
+    // scrolled past by an observer that never saw you scroll. Start at the top,
+    // where what is left of the list begins.
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
     var named = u.searchParams.get('order');
     if (named === 'asc' || named === 'desc'){ localStorage.setItem('tui:order', named); return; }
     if (localStorage.getItem('tui:order') === 'desc'){
@@ -401,6 +407,21 @@ function flushPending(){
   });
   return Promise.all(calls).then(function(){ if(failed) resync(); });
 }
+// The queue waits 400ms for company, so a refresh or a closed tab inside that
+// window would take the last few reads with it — the cards come back unread and
+// you read them again. A beacon outlives the page, which a fetch does not, so
+// send whatever is in hand; there is nobody left to hear a failure, and the next
+// load is the honest record either way.
+window.addEventListener('pagehide', function(){
+  Object.keys(pending).forEach(function(app){
+    var ids = pending[app]; if(!ids.length) return;
+    pending[app] = [];
+    var fd = new FormData(); fd.append('app', app); fd.append('json','1');
+    ids.forEach(function(id){ fd.append('id', id); });
+    if(navigator.sendBeacon) navigator.sendBeacon('/mark', fd);
+    else markFetch(fd).catch(function(){});
+  });
+});
 // Leaving this page for another of ours: whatever marks are still queued go
 // first, because leaving is exactly when one that hasn't reached the server
 // would be lost. The cover goes up as the tap lands, since the wait is the
@@ -541,19 +562,49 @@ var obs = new IntersectionObserver(function(entries){
   if (ffs) return; // fake fullscreen scrolls the feed behind the video (hiding
                    // Safari's bars); that motion must not mark cards read
   entries.forEach(function(en){
-    if(en.isIntersecting) return;                 // still visible
     var el = en.target;
+    // On screen: whatever it was before, it has now been in front of you, so
+    // scrolling past it from here is a read.
+    if(en.isIntersecting){ delete el.dataset.behind; return; }
+    // Above the viewport since the page arrived and never seen since. The head
+    // script asks the browser not to restore a scroll offset, but a browser
+    // that restores one anyway (or an anchor, or a back button) must not turn
+    // the whole list above it into reads: nobody scrolled past these.
+    if(el.dataset.behind) return;
     var r = el.getBoundingClientRect();
     if(r.height === 0 && r.top === 0) return;
     if(r.bottom > 0) return;                      // below, not yet scrolled past
     queueRead(el);
   });
 },{threshold:0});
+// Exempt every card that is above the viewport right now: whatever put the page
+// here, it wasn't you scrolling through them on this page.
+function exemptBehind(){
+  document.querySelectorAll('article.card:not(.read)').forEach(function(c){
+    if (c.getBoundingClientRect().bottom <= 0) c.dataset.behind = '1';
+  });
+}
 // The saved list is for re-reading and the blocked one for looking over, so
 // scrolling through either must not mark anything read; in swipe mode the throw
 // does the marking, not the scroll.
 if (!SWIPE && !SAVED_VIEW && !BLOCKED_VIEW) {
+  exemptBehind();
   document.querySelectorAll('article.card').forEach(function(c){ obs.observe(c); });
+  // A restore can also land after this script has run, and it arrives as a
+  // scroll event like any other. One that jumps a whole screen or more before
+  // you have touched anything is the browser's, not yours, so what it leaves
+  // above the viewport is exempt too. Only ever the first one: past that, a
+  // jump that size is you dragging the scrollbar, which does read.
+  var gestured = false;
+  ['wheel', 'touchstart', 'keydown'].forEach(function(ev){
+    window.addEventListener(ev, function(){ gestured = true; }, {passive:true});
+  });
+  var from = window.scrollY || 0;
+  var onFirstScroll = function(){
+    window.removeEventListener('scroll', onFirstScroll);
+    if (!gestured && (window.scrollY || 0) - from >= window.innerHeight) exemptBehind();
+  };
+  window.addEventListener('scroll', onFirstScroll);
 }
 
 // Save / unsave one item. The button posts just app+id; the server pairs that

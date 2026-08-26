@@ -199,6 +199,15 @@ a window of the backlog, but the browser remembers which one you asked for and
 asks for it again on the next visit. The page uses the Inter webfont (with
 system fallbacks) for a polished read.
 
+Where the page starts is the page's business, not the browser's: a card is
+marked read by scrolling past it, so a reload that came back at the old offset
+(Firefox does this) would report every card above it as read without you having
+seen any of them. So the feed asks for no scroll restoration and starts at the
+top of what's left, and any card that is somehow already above the viewport is
+exempt until it has actually been on screen. Reads are batched for a moment
+before they're sent, and leaving inside that window — a refresh, a closed tab —
+sends them with a beacon rather than losing them.
+
 Above the first card is one wrapping row of **chips**: a group for the
 **source** (`𝕏`, `rdt`, `ino`, …) followed by one for what the item carries
 (**text**, **video**, **audio**), each chip counting the unread items it would
