@@ -1610,6 +1610,29 @@ func TestDeckWanted(t *testing.T) {
 	}
 }
 
+func TestClientWindowDependsOnLayout(t *testing.T) {
+	if got := clientWindow(false); got != 100 {
+		t.Fatalf("list window = %d, want 100", got)
+	}
+	if got := clientWindow(true); got != 20 {
+		t.Fatalf("deck window = %d, want 20", got)
+	}
+}
+
+func TestDeckLoadsNextWindowAfterFlushing(t *testing.T) {
+	in := pageInput{
+		items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 2,
+		apps: []string{"x"}, now: time.Now(), swipe: true,
+	}
+	p := renderInput(t, in)
+	if !strings.Contains(p, `at >= cards.length && markAllBtn && markAllBtn.dataset.more === '1'`) {
+		t.Fatal("a partial deck should detect when its window is exhausted")
+	}
+	if !strings.Contains(p, `flushPending().then(function(){ location.reload(); });`) {
+		t.Fatal("the next deck should load only after pending reads flush")
+	}
+}
+
 func TestDeckToggle(t *testing.T) {
 	hrefs := []struct {
 		q    string

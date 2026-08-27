@@ -14,12 +14,13 @@ import (
 // savedStore persists the items starred from the web page. It keeps the whole
 // item, not just an id: a saved item has to outlive the feed it came from, and
 // feeds are transient (an unread list you triage away, an x timeline window
-// that scrolls past). It lives under the shared state dir, so --state-dir puts
-// it alongside credentials and read state for syncing between devices.
+// that scrolls past).
 type savedStore struct {
-	mu    sync.Mutex
-	path  string
-	items []savedItem // newest save first
+	mu      sync.Mutex
+	writeMu sync.Mutex
+	path    string
+	db      *feedDB
+	items   []savedItem // newest save first
 }
 
 type savedItem struct {
@@ -33,11 +34,19 @@ type savedItem struct {
 	PosSrc string  `json:"pos_src,omitempty"`
 }
 
+func loadSavedDB(db *feedDB) (*savedStore, error) {
+	items, err := db.loadSaved()
+	if err != nil {
+		return nil, err
+	}
+	return &savedStore{path: db.path, db: db, items: items}, nil
+}
+
 type savedFile struct {
 	Items []savedItem `json:"items"`
 }
 
-// loadSaved reads the store, or the default location when path is empty. A
+// loadSaved reads the legacy JSON store used by tests and migration. A
 // missing or corrupt file yields an empty store rather than an error: saving is
 // a convenience, never a reason to refuse to serve the page.
 func loadSaved(path string) *savedStore {
@@ -90,6 +99,11 @@ func (s *savedStore) add(it core.Item, now time.Time) error {
 		s.items = append([]savedItem{entry}, s.items...)
 	}
 	s.mu.Unlock()
+	if s.db != nil {
+		if err := s.db.putItem(entry.Wire); err != nil {
+			return err
+		}
+	}
 	return s.save()
 }
 
@@ -157,15 +171,21 @@ func (s *savedStore) list(now time.Time) []core.Item {
 	return items
 }
 
-// save writes the store atomically (temp file + rename). A store with no
-// resolvable path is a silent no-op.
+// save persists the current store. A store with no resolvable path is a silent
+// no-op.
 func (s *savedStore) save() error {
-	if s.path == "" {
+	if s.path == "" && s.db == nil {
 		return nil
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
-	data, err := json.MarshalIndent(savedFile{Items: s.items}, "", "  ")
+	items := append([]savedItem(nil), s.items...)
 	s.mu.Unlock()
+	if s.db != nil {
+		return s.db.replaceSaved(items)
+	}
+	data, err := json.MarshalIndent(savedFile{Items: items}, "", "  ")
 	if err != nil {
 		return err
 	}

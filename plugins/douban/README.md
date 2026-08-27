@@ -96,9 +96,8 @@ charts = ["movie_weekly_best", "book_weekly_best"]   # or [] for none
 ```
 
 A title read once stays read, so after the first load only titles new to a
-chart come back unread. The lists turn over weekly, so a fetched chart is
-cached for six hours in `charts.json` beside the read store; deleting that file
-costs one refetch.
+chart come back unread. The lists turn over weekly, so fetched chart responses
+are cached for six hours in `feed.db`.
 
 ## Authentication
 
@@ -112,8 +111,7 @@ launcher shows a red dot; re-run the same command to refresh it.
 
 ## Read tracking
 
-Douban exposes no read state for the timeline, so douban-tui keeps one
-locally: ids of statuses you've read live in
-`~/.local/state/douban-tui/read.json` (capped, pruned oldest-first). The
+Douban exposes no read state for the timeline, so douban-tui keeps status ids in
+`~/.local/state/tui/feed.db` without an application-level cap. The
 launcher's merged "all" view flushes into the same store, so read state stays
 consistent everywhere.

@@ -31,42 +31,37 @@ session, so install one if you haven't. Credentials and settings live in
 
 ### Syncing state between devices
 
-Point `TUI_STATE_DIR` (or `tui --state-dir <dir>`) at a synced folder and all
-persisted state moves under it, so sessions and read marks follow you across
+Point `TUI_SYNC_DIR` (or `tui --sync-dir <dir>`) at a synced folder to carry
+sessions, settings, read marks, and a snapshot of the feed database across
 machines:
 
 ```sh
-export TUI_STATE_DIR=~/Dropbox/tui   # in your shell profile; or: tui --state-dir ~/Dropbox/tui
+export TUI_SYNC_DIR=~/Dropbox/tui   # in your shell profile; or: tui --sync-dir ~/Dropbox/tui
 ```
 
 ```
-$TUI_STATE_DIR/
+$TUI_SYNC_DIR/
   env                          credentials for every app (chmod 600)
-  state/<app>-tui/read.json    read state (x, reddit, douban, bilibili)
-  state/tui/saved.json         the web view's saved list
-  state/tui/feed.json          the web view's backlog cache and read marks
-  state/tui/keywords.json      the web view's block list
-  state/tui/blocked.json       what those keywords kept out of the feed
+  feed.db                      snapshot of the feed database
   config/<app>-tui/config.toml per-app settings
 ```
 
 Migrate existing state once:
 
 ```sh
-mkdir -p "$TUI_STATE_DIR"
-mv ~/.config/tui/env "$TUI_STATE_DIR/env"
-for d in ~/.local/state/*-tui; do mkdir -p "$TUI_STATE_DIR/state/$(basename $d)" && mv $d/* "$TUI_STATE_DIR/state/$(basename $d)/"; done
+mkdir -p "$TUI_SYNC_DIR"
+mv ~/.config/tui/env "$TUI_SYNC_DIR/env"
+for d in ~/.local/state/*-tui; do mkdir -p "$TUI_SYNC_DIR/state/$(basename $d)" && mv $d/* "$TUI_SYNC_DIR/state/$(basename $d)/"; done
 ```
 
-The flag works on the launcher and on a single app alike (`tui --state-dir
-<dir>`, `tui x --state-dir <dir>`), and an app the picker opens inherits
+The flag works on the launcher and on a single app alike (`tui --sync-dir
+<dir>`, `tui x --sync-dir <dir>`), and an app the picker opens inherits
 whatever the launcher was given. The browser login profile
 (`~/.config/tui/profile`) deliberately stays local: live Chromium profiles
 don't survive file syncing, and the captured session values in `env` are what
-the apps actually use. Read marks are whole-file JSON saves, so triage from one
-device at a time; concurrent edits end as Dropbox conflict copies. The same goes
-double for `state/tui/feed.json`: run one `tui --web`, since it's the only
-record of a backlog Inoreader has been told you've read.
+the apps actually use. Feed content, plugin read marks, saved and blocked
+items, keywords, and the Douban chart cache all live in the local database.
+The server snapshots it into the sync directory after each fetch.
 
 ## Use
 
@@ -151,7 +146,21 @@ tui --web                    # serve the all timeline on 0.0.0.0:8080
 tui --web --web-addr :9000   # custom port
 tui --web --web-fetch 30m    # fetch less often (default 10m; 0 = on demand only)
 tui --web --web-drain=false  # leave Inoreader's own unread list alone (see below)
+tui --web --sync-dir ~/Dropbox/tui
+                             # snapshot feed.db after each fetch
 ```
+
+The live database stays at `~/.local/state/tui/feed.db` (or
+`$XDG_STATE_HOME/tui/feed.db`). When a sync directory is set, every completed
+fetch writes a consistent SQLite snapshot to `$TUI_SYNC_DIR/feed.db`, then
+atomically replaces the old snapshot.
+If the local database is missing, startup restores that snapshot. Without a
+sync directory, the database remains local and no snapshot is made.
+
+The first startup imports the old `feed.json`, `saved.json`, `keywords.json`,
+`blocked.json`, each plugin's `read.json`, and Douban's `charts.json`. It leaves
+them alone during import. Once the server starts and the synced `feed.db`
+snapshot exists, those legacy JSON state files can be deleted.
 
 The server binds `0.0.0.0` by default so your other devices reach it, and
 prints the Tailscale URL to open when `tailscale` is on PATH. It exposes only
@@ -257,7 +266,7 @@ sweep reddit away and keep the articles for later. The pick lives in the URL, so
 the reload that fetches the next window of a deep backlog comes back to it.
 
 A saved item also remembers **where you left off**. The position in its player
-is posted back as you watch or listen and rides along in `saved.json`, so
+is posted back as you watch or listen and rides along in `feed.db`, so
 reopening the list picks up there — on the same phone, or on another device
 reading the same synced store. It covers video, podcast audio, redgifs clips
 and YouTube embeds alike, and pins the position to the stream it belongs to, so
@@ -282,17 +291,17 @@ the real one: each app hands over its newest page (40-50 items) and no more.
 Now a background sweeper does the fetching, every **10 minutes** by default and
 jittered ±15% so the requests don't arrive on a machine-perfect cadence (the
 services within one sweep are spread out too). What it finds accumulates in
-`state/tui/feed.json`, keyed by app and id, and a page load just reads that
-file. Two things follow: the page is as fast as the saved list already was, and
+the `feed_items` table in the local `feed.db`, keyed by app and id, and a page
+load reads that database. Two things follow: the page is as fast as the saved
+list already was, and
 the count is the **real** backlog, because it grows across sweeps instead of
 being replaced by one. Tap the count to ask for a fetch now; it says
 `fetching…` while one is in flight and how stale it is otherwise (`4m`).
 
-A page carries at most **500 cards** — a phone rendering a thousand bodies,
-posters and players would crawl — while the header counts the whole thing. The
-button says *"mark these 500 read"* when there's more behind it, and clearing
-them reloads into the next batch, so the number stays honest and the triage loop
-keeps going.
+The scrolling list carries at most **100 cards** and the swipe deck carries
+**20**. The header and chips still count the complete backlog. Finishing a
+partial deck flushes its read marks and loads the next 20; clearing a partial
+list does the same for its next window.
 
 **Read marks are ours now.** Marking something read writes to the cache and the
 request returns; carrying it to the app's own `--mark-read` is a background job,
@@ -322,21 +331,19 @@ that never reached the cache would be gone for good.
 The consequences are worth knowing:
 
 - inoreader.com will show **0 unread** from then on. Your backlog lives in
-  `feed.json`, and `--web` is where you read it.
+  `feed.db`, and `--web` is where you read it.
 - the standalone `tui inoreader` TUI and the terminal `all` view fetch live, so
   they'll look empty. The picker's badge reads the cache instead and says
   `unread on --web` so it isn't lying to you.
 - `--web-drain=false` turns it off, at the cost of only ever seeing Inoreader's
   first page. Every other service pages honestly (folo walks a cursor) or has no
-  server-side read state at all (x, reddit, douban, bilibili keep a local
-  `read.json`), and none of them is ever marked read at fetch time.
+  server-side read state at all (x, reddit, douban, and bilibili keep their read
+  markers in `feed.db`), and none of them is ever marked read at fetch time.
 
-Two housekeeping notes. The cache is a **single-writer** file: run one
-`tui --web`, since it rewrites the whole thing each sweep and a Dropbox conflict
-copy here is lost backlog rather than an annoyance. And it's bounded — read
-entries are pruned after two weeks, and past 6000 entries the oldest read ones
-go first, unread ones only as a last resort, with a line on stderr when that
-happens.
+Run one active server for a synced snapshot; if two machines overwrite it, the
+last completed fetch wins. SQLite keeps the full feed, blocked history, saved
+items, and plugin read markers. The limits apply only to what one web response
+sends to a browser.
 
 ### Blocking by keyword
 
@@ -347,8 +354,8 @@ line. Edit, save, done — there is no per-row add and delete, because the list
 already is a list.
 
 A sweep screens what it fetched before the cache sees any of it: a post whose
-**title** carries one of the words is kept out of `feed.json` and filed in
-`blocked.json` instead, so it never becomes backlog you have to clear. Matching
+**title** carries one of the words is kept out of `feed_items` and filed in
+`blocked_items` instead, so it never becomes backlog you have to clear. Matching
 is plain case-insensitive substring anywhere in the title, which is what
 "keep posts about X out" means for a Chinese title as much as an English one.
 Only the title is read — a post that carries its whole text as its title (an x
@@ -364,8 +371,8 @@ The blocked list renders as **titles alone** — no body, no player, no stills �
 with the keyword that caught each one on its row, so a long list stays
 scannable and it's obvious which word is doing too much work. The chips narrow
 it the way they narrow the saved list, and nothing on it can be marked read,
-because none of it was ever unread. `blocked.json` is a plain record you can
-delete whenever you've seen enough of it; it holds 2000 posts, oldest first out.
+because none of it was ever unread. The `blocked_items` table keeps the full
+history.
 
 ### Swipe mode
 

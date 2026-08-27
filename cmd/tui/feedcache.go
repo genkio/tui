@@ -11,9 +11,8 @@ import (
 )
 
 // feedCache is the web view's backlog: every unread item the sweeper has ever
-// fetched, kept whole on disk so serving a page is a file read instead of six
-// concurrent scrapes. It is the counterpart of savedStore and lives beside it,
-// so --state-dir carries both.
+// fetched, kept in SQLite so serving a page does not wait on six concurrent
+// scrapes.
 //
 // Two things fall out of accumulating rather than re-fetching. The unread count
 // becomes real: a service that only ever hands over its newest page (or, for
@@ -22,8 +21,7 @@ import (
 // it and whether that mark has reached the app it came from, so a mark is
 // recorded instantly and flushed upstream in the background.
 //
-// One process writes it. The server owns the file while it runs; the launcher
-// only ever reads it.
+// One server owns the database while it runs; the launcher only reads it.
 type feedCache struct {
 	mu      sync.Mutex
 	entries []*feedEntry
@@ -35,6 +33,17 @@ type feedCache struct {
 	writeMu sync.Mutex
 	written int
 	path    string
+	db      *feedDB
+}
+
+func loadFeedCacheDB(db *feedDB) (*feedCache, error) {
+	f, err := db.loadFeed()
+	if err != nil {
+		return nil, err
+	}
+	c := &feedCache{db: db, path: db.path, byKey: map[string]*feedEntry{}, status: map[string]appStatus{}}
+	c.load(f)
+	return c, nil
 }
 
 // feedEntry is one cached item plus what we know about your relationship to it.
@@ -67,17 +76,7 @@ type feedFile struct {
 	Swept  string               `json:"swept,omitempty"`
 }
 
-const (
-	// feedCacheKeep is how long a read entry lingers before pruning. It has to
-	// outlast a re-fetch: an app whose --json still lists an item we have read
-	// would otherwise resurrect it as unread.
-	feedCacheKeep = 14 * 24 * time.Hour
-	// maxFeedEntries bounds the file. It is a whole-file rewrite on every sweep
-	// and it may sit in a synced folder, so the backlog is deliberately finite.
-	maxFeedEntries = 6000
-)
-
-// loadFeedCache reads the cache, or the default location when path is empty. A
+// loadFeedCache reads the legacy JSON cache used by tests and migration. A
 // missing or corrupt file yields an empty cache rather than an error: the worst
 // case is one slow sweep before the page has anything to serve.
 func loadFeedCache(path string) *feedCache {
@@ -93,6 +92,11 @@ func loadFeedCache(path string) *feedCache {
 	if json.Unmarshal(data, &f) != nil {
 		return c
 	}
+	c.load(f)
+	return c
+}
+
+func (c *feedCache) load(f feedFile) {
 	for _, e := range f.Items {
 		if e == nil || e.App == "" || e.ID == "" {
 			continue
@@ -110,7 +114,6 @@ func loadFeedCache(path string) *feedCache {
 	if t, err := time.Parse(time.RFC3339, f.Swept); err == nil {
 		c.swept = t
 	}
-	return c
 }
 
 // upsert folds a fetch into the backlog and reports how many of the items were
@@ -332,34 +335,45 @@ func trimJoin(a, b string) string {
 	return a + " " + b
 }
 
-// save writes the cache atomically. It marshals under the lock and writes
-// outside it, so a multi-megabyte rewrite doesn't hold up a page render; a
-// revision check drops a snapshot that a newer one has already overtaken.
+// save snapshots under the lock and persists outside it, so a large write does
+// not hold up a page render. A revision check drops a snapshot that a newer one
+// has already overtaken.
 func (c *feedCache) save() error {
 	if c.path == "" {
 		return nil
 	}
 	c.mu.Lock()
-	dropped := c.prune()
 	c.rev++
 	rev := c.rev
-	f := feedFile{Items: c.entries, Status: c.status}
+	items := make([]*feedEntry, 0, len(c.entries))
+	for _, e := range c.entries {
+		copy := *e
+		items = append(items, &copy)
+	}
+	f := feedFile{Items: items, Status: make(map[string]appStatus, len(c.status))}
+	for app, st := range c.status {
+		f.Status[app] = st
+	}
 	if !c.swept.IsZero() {
 		f.Swept = c.swept.UTC().Format(time.RFC3339)
 	}
-	data, err := json.Marshal(f)
 	c.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if dropped > 0 {
-		logf("cache full: dropped %d unread item(s) to stay under %d", dropped, maxFeedEntries)
-	}
 
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	if rev <= c.written {
 		return nil // a later snapshot already landed
+	}
+	if c.db != nil {
+		if err := c.db.replaceFeed(f); err != nil {
+			return err
+		}
+		c.written = rev
+		return nil
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
 		return err
@@ -373,51 +387,4 @@ func (c *feedCache) save() error {
 	}
 	c.written = rev
 	return nil
-}
-
-// prune bounds the file: read entries past feedCacheKeep go first, then the
-// oldest read ones, and only then unread ones. It reports how many unread
-// entries it had to drop, which is worth saying out loud — for a drained
-// service that is backlog nobody can fetch again. Caller holds the lock.
-func (c *feedCache) prune() int {
-	cut := time.Now().Add(-feedCacheKeep).UTC().Format(time.RFC3339)
-	kept := c.entries[:0]
-	for _, e := range c.entries {
-		if e.Read && e.Synced && e.ReadAt != "" && e.ReadAt < cut {
-			delete(c.byKey, core.Key(e.App, e.ID))
-			continue
-		}
-		kept = append(kept, e)
-	}
-	c.entries = kept
-
-	over := len(c.entries) - maxFeedEntries
-	if over <= 0 {
-		return 0
-	}
-	// Oldest first, and read before unread within that: entries are in the
-	// order they were first seen, so two passes over the slice do it.
-	droppedUnread := 0
-	for _, readPass := range []bool{true, false} {
-		for i := 0; i < len(c.entries) && over > 0; i++ {
-			e := c.entries[i]
-			if e == nil || e.Read != readPass {
-				continue
-			}
-			if !e.Read {
-				droppedUnread++
-			}
-			delete(c.byKey, core.Key(e.App, e.ID))
-			c.entries[i] = nil
-			over--
-		}
-	}
-	kept = c.entries[:0]
-	for _, e := range c.entries {
-		if e != nil {
-			kept = append(kept, e)
-		}
-	}
-	c.entries = kept
-	return droppedUnread
 }

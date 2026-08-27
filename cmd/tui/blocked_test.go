@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -151,6 +152,21 @@ func TestBlockerFilesEachPostOnce(t *testing.T) {
 	}
 	if got := b.caughtBy("reddit", "1"); got != "crypto" {
 		t.Errorf("caughtBy = %q, want the keyword that blocked it", got)
+	}
+}
+
+func TestBlockerRetainsRowsPastFormerLimit(t *testing.T) {
+	const formerLimit = 2000
+	b := loadBlocker(filepath.Join(t.TempDir(), "keywords.json"), filepath.Join(t.TempDir(), "blocked.json"))
+	items := make([]blockedItem, 0, formerLimit+1)
+	for i := range formerLimit + 1 {
+		items = append(items, blockedItem{Wire: item("reddit", fmt.Sprint(i), "blocked").Wire()})
+	}
+	if fresh, err := b.file(items); err != nil || fresh != len(items) {
+		t.Fatalf("filed %d of %d items: %v", fresh, len(items), err)
+	}
+	if got := b.count(); got != formerLimit+1 {
+		t.Fatalf("kept %d blocked items, want %d", got, formerLimit+1)
 	}
 }
 

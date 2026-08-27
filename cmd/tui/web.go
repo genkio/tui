@@ -72,17 +72,45 @@ func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 	if err != nil {
 		return err
 	}
-	saved := loadSaved("")
-	block := loadBlocker("", "")
+	db, syncPath, err := prepareFeedDB()
+	if err != nil {
+		return err
+	}
+	defer db.close()
+	saved, err := loadSavedDB(db)
+	if err != nil {
+		return err
+	}
+	block, err := loadBlockerDB(db)
+	if err != nil {
+		return err
+	}
 	rendered := newRenderedItems()
-	cache := loadFeedCache("")
+	cache, err := loadFeedCacheDB(db)
+	if err != nil {
+		return err
+	}
 	flusher := newMarkFlusher(root, cache)
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
+	if syncPath != "" {
+		sweep.after = func() error { return db.snapshot(syncPath) }
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go flusher.run(ctx)
-	go sweep.run(ctx)
+	var workers sync.WaitGroup
+	workers.Add(2)
+	defer func() {
+		stop()
+		workers.Wait()
+	}()
+	go func() {
+		defer workers.Done()
+		flusher.run(ctx)
+	}()
+	go func() {
+		defer workers.Done()
+		sweep.run(ctx)
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +194,9 @@ func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 	} else {
 		fmt.Printf("  fetching on demand only into %s\n", cache.path)
 	}
+	if syncPath != "" {
+		fmt.Printf("  syncing after each fetch to %s\n", syncPath)
+	}
 	if drain {
 		fmt.Println("  draining: a fetched Inoreader article is marked read there so the rest of the backlog can be reached")
 	}
@@ -246,16 +277,17 @@ func authedFeedApps(root string) []string {
 	return out
 }
 
-// feedWindow caps how many cards one feed page carries. The backlog can run to
-// thousands; a phone rendering all of them — bodies, posters, players — would
-// crawl. The header still counts the whole thing, and marking the window read
-// brings the next one, so the number is honest and the page stays light.
-//
-// Set well above a normal day's backlog, because a windowed page is the
-// confusing case: the header says one number and the mark-all button another,
-// and the difference has to be explained. Stills are lazy and players preload
-// nothing, so the cost of a card nobody scrolls to is a few dozen DOM nodes.
-const feedWindow = 500
+const (
+	listWindow = 100
+	deckWindow = 20
+)
+
+func clientWindow(deck bool) int {
+	if deck {
+		return deckWindow
+	}
+	return listWindow
+}
 
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
 // with ?json=1), served from the backlog cache rather than a fetch. Default
@@ -364,8 +396,9 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	}
 
 	total := len(items)
-	if len(items) > feedWindow {
-		items = items[:feedWindow]
+	window := clientWindow(deck)
+	if len(items) > window {
+		items = items[:window]
 	}
 	// Remember what this page showed so a save button can post back just an
 	// app+id and still persist the whole item, even for the uncached For You.

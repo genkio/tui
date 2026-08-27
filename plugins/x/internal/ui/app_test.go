@@ -28,7 +28,7 @@ func itemIDs(f core.Feed) []string {
 func newTestModel(t *testing.T, unreadOnly bool) Model {
 	t.Helper()
 	m := Model{
-		read:       readstore.Load(filepath.Join(t.TempDir(), "read.json")),
+		read:       readstore.Load(filepath.Join(t.TempDir(), "feed.db")),
 		feed:       core.NewFeed(core.NewTheme(true), false),
 		unreadOnly: unreadOnly,
 		cache:      map[x.Tab][]x.Tweet{},

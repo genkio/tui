@@ -210,6 +210,15 @@ func backlogCount(app string) (string, bool) {
 		return "", false
 	}
 	c := loadFeedCache("")
+	dbPath := core.FeedDBPath()
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) && core.SyncDir() != "" {
+		dbPath = filepath.Join(core.SyncDir(), "feed.db")
+	}
+	if _, err := os.Stat(dbPath); err == nil {
+		if fromDB, err := readFeedCacheDB(dbPath); err == nil {
+			c = fromDB
+		}
+	}
 	if c.sweptAt().IsZero() {
 		return "", false
 	}
@@ -711,7 +720,7 @@ func main() {
 	webFetch := flag.Duration("web-fetch", 10*time.Minute, "with --web: how often the server fetches every service into its backlog cache (jittered ±15%; 0 fetches only on demand)")
 	webDrain := flag.Bool("web-drain", true, "with --web: let the server mark a fetched Inoreader article read there, the only way past its first page (off keeps Inoreader's own unread list intact)")
 	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild)")
-	stateDir := flag.String("state-dir", os.Getenv("TUI_STATE_DIR"), "single dir for credentials, read state, and configs (e.g. ~/Dropbox/tui to sync between devices); env TUI_STATE_DIR")
+	syncDir := flag.String("sync-dir", os.Getenv("TUI_SYNC_DIR"), "sync snapshots, credentials, read state, and configs through this dir (e.g. ~/Dropbox/tui); env TUI_SYNC_DIR")
 	flag.Parse()
 
 	if *showVersion {
@@ -719,10 +728,10 @@ func main() {
 		return
 	}
 
-	// Export the state dir so every self-exec'd `tui <app>` subprocess resolves
+	// Export the sync dir so every self-exec'd `tui <app>` subprocess resolves
 	// the same env/read-state/config paths as the launcher.
-	if *stateDir != "" {
-		exportStateDir(*stateDir)
+	if *syncDir != "" {
+		exportSyncDir(*syncDir)
 	}
 
 	// root locates the dev source tree for per-plugin .env; an installed binary

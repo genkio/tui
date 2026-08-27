@@ -14,20 +14,28 @@ import (
 )
 
 // blocker is the block list: the keywords you have asked to keep out of the
-// feed, and the posts they caught. Both files live under the shared state dir
-// beside saved.json and feed.json, so --state-dir carries them along with
-// everything else worth syncing.
+// feed, and the posts they caught.
 //
 // A sweep screens what it fetched before the cache ever sees it, so a blocked
 // post never becomes backlog you have to triage away. It is filed rather than
-// dropped: blocked.json is a record you can read back — and delete when you've
-// seen enough of it — not a black hole.
+// dropped: the blocked-items table is a record you can read back and clear when
+// you have seen enough of it, not a black hole.
 type blocker struct {
 	mu       sync.Mutex
+	writeMu  sync.Mutex
 	wordPath string
 	itemPath string
+	db       *feedDB
 	words    []string
 	items    []blockedItem // newest block first
+}
+
+func loadBlockerDB(db *feedDB) (*blocker, error) {
+	words, items, err := db.loadBlocker()
+	if err != nil {
+		return nil, err
+	}
+	return &blocker{db: db, wordPath: db.path, itemPath: db.path, words: words, items: items}, nil
 }
 
 // blockedItem is one post the list caught, kept whole the way a saved one is:
@@ -53,15 +61,9 @@ const (
 	// rather than a sweep that quietly slows to a crawl.
 	maxKeywords   = 500
 	maxKeywordLen = 200
-	// maxBlocked bounds blocked.json the way maxFeedEntries bounds the cache.
-	// Nothing here is owed anything — it is the record of what you didn't want —
-	// so the oldest simply go.
-	maxBlocked = 2000
 )
 
-// loadBlocker reads both files, or their default locations when the paths are
-// empty. Missing or corrupt files yield an empty list rather than an error:
-// blocking is a convenience, never a reason to refuse to serve the page.
+// loadBlocker reads the legacy JSON stores used by tests and migration.
 func loadBlocker(wordPath, itemPath string) *blocker {
 	if wordPath == "" {
 		wordPath = core.StatePath("tui", "keywords.json")
@@ -214,9 +216,6 @@ func (b *blocker) file(caught []blockedItem) (int, error) {
 		return 0, nil
 	}
 	b.items = append(add, b.items...)
-	if len(b.items) > maxBlocked {
-		b.items = b.items[:maxBlocked]
-	}
 	b.mu.Unlock()
 	return len(add), b.saveItems()
 }
@@ -295,13 +294,20 @@ func blockedIndex(items []blockedItem, app, id string) int {
 }
 
 func (b *blocker) saveWords() error {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
 	b.mu.Lock()
-	words := b.words
+	words := append([]string(nil), b.words...)
+	items := append([]blockedItem(nil), b.items...)
+	db := b.db
 	if words == nil {
 		words = []string{}
 	}
-	data, err := json.MarshalIndent(keywordFile{Keywords: words}, "", "  ")
 	b.mu.Unlock()
+	if db != nil {
+		return db.replaceBlocker(words, items)
+	}
+	data, err := json.MarshalIndent(keywordFile{Keywords: words}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -309,9 +315,17 @@ func (b *blocker) saveWords() error {
 }
 
 func (b *blocker) saveItems() error {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
 	b.mu.Lock()
-	data, err := json.MarshalIndent(blockedFile{Items: b.items}, "", "  ")
+	words := append([]string(nil), b.words...)
+	items := append([]blockedItem(nil), b.items...)
+	db := b.db
 	b.mu.Unlock()
+	if db != nil {
+		return db.replaceBlocker(words, items)
+	}
+	data, err := json.MarshalIndent(blockedFile{Items: items}, "", "  ")
 	if err != nil {
 		return err
 	}

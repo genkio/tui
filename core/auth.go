@@ -103,7 +103,7 @@ func RunAuth(ctx context.Context, loginURL string, capture func(*Session) (map[s
 	if err != nil {
 		return err
 	}
-	// Always local, never under TUI_STATE_DIR: a live Chromium profile does not
+	// Always local, never under TUI_SYNC_DIR: a live Chromium profile does not
 	// survive file syncing, and the captured values land in UserEnvPath anyway.
 	profile := filepath.Join(userConfigDir(), "tui", "profile")
 	if err := os.MkdirAll(profile, 0o700); err != nil {

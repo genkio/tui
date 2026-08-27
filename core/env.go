@@ -22,11 +22,11 @@ func userConfigDir() string {
 }
 
 // UserEnvPath is the bundle's single credentials + settings file,
-// $TUI_STATE_DIR/env when a state dir is set, else $XDG_CONFIG_HOME/tui/env
+// $TUI_SYNC_DIR/env when a sync dir is set, else $XDG_CONFIG_HOME/tui/env
 // (default ~/.config/tui/env). Auth writes it; every `tui <app>` reads it, so
 // a Homebrew install needs no source tree.
 func UserEnvPath() string {
-	if dir := StateDir(); dir != "" {
+	if dir := SyncDir(); dir != "" {
 		return filepath.Join(dir, "env")
 	}
 	dir := userConfigDir()
@@ -115,13 +115,13 @@ func UpsertUserEnv(vars map[string]string) error {
 }
 
 // shellQuote single-quotes v the way sh needs, escaping any embedded quote as
-// '\'' so the value round-trips through unquoteEnv.
+// '\” so the value round-trips through unquoteEnv.
 func shellQuote(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }
 
 // unquoteEnv undoes the shell quoting shellQuote writes (KEY='value', with an
-// embedded ' escaped as '\''), and plain double quotes, leaving bare values.
+// embedded ' escaped as '\”), and plain double quotes, leaving bare values.
 func unquoteEnv(v string) string {
 	if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
 		return strings.ReplaceAll(v[1:len(v)-1], `'\''`, `'`)

@@ -425,3 +425,17 @@ func TestKickDoesNotBlock(t *testing.T) {
 		t.Fatal("kick blocked")
 	}
 }
+
+func TestSweepRunsAfterHook(t *testing.T) {
+	c := loadFeedCache(filepath.Join(t.TempDir(), "feed.json"))
+	s := newSweeper(t.TempDir(), c, nil, nil, false, 0)
+	called := 0
+	s.after = func() error {
+		called++
+		return nil
+	}
+	s.sweep(context.Background(), true)
+	if called != 1 {
+		t.Fatalf("after hook called %d times, want 1", called)
+	}
+}

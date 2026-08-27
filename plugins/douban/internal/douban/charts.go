@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/genkio/tui/core"
+	"github.com/genkio/tui/core/chartcache"
 )
 
 // chartItems is how many entries to ask a chart for. The weekly ones hold ten;
@@ -34,6 +33,7 @@ func (c *Client) Charts(ctx context.Context, ids []string, now time.Time) []Stat
 		return nil
 	}
 	cache := loadChartCache()
+	defer cache.Close()
 	var out []Status
 	seen := map[string]bool{}
 	dirty := false
@@ -61,7 +61,7 @@ func (c *Client) Charts(ctx context.Context, ids []string, now time.Time) []Stat
 		}
 	}
 	if dirty {
-		_ = cache.save()
+		_ = cache.Save()
 	}
 	return out
 }
@@ -228,48 +228,8 @@ func sortByRecency(statuses []Status) {
 	})
 }
 
-// chartCache is the fetched charts, kept between runs. It is a cache and
-// nothing else: deleting the file costs one refetch.
-type chartCache struct {
-	path   string
-	Charts map[string]cachedChart `json:"charts"`
-}
+type cachedChart = chartcache.Entry
 
-type cachedChart struct {
-	FetchedAt time.Time       `json:"fetched_at"`
-	Body      json.RawMessage `json:"body"`
-}
-
-// chartCachePath sits beside the read store: $TUI_STATE_DIR/state/douban-tui/charts.json.
-func chartCachePath() string { return core.StatePath("douban-tui", "charts.json") }
-
-func loadChartCache() *chartCache {
-	c := &chartCache{path: chartCachePath(), Charts: map[string]cachedChart{}}
-	data, err := os.ReadFile(c.path)
-	if err != nil {
-		return c
-	}
-	var f chartCache
-	if json.Unmarshal(data, &f) == nil && f.Charts != nil {
-		c.Charts = f.Charts
-	}
-	return c
-}
-
-func (c *chartCache) save() error {
-	if c.path == "" {
-		return nil
-	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
-		return err
-	}
-	tmp := c.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.path)
+func loadChartCache() *chartcache.Cache {
+	return chartcache.Load("", "douban", core.StatePath("douban-tui", "charts.json"))
 }

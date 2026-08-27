@@ -105,15 +105,23 @@ func TestBadgeStates(t *testing.T) {
 // web server's backlog instead. Nothing else does, and a machine that has
 // never run --web is unaffected.
 func TestBacklogCount(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("TUI_STATE_DIR", dir)
+	t.Setenv("TUI_SYNC_DIR", "")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	// No cache yet: fall through to the service's own --count.
 	if _, ok := backlogCount("inoreader"); ok {
 		t.Fatal("an unswept cache should not answer for the service")
 	}
 
-	c := loadFeedCache("")
+	db, _, err := prepareFeedDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	c, err := loadFeedCacheDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	c.upsert([]core.Item{
 		{App: "inoreader", ID: "1", Title: "a"},
@@ -125,7 +133,6 @@ func TestBacklogCount(t *testing.T) {
 	if err := c.save(); err != nil {
 		t.Fatal(err)
 	}
-
 	got, ok := backlogCount("inoreader")
 	if !ok || got != "1" {
 		t.Fatalf("backlogCount(inoreader) = %q, %v; want \"1\", true", got, ok)

@@ -59,8 +59,8 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// DefaultPath is $TUI_STATE_DIR/config/inoreader-tui/config.toml when a shared
-// state dir is set, else $XDG_CONFIG_HOME/inoreader-tui/config.toml, falling back
+// DefaultPath is $TUI_SYNC_DIR/config/inoreader-tui/config.toml when a shared
+// sync dir is set, else $XDG_CONFIG_HOME/inoreader-tui/config.toml, falling back
 // to ~/.config/inoreader-tui/config.toml.
 func DefaultPath() string {
 	return core.ConfigPath("inoreader-tui", "config.toml")

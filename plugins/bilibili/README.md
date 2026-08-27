@@ -106,8 +106,7 @@ through a login.
 
 ## Read tracking
 
-bilibili exposes no read state for the 动态 timeline, so bilibili-tui keeps one
-locally: ids of posts you've seen live in
-`~/.local/state/bilibili-tui/read.json` (capped, pruned oldest-first). The
+bilibili exposes no read state for the 动态 timeline, so bilibili-tui keeps post
+ids in `~/.local/state/tui/feed.db` without an application-level cap. The
 launcher's merged "all" view flushes into the same store, so read state stays
 consistent everywhere.

@@ -49,8 +49,8 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// DefaultPath is $TUI_STATE_DIR/config/reddit-tui/config.toml when a shared
-// state dir is set, else $XDG_CONFIG_HOME/reddit-tui/config.toml, falling back
+// DefaultPath is $TUI_SYNC_DIR/config/reddit-tui/config.toml when a shared
+// sync dir is set, else $XDG_CONFIG_HOME/reddit-tui/config.toml, falling back
 // to ~/.config/reddit-tui/config.toml.
 func DefaultPath() string {
 	return core.ConfigPath("reddit-tui", "config.toml")

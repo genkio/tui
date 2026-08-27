@@ -6,27 +6,27 @@ import (
 	"testing"
 )
 
-func TestStateDirUnset(t *testing.T) {
-	t.Setenv("TUI_STATE_DIR", "")
-	if got := StateDir(); got != "" {
-		t.Fatalf("unset TUI_STATE_DIR should yield empty, got %q", got)
+func TestSyncDirUnset(t *testing.T) {
+	t.Setenv("TUI_SYNC_DIR", "")
+	if got := SyncDir(); got != "" {
+		t.Fatalf("unset TUI_SYNC_DIR should yield empty, got %q", got)
 	}
 }
 
-func TestStateDirExpandsTilde(t *testing.T) {
-	t.Setenv("TUI_STATE_DIR", "~/Dropbox/tui")
+func TestSyncDirExpandsTilde(t *testing.T) {
+	t.Setenv("TUI_SYNC_DIR", "~/Dropbox/tui")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("no home dir")
 	}
 	want := filepath.Join(home, "Dropbox", "tui")
-	if got := StateDir(); got != want {
-		t.Fatalf("StateDir() = %q, want %q", got, want)
+	if got := SyncDir(); got != want {
+		t.Fatalf("SyncDir() = %q, want %q", got, want)
 	}
 }
 
-func TestPathsFollowStateDir(t *testing.T) {
-	t.Setenv("TUI_STATE_DIR", "/sync/tui")
+func TestPathsFollowSyncDir(t *testing.T) {
+	t.Setenv("TUI_SYNC_DIR", "/sync/tui")
 	if got, want := UserEnvPath(), filepath.Join("/sync/tui", "env"); got != want {
 		t.Fatalf("UserEnvPath() = %q, want %q", got, want)
 	}
@@ -39,7 +39,7 @@ func TestPathsFollowStateDir(t *testing.T) {
 }
 
 func TestPathsFallBackToXDG(t *testing.T) {
-	t.Setenv("TUI_STATE_DIR", "")
+	t.Setenv("TUI_SYNC_DIR", "")
 	t.Setenv("XDG_STATE_HOME", "/xdg/state")
 	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
 	if got, want := StatePath("x-tui", "read.json"), filepath.Join("/xdg/state", "x-tui", "read.json"); got != want {

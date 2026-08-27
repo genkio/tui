@@ -90,15 +90,14 @@ reader does. A post is marked read when you scroll past it (`j`/`k`), expand it
 (`space`), or press `r`; read posts render greyed. `K` keeps a post unread so
 scrolling won't touch it (`K` again unlocks).
 
-Marks persist to `~/.local/state/x-tui/read.json`
-(`$XDG_STATE_HOME/x-tui/read.json` if set), so a post you already saw stays read
+Marks persist in `~/.local/state/tui/feed.db`
+(`$XDG_STATE_HOME/tui/feed.db` if set), so a post you already saw stays read
 across refreshes and restarts. In the default **unread-only** mode read posts
 grey out in place and drop off on the next refresh, leaving only what's new;
 press `u` to switch to showing everything with read posts merely greyed. Set
 `XTUI_UNREAD_ONLY=false` to make show-all the default.
 
-The store is capped to the most recent 20,000 ids and pruned automatically;
-deleting the file just resets everything to unread.
+Read markers are retained without an application-level cap.
 
 ## Authentication
 

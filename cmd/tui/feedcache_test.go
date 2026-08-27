@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -194,90 +194,26 @@ func TestFeedCacheToleratesRubbish(t *testing.T) {
 	}
 }
 
-// A read entry lingers long enough that a service still listing it can't
-// resurrect it, then it goes. An unsynced one stays regardless: its app has
-// not been told yet.
-func TestFeedCachePrunesStaleReads(t *testing.T) {
-	c := newTestCache(t)
-	old := time.Now().Add(-30 * 24 * time.Hour)
-	now := time.Now()
-	c.upsert([]core.Item{item("x", "1", "old and flushed"), item("x", "2", "old and pending"), item("x", "3", "unread")}, now)
-	c.markRead("x", []string{"1", "2"}, old)
-	c.markSynced("x", []string{"1"})
-
-	if err := c.save(); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := c.item("x", "1", now); ok {
-		t.Error("a long-flushed read entry should have been pruned")
-	}
-	if _, ok := c.item("x", "2", now); !ok {
-		t.Error("an unflushed read entry must stay until its app is told")
-	}
-	if _, ok := c.item("x", "3", now); !ok {
-		t.Error("an unread entry must never be pruned by age")
-	}
-}
-
-// Over the cap, read entries go before unread ones and the oldest go first, so
-// the backlog you have not got to survives longest.
-func TestFeedCachePrunesReadBeforeUnread(t *testing.T) {
-	const over = 10
+func TestFeedCacheRetainsOldAndLargeHistory(t *testing.T) {
+	const formerLimit = 6000
 	c := newTestCache(t)
 	now := time.Now()
-	items := make([]core.Item, 0, maxFeedEntries+over)
-	for i := range maxFeedEntries + over {
-		items = append(items, item("x", strconv.Itoa(i), "post"))
+	items := make([]core.Item, 0, formerLimit+1)
+	for i := range formerLimit + 1 {
+		items = append(items, item("x", fmt.Sprint(i), "post"))
 	}
 	c.upsert(items, now)
-	// The oldest 20 are read and flushed, so there is more than enough there to
-	// absorb the overflow without touching anything unread.
-	const readCount = 20
-	var read []string
-	for i := range readCount {
-		read = append(read, strconv.Itoa(i))
-	}
-	c.markRead("x", read, now)
-	c.markSynced("x", read)
-
-	if err := c.save(); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(c.entries); got != maxFeedEntries {
-		t.Fatalf("kept %d entries, want %d", got, maxFeedEntries)
-	}
-	if got, want := c.unreadCount(), maxFeedEntries+over-readCount; got != want {
-		t.Fatalf("unread = %d, want %d; pruning took unread items while read ones were available", got, want)
-	}
-	// Oldest read first, and the newest of the read ones is still here: the
-	// overflow was smaller than what the read entries could cover.
-	if _, ok := c.item("x", "0", now); ok {
-		t.Error("the oldest read entry should have gone first")
-	}
-	if _, ok := c.item("x", strconv.Itoa(readCount-1), now); !ok {
-		t.Error("pruning took more read entries than the overflow needed")
-	}
-}
-
-// The index has to survive pruning, or a later lookup addresses the wrong entry.
-func TestFeedCacheIndexSurvivesPrune(t *testing.T) {
-	c := newTestCache(t)
-	now := time.Now()
 	old := now.Add(-30 * 24 * time.Hour)
-	c.upsert([]core.Item{item("x", "1", "a"), item("x", "2", "b"), item("x", "3", "c")}, now)
-	c.markRead("x", []string{"1"}, old)
-	c.markSynced("x", []string{"1"})
+	c.markRead("x", []string{"0"}, old)
+	c.markSynced("x", []string{"0"})
 	if err := c.save(); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"2", "3"} {
-		it, ok := c.item("x", id, now)
-		if !ok || it.ID != id {
-			t.Fatalf("after pruning, x/%s resolves to %+v (ok=%v)", id, it, ok)
-		}
+	if got := len(c.entries); got != formerLimit+1 {
+		t.Fatalf("kept %d entries, want %d", got, formerLimit+1)
 	}
-	if len(c.byKey) != len(c.entries) {
-		t.Fatalf("index has %d keys for %d entries", len(c.byKey), len(c.entries))
+	if _, ok := c.item("x", "0", now); !ok {
+		t.Fatal("old read entry was deleted")
 	}
 }
 

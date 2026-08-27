@@ -91,6 +91,7 @@ type sweeper struct {
 	block *blocker
 	drain bool
 	every time.Duration
+	after func() error
 	fetch fetchFunc
 	mark  markFunc
 
@@ -187,6 +188,11 @@ func (s *sweeper) sweep(ctx context.Context, first bool) {
 	// app: whatever was down for the flush may well be up again by now.
 	if s.flush != nil {
 		s.flush.kick()
+	}
+	if s.after != nil {
+		if err := s.after(); err != nil {
+			logf("backup database: %v", err)
+		}
 	}
 }
 
