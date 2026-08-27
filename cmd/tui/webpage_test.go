@@ -462,6 +462,24 @@ func TestLinkify(t *testing.T) {
 	}
 }
 
+func TestLinkifyMarkdownLink(t *testing.T) {
+	in := `website: [https://coveryourtracks.eff.org/](https://coveryourtracks.eff.org/), firefox`
+	out := linkify(in)
+	if !strings.Contains(out, `href="https://coveryourtracks.eff.org/"`) {
+		t.Fatalf("markdown destination was not linked: %s", out)
+	}
+	if strings.Count(out, `<a class="link"`) != 1 {
+		t.Fatalf("markdown link rendered as more than one anchor: %s", out)
+	}
+	if strings.Contains(out, `](`) {
+		t.Fatalf("markdown syntax leaked into the page: %s", out)
+	}
+	safe := linkify(`[<b>unsafe</b>](https://example.com/?a=1&b=2)`)
+	if !strings.Contains(safe, `&lt;b&gt;unsafe&lt;/b&gt;`) || !strings.Contains(safe, `a=1&amp;b=2`) {
+		t.Fatalf("markdown link was not escaped: %s", safe)
+	}
+}
+
 func TestRenderPageEmptyAndNote(t *testing.T) {
 	// No authed apps: the page tells the user to log in.
 	p := renderPage(t, nil, nil, nil, "following", "")

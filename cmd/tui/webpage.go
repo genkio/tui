@@ -983,16 +983,29 @@ func redgifID(texts ...string) string {
 // linkRe matches a URL plus any trailing punctuation (so "see http://x.com."
 // renders the period as plain text, not part of the link).
 var linkRe = regexp.MustCompile(`(https?://[^\s<>"']+)([.,;:!?)\]}"']*)`)
+var markdownLinkRe = regexp.MustCompile(`\[([^\]\r\n]+)\]\((https?://[^\s<>"']+)\)`)
 
 // linkify HTML-escapes text and turns embedded URLs into clickable links that
 // open in a new tab; non-URL text is escaped as before.
 func linkify(s string) string {
 	var b strings.Builder
 	last := 0
+	for _, m := range markdownLinkRe.FindAllStringSubmatchIndex(s, -1) {
+		b.WriteString(linkifyURLs(s[last:m[0]]))
+		b.WriteString(linkAnchor(s[m[4]:m[5]], s[m[2]:m[3]]))
+		last = m[1]
+	}
+	b.WriteString(linkifyURLs(s[last:]))
+	return b.String()
+}
+
+func linkifyURLs(s string) string {
+	var b strings.Builder
+	last := 0
 	for _, m := range linkRe.FindAllStringSubmatchIndex(s, -1) {
 		b.WriteString(escape(s[last:m[2]])) // text before the URL
 		u := s[m[2]:m[3]]
-		b.WriteString(`<a class="link" href="` + escape(u) + `" target="_blank" rel="noopener" title="` + escape(u) + `">` + escape(linkLabel(u)) + `</a>`)
+		b.WriteString(linkAnchor(u, linkLabel(u)))
 		if m[4] >= 0 { // trailing punctuation kept as plain text
 			b.WriteString(escape(s[m[4]:m[5]]))
 		}
@@ -1000,6 +1013,10 @@ func linkify(s string) string {
 	}
 	b.WriteString(escape(s[last:]))
 	return b.String()
+}
+
+func linkAnchor(url, label string) string {
+	return `<a class="link" href="` + escape(url) + `" target="_blank" rel="noopener" title="` + escape(url) + `">` + escape(label) + `</a>`
 }
 
 // linkLabel trims the scheme/www and shortens a URL for link text, keeping the
