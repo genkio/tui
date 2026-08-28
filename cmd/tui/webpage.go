@@ -239,6 +239,7 @@ type cardData struct {
 	Author      string // blank when it duplicates Source
 	Age         string
 	Title       string // blank when x carries the full text as both title and body
+	ListTitle   string
 	PreviewBody template.HTML
 	FullBody    template.HTML
 	URL         string
@@ -261,6 +262,8 @@ type cardData struct {
 	// is the part you asked not to see, and the keyword that caught it.
 	Compact bool
 	Keyword string
+
+	ShowActions bool
 }
 
 // cardImages prepares an app's stills for the card, sending the ones the
@@ -327,7 +330,7 @@ func buildPageData(in pageInput) pageData {
 			continue
 		}
 		if in.savedView && in.savedCompact {
-			cards = append(cards, buildSavedCompactCard(it))
+			cards = append(cards, buildSavedCompactCard(it, cl))
 			continue
 		}
 		// In the saved view every card is saved by definition; in the feed ask
@@ -472,13 +475,12 @@ func buildBlockedCard(it core.Item, why string) cardData {
 	}
 }
 
-func buildSavedCompactCard(it core.Item) cardData {
-	card := buildBlockedCard(it, "")
-	if card.Title == "" {
-		card.Title = strings.TrimSpace(it.Title)
-	}
-	if card.Title == "" {
-		card.Title = strings.TrimSpace(it.Body)
+func buildSavedCompactCard(it core.Item, cl clips) cardData {
+	card := buildCard(it, true, cl)
+	card.Compact = true
+	card.ListTitle = strings.TrimSpace(it.Title)
+	if card.ListTitle == "" {
+		card.ListTitle = strings.TrimSpace(it.Body)
 	}
 	return card
 }
@@ -510,6 +512,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 		Images: cardImages(it.Images),
 		Saved:  starred,
 	}
+	c.ShowActions = true
 	// Two content panels: a clipped preview and a full version the footer's
 	// expand toggle reveals. linkify escapes, so the HTML is safe as-is.
 	if body != "" {

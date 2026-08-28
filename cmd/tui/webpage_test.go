@@ -1346,7 +1346,7 @@ func TestSavedPageAndButton(t *testing.T) {
 		t.Fatal("saved view should flag itself so scroll-to-read stays off")
 	}
 
-	if err := store.add(core.Item{App: "reddit", ID: "7", Title: "kept", Body: "compact-hidden-body", Source: "r/go", Video: "https://video.test/7.mp4"}, time.Now()); err != nil {
+	if err := store.add(core.Item{App: "reddit", ID: "7", Title: "kept", Body: "compact-hidden-body", Source: "r/go", URL: "https://reddit.test/7", Video: "https://video.test/7.mp4"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	page := renderSavedPage(t, store)
@@ -1370,9 +1370,14 @@ func TestSavedPageAndButton(t *testing.T) {
 	if !strings.Contains(compact, `id="savedmode"`) || !strings.Contains(compact, `>compact</a>`) {
 		t.Fatalf("the compact saved view should say which mode it is in: %s", compact)
 	}
-	for _, absent := range []string{"compact-hidden-body", `<video`, `<button class="save"`, `class="tagrows"`} {
-		if strings.Contains(compact, absent) {
-			t.Fatalf("compact saved rows should contain titles only, found %q: %s", absent, compact)
+	for _, content := range []string{"compact-hidden-body", `<video`, `class="tagrows"`} {
+		if !strings.Contains(compact, content) {
+			t.Fatalf("compact saved rows should retain hidden detail %q: %s", content, compact)
+		}
+	}
+	for _, action := range []string{`class="open"`, `class="save"`, `data-saved="1"`, `>saved</button>`, `class="share"`, `class="detail"`, `>details</button>`} {
+		if !strings.Contains(compact, action) {
+			t.Fatalf("compact saved rows should retain footer action %q: %s", action, compact)
 		}
 	}
 	if !strings.Contains(compact, "kept") {
@@ -1381,7 +1386,7 @@ func TestSavedPageAndButton(t *testing.T) {
 	if got := savedModeHref(url.Values{"saved": {"1"}, "compact": {"1"}, "app": {"reddit"}}, true); got != "/?app=reddit&saved=1" {
 		t.Fatalf("full-mode href = %q, want saved filter preserved", got)
 	}
-	if got := buildSavedCompactCard(core.Item{App: "x", ID: "8", Title: "post text", Body: "post text"}).Title; got != "post text" {
+	if got := buildSavedCompactCard(core.Item{App: "x", ID: "8", Title: "post text", Body: "post text"}, listClips).ListTitle; got != "post text" {
 		t.Fatalf("compact untitled post = %q, want its text as the title", got)
 	}
 	xCompact := renderInput(t, pageInput{
