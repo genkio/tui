@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +14,10 @@ import (
 func TestTerminalFeedUsesServerState(t *testing.T) {
 	cache := newTestCache(t)
 	now := time.Now()
-	cache.upsert([]core.Item{{App: "bilibili", ID: "7", Title: "clip"}}, now)
+	cache.upsert([]core.Item{{App: "bilibili", ID: "7", Title: "clip", URL: "https://www.bilibili.com/video/BV1GJ411x7h7"}}, now)
 	flusher := &markFlusher{cache: cache, wake: make(chan struct{}, 1)}
+	saved := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	rendered := newRenderedItems()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("json") != "1" || r.URL.Query().Get("order") != "desc" {
@@ -25,8 +28,8 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		handleMark(w, r, cache, flusher)
 	})
-	mux.HandleFunc("/unmark", func(w http.ResponseWriter, r *http.Request) {
-		handleUnmark(w, r, cache)
+	mux.HandleFunc("/save", func(w http.ResponseWriter, r *http.Request) {
+		handleSave(w, r, saved, cache, rendered)
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -38,6 +41,18 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	if len(feed.Items) != 1 || feed.Items[0].App != "bilibili" || feed.Items[0].ID != "7" {
 		t.Fatalf("initial terminal feed = %+v", feed.Items)
 	}
+	if feed.Items[0].Type != "video" {
+		t.Fatalf("terminal API type = %q, want video", feed.Items[0].Type)
+	}
+	if err := saveServerItem(server.URL, feed.Items[0].Item(now)); err != nil {
+		t.Fatal(err)
+	}
+	if !saved.has("bilibili", "7") {
+		t.Fatal("terminal save did not reach the server's saved store")
+	}
+	if cache.unreadCount() != 1 {
+		t.Fatal("saving should not change unread state")
+	}
 	if err := markServerRead(server.URL, "bilibili", []string{"7"}); err != nil {
 		t.Fatal(err)
 	}
@@ -47,16 +62,6 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	}
 	if len(feed.Items) != 0 {
 		t.Fatalf("terminal read did not leave the shared backlog: %+v", feed.Items)
-	}
-	if err := unmarkServerRead(server.URL, "bilibili", "7"); err != nil {
-		t.Fatal(err)
-	}
-	feed, err = fetchServerFeed(server.URL, "following")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(feed.Items) != 1 || feed.Items[0].ID != "7" {
-		t.Fatalf("terminal unread did not restore the shared backlog: %+v", feed.Items)
 	}
 	select {
 	case <-flusher.wake:

@@ -417,6 +417,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	sortItems(items, asc)
 
 	if q.Get("json") == "1" {
+		rendered.put(items)
 		w.Header().Set("Content-Type", "application/json")
 		meta := feedAPIResponse{Apps: apps, Warn: warn, Fetching: sweep.sweeping(), Capped: capped}
 		if updated := cache.sweptAt(); !updated.IsZero() {

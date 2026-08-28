@@ -52,7 +52,7 @@ tui all --server http://100.121.244.89:8080
 terminal client:
 
 - loads items, counts, and source status from the feed service;
-- sends read and unread actions to the service;
+- sends scroll-driven reads and explicit saves to the service;
 - reloads the service cache when the user asks to refresh;
 - does not fetch source plugins directly;
 - does not open `feed.db`; and

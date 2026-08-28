@@ -120,10 +120,11 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case unmarkFlushedMsg:
+	case savedMsg:
 		if msg.err != nil {
-			m.feed.RevertKeep(msg.item.Key())
-			m.setStatus("could not keep item unread: "+friendlyAllError(msg.err), true)
+			m.setStatus("could not save item: "+friendlyAllError(msg.err), true)
+		} else {
+			m.setStatus("Saved.", false)
 		}
 		return m, nil
 
@@ -204,7 +205,7 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 	case key.Matches(msg, m.keys.Expand):
 		opened := m.feed.ToggleCursor()
 		it, ok := m.feed.Selected()
-		if !opened || !ok || m.feed.IsRead(it.Key()) || m.feed.IsKept(it.Key()) {
+		if !opened || !ok || m.feed.IsRead(it.Key()) {
 			return m, nil
 		}
 		return m, m.markItem(it)
@@ -213,31 +214,13 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		m.feed.ToggleSource()
 		return m, nil
 
-	case key.Matches(msg, m.keys.Mark):
-		it, ok := m.feed.Selected()
-		if !ok || m.feed.IsRead(it.Key()) {
-			return m, nil
-		}
-		if m.feed.IsKept(it.Key()) {
-			m.setStatus("Kept unread; press K to unlock first.", true)
-			return m, nil
-		}
-		m.clearStatus()
-		return m, m.markItem(it)
-
-	case key.Matches(msg, m.keys.Keep):
+	case key.Matches(msg, m.keys.Save):
 		it, ok := m.feed.Selected()
 		if !ok {
 			return m, nil
 		}
-		if kept, _ := m.feed.ToggleKeep(); kept {
-			m.unqueue(it)
-			m.setStatus("Kept unread; scrolling won't mark it read. K again to unlock.", false)
-			return m, unmarkServer(m.server, it)
-		} else {
-			m.setStatus("Keep removed.", false)
-		}
-		return m, nil
+		m.clearStatus()
+		return m, saveServer(m.server, it)
 
 	case key.Matches(msg, m.keys.OpenURL):
 		if it, ok := m.feed.Selected(); ok {
@@ -281,7 +264,7 @@ func (m *allModel) moveMarkingRead(delta int) tea.Cmd {
 	before := m.feed.Cursor()
 	leaving, ok := m.feed.Selected()
 	m.feed.MoveCursor(delta)
-	if !ok || m.feed.Cursor() == before || m.feed.IsRead(leaving.Key()) || m.feed.IsKept(leaving.Key()) {
+	if !ok || m.feed.Cursor() == before || m.feed.IsRead(leaving.Key()) {
 		return nil
 	}
 	return m.markItem(leaving)
@@ -298,18 +281,6 @@ func (m *allModel) markItem(it core.Item) tea.Cmd {
 	}
 	m.flushArmed = true
 	return scheduleFlush()
-}
-
-// unqueue drops a not-yet-flushed mark so keeping an item unread cancels it. A
-// mark already flushed to the app's store can't be undone (no mark-unread).
-func (m *allModel) unqueue(it core.Item) {
-	ids := m.pending[it.App]
-	for i, id := range ids {
-		if id == it.ID {
-			m.pending[it.App] = append(ids[:i], ids[i+1:]...)
-			return
-		}
-	}
 }
 
 // drainPending fires one flush per app for everything queued, clearing the

@@ -86,11 +86,13 @@ merged and sorted newest-first, each row tagged with a colored source chip
 
 Triage works exactly like the individual apps: `j`/`k` move (and mark the row
 you leave read), `space` expands the body inline, `o`/`O` read it in carbonyl,
-`b` opens the browser, `c` copies the URL, `tab` shows the source names
+`b` opens the browser, `c` copies the URL, `s` saves it, and `tab` shows the source names
 (`@handle` / feed title, hidden by default so rows are all content), `R`
 reloads the service cache, and `q` quits. Marking a row read posts it to the
 service, which records it in `feed.db` and flushes it to the source in the
 background. The web and terminal clients therefore read the same backlog.
+Video titles start with `🎬`; audio titles start with `🔊`. Text items have no
+prefix.
 
 Once you've read everything, `all` offers one more thing: if x is logged in and
 you were on its **Following** feed, it shows *"All read — press `f` to continue

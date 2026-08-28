@@ -32,7 +32,7 @@ type (
 		ids []string
 		err error
 	}
-	unmarkFlushedMsg struct {
+	savedMsg struct {
 		item core.Item
 		err  error
 	}
@@ -141,14 +141,16 @@ func markServerRead(server, app string, ids []string) error {
 	return nil
 }
 
-func unmarkServerRead(server, app, id string) error {
-	u, err := serverEndpoint(server, "/unmark")
+func saveServerItem(server string, item core.Item) error {
+	u, err := serverEndpoint(server, "/save")
 	if err != nil {
 		return err
 	}
-	res, err := feedMutationHTTP.PostForm(u.String(), url.Values{"app": {app}, "id": {id}})
+	res, err := feedMutationHTTP.PostForm(u.String(), url.Values{
+		"app": {item.App}, "id": {item.ID}, "save": {"1"},
+	})
 	if err != nil {
-		return fmt.Errorf("cannot restore unread through feed server %s: %w", server, err)
+		return fmt.Errorf("cannot save through feed server %s: %w", server, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
@@ -157,9 +159,9 @@ func unmarkServerRead(server, app, id string) error {
 	return nil
 }
 
-func unmarkServer(server string, item core.Item) tea.Cmd {
+func saveServer(server string, item core.Item) tea.Cmd {
 	return func() tea.Msg {
-		return unmarkFlushedMsg{item: item, err: unmarkServerRead(server, item.App, item.ID)}
+		return savedMsg{item: item, err: saveServerItem(server, item)}
 	}
 }
 

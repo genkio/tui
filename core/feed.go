@@ -293,6 +293,9 @@ func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 	if oneLine == "" {
 		oneLine = "(no title)"
 	}
+	if media := mediaPrefix(it); media != "" {
+		oneLine = media + " " + oneLine
+	}
 	title := titleSt.Render(truncate(oneLine, avail))
 
 	used := lipgloss.Width(gutter) + chipSegW + srcSegW + lipgloss.Width(title) + lipgloss.Width(age)
@@ -307,6 +310,17 @@ func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 		lines = append(lines, f.renderBody(it)...)
 	}
 	return lines
+}
+
+func mediaPrefix(it Item) string {
+	switch {
+	case it.Type == "video", it.Type == "" && (it.Video != "" || it.Quote != nil && it.Quote.Video != ""):
+		return "🎬"
+	case it.Type == "audio", it.Type == "" && it.Audio != "":
+		return "🔊"
+	default:
+		return ""
+	}
 }
 
 func (f Feed) renderBody(it Item) []string {

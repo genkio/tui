@@ -80,6 +80,25 @@ func TestSourceColumnHiddenUntilToggled(t *testing.T) {
 	}
 }
 
+func TestMediaTypePrefixesTitle(t *testing.T) {
+	f := NewFeed(NewTheme(true), false)
+	f.SetSize(60, 8)
+	f.SetItems([]Item{
+		{App: "x", ID: "1", Type: "video", Title: "watch this"},
+		{App: "inoreader", ID: "2", Type: "audio", Title: "listen to this"},
+		{App: "reddit", ID: "3", Type: "text", Title: "read this"},
+	}, true)
+	view := f.View()
+	for _, want := range []string{"🎬 watch this", "🔊 listen to this", "read this"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("feed missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "🎬 read this") || strings.Contains(view, "🔊 read this") {
+		t.Fatalf("text item gained a media prefix:\n%s", view)
+	}
+}
+
 // The terminal draws one body string, so an embedded post has to be flattened
 // back into it when the row expands.
 func TestExpandedRowShowsQuote(t *testing.T) {

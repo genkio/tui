@@ -1074,7 +1074,9 @@ func linkLabel(u string) string {
 func writeJSONItems(w io.Writer, items []core.Item, failed []string, response feedAPIResponse) {
 	response.Items = make([]core.Wire, 0, len(items))
 	for _, it := range items {
-		response.Items = append(response.Items, it.Wire())
+		wire := it.Wire()
+		wire.Type = itemType(it)
+		response.Items = append(response.Items, wire)
 	}
 	response.Failed = failed
 	_ = json.NewEncoder(w).Encode(response)

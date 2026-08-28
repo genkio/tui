@@ -23,6 +23,7 @@ type Item struct {
 	URL     string
 	Age     string
 	At      time.Time // publish time for the merged sort; zero sinks to the bottom
+	Type    string    // text, video, or audio when the feed service classified it
 	Video   string    // direct mp4 of an attached video, when the app provides one
 	Poster  string    // still frame shown before Video plays
 	VidSecs int       // Video's length in seconds; 0 when the app reported none
@@ -73,6 +74,7 @@ type Wire struct {
 	URL     string   `json:"url,omitempty"`
 	Age     string   `json:"age,omitempty"`
 	TS      string   `json:"ts,omitempty"` // RFC3339 publish time, for the merged sort
+	Type    string   `json:"type,omitempty"`
 	Video   string   `json:"video,omitempty"`
 	Poster  string   `json:"poster,omitempty"`
 	VidSecs int      `json:"vidsecs,omitempty"`
@@ -95,6 +97,7 @@ func (w Wire) Item(now time.Time) Item {
 		URL:     w.URL,
 		Age:     w.Age,
 		At:      SortTime(w.TS, w.Age, now),
+		Type:    w.Type,
 		Video:   w.Video,
 		Poster:  w.Poster,
 		VidSecs: w.VidSecs,
@@ -116,6 +119,7 @@ func (it Item) Wire() Wire {
 		Author:  it.Author,
 		URL:     it.URL,
 		Age:     it.Age,
+		Type:    it.Type,
 		Video:   it.Video,
 		Poster:  it.Poster,
 		VidSecs: it.VidSecs,
