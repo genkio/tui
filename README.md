@@ -1,7 +1,7 @@
 # tui
 
-A small launcher for my terminal apps, each a cookie-stealth TUI over a site I
-read daily:
+A feed service with terminal and web clients, plus standalone cookie-stealth
+TUIs for the sites I read daily:
 
 | App                      | What it is                                  |
 | ------------------------ | ------------------------------------------- |
@@ -20,7 +20,8 @@ The whole family ships as one binary; each app is a plugin under `plugins/`.
 
 ```sh
 brew install genkio/tap/tui
-tui                    # open the picker
+tui serve              # start the feed service
+tui                    # open its terminal client
 ```
 
 Log into an app with `tui <app> --auth` (e.g. `tui x --auth`): it opens a
@@ -31,12 +32,13 @@ session, so install one if you haven't. Credentials and settings live in
 
 ### Syncing state between devices
 
-Point `TUI_SYNC_DIR` (or `tui --sync-dir <dir>`) at a synced folder to carry
+Point `TUI_SYNC_DIR` (or `tui serve --sync-dir <dir>`) at a synced folder to carry
 sessions, settings, read marks, and a snapshot of the feed database across
 machines:
 
 ```sh
-export TUI_SYNC_DIR=~/Dropbox/tui   # in your shell profile; or: tui --sync-dir ~/Dropbox/tui
+export TUI_SYNC_DIR=~/Dropbox/tui
+tui serve                           # or: tui serve --sync-dir ~/Dropbox/tui
 ```
 
 ```
@@ -54,9 +56,9 @@ mv ~/.config/tui/env "$TUI_SYNC_DIR/env"
 for d in ~/.local/state/*-tui; do mkdir -p "$TUI_SYNC_DIR/state/$(basename $d)" && mv $d/* "$TUI_SYNC_DIR/state/$(basename $d)/"; done
 ```
 
-The flag works on the launcher and on a single app alike (`tui --sync-dir
-<dir>`, `tui x --sync-dir <dir>`), and an app the picker opens inherits
-whatever the launcher was given. The browser login profile
+The flag also works on a standalone app (`tui x --sync-dir <dir>`). Terminal
+and web feed clients do not need it because they never open the database or
+read credentials. The browser login profile
 (`~/.config/tui/profile`) deliberately stays local: live Chromium profiles
 don't survive file syncing, and the captured session values in `env` are what
 the apps actually use. Feed content, plugin read marks, saved and blocked
@@ -66,17 +68,18 @@ The server snapshots it into the sync directory after each fetch.
 ## Use
 
 ```sh
-tui                    # installed via Homebrew
-make run               # from a source checkout (builds ./tui)
+tui serve --sync-dir ~/Dropbox/tui  # database owner and background fetcher
+tui                                   # terminal All client on localhost
+tui web                               # open the web client on localhost
 ```
 
-Pick an app and press enter. If it's already logged in it opens straight away;
-if not, the launcher runs its `--auth` browser login first, then opens it.
-Inside an app, `q` drops back to the picker; `q` again quits.
+The clients default to `http://127.0.0.1:8080`. Point either one at another
+machine with `--server URL`, or set `TUI_SERVER_URL`. Standalone apps remain
+available by name: `tui x`, `tui reddit`, and so on.
 
 ## The `all` timeline
 
-The first pick is **all**: one feed of the unread items from every logged-in
+Bare `tui` opens **all**: one feed of the unread items from every logged-in
 reader app (`x`, `inoreader`, `folo`; slack is a chat model, not a stream),
 merged and sorted newest-first, each row tagged with a colored source chip
 (`𝕏`, `ino`, `folo`, `rdt`). It's the whole morning's backlog in one place.
@@ -85,70 +88,47 @@ Triage works exactly like the individual apps: `j`/`k` move (and mark the row
 you leave read), `space` expands the body inline, `o`/`O` read it in carbonyl,
 `b` opens the browser, `c` copies the URL, `tab` shows the source names
 (`@handle` / feed title, hidden by default so rows are all content), `R`
-refetches, `q` backs out to the picker. Marking a row read flushes to that app's own read state (x's local
-store, or Inoreader/Folo's server), so it's read everywhere, and the picker's
-counts update the moment you return.
+reloads the service cache, and `q` quits. Marking a row read posts it to the
+service, which records it in `feed.db` and flushes it to the source in the
+background. The web and terminal clients therefore read the same backlog.
 
 Once you've read everything, `all` offers one more thing: if x is logged in and
 you were on its **Following** feed, it shows *"All read — press `f` to continue
 on x For You"*. `f` swaps the x source to the **For You** timeline and refetches
-(backing out of `all` and re-entering returns to Following, and a subsequent
-refresh keeps whatever tab is live).
+through the service. Restarting the terminal client returns to Following, and a
+subsequent refresh keeps whichever timeline is live.
 
 Sorting is by publish time: x and Folo carry an exact timestamp; Inoreader
 exposes only a relative age (`2h`), so its items are placed from that. An item
 with no resolvable time sinks to the bottom rather than jumping the queue.
 
-Which apps qualify is a single `feed` flag in the launcher's app registry, so a
+Which apps qualify is a single `feed` flag in the app registry, so a
 new reader app joins the merged feed as soon as it implements the `make json` /
 `make mark-read` contract and flips that flag on.
 
-For every logged-in app the picker shows an unread count next to it, refreshed
-every 5 minutes (and again the moment you return from an app, since you've
-likely just read something). The header shows how long ago the counts were last
-fetched (`updated 2m ago`). Polling pauses while you're inside a TUI so the
-launcher isn't hitting the same service the app already is. Press `r` to refresh
-now.
-
 ```sh
-make run                 # default 5-minute poll
-TUI_POLL=2m make run     # custom interval (env)
-./tui --poll 0           # disable polling; press r to count on demand
-```
-
-Counts are one cheap fetch per service (the newest page), shown as `N` or `N+`
-when the count hits the fetch cap and there's likely more. The x count reuses
-its local read-tracking store, so it means "unread in your latest posts".
-
-A service showing a capped `N+` is **skipped by the periodic poll**: re-fetching
-can't move the badge off the ceiling, so it's wasted requests. It's re-checked
-only when you return from that app (you may have read it down) or press `r`.
-Services below the cap keep polling, so new items still bump the number.
-
-One exception: once `tui --web` has drained Inoreader (see below), Inoreader's
-own count is zero, so the picker reads that badge off the web server's backlog
-instead and labels it **`N unread on --web`** — those items are triaged there,
-and opening the Inoreader TUI won't show them.
-
-```sh
-make build    # build the launcher + all four TUIs
+make build    # build tui and every standalone app binary
 make x        # build just one (also: make inoreader, make slack)
 make clean
 ```
 
-## Web view (mobile)
+## Feed service and web view
 
 The same `all` timeline is available as a mobile-friendly web page, so you can
 triage from your phone or any other device on your Tailscale network:
 
 ```sh
-tui --web                    # serve the all timeline on 0.0.0.0:8080
-tui --web --web-addr :9000   # custom port
-tui --web --web-fetch 30m    # fetch less often (default 10m; 0 = on demand only)
-tui --web --web-drain=false  # leave Inoreader's own unread list alone (see below)
-tui --web --sync-dir ~/Dropbox/tui
-                             # snapshot feed.db after each fetch
+tui serve --sync-dir ~/Dropbox/tui
+tui serve --addr :9000 --fetch-every 30m
+tui serve --drain-inoreader=false
+tui web
+tui web --server http://100.121.244.89:8080
 ```
+
+`tui serve` listens on `0.0.0.0:8080` by default, fetches immediately, and then
+fetches every ten minutes with jitter. It serves the API and HTML application
+from the same address. `tui web` only opens that address in the local browser;
+it does not start another process.
 
 The live database stays at `~/.local/state/tui/feed.db` (or
 `$XDG_STATE_HOME/tui/feed.db`). When a sync directory is set, every completed
@@ -194,9 +174,9 @@ with a player in it outgrows a phone, so the row scrolls sideways. Since
 scroll-to-read can't reach the last few cards, a **mark all read** button sits
 at the end of the feed to clear the full backlog in one tap. x's **For You** is a chip of
 its own in the header (see below) rather than something offered at the end of the
-feed. It reuses the same `--json` / `--mark-read`
-contract the terminal `all` view uses, so read state stays consistent between
-the TUI and the page — mark something read and it's read in the app too (see
+feed. The terminal client requests the same live round through the service, so
+read state stays consistent between the TUI and the page — mark something read
+and it's read in the app too (see
 **The backlog cache** below for the one place that changes). Items are sorted
 **oldest-first** (triage in the order they arrived), and the saved list is
 ordered by **when you saved things, newest first**. At the far end of the
@@ -337,11 +317,10 @@ that never reached the cache would be gone for good.
 The consequences are worth knowing:
 
 - inoreader.com will show **0 unread** from then on. Your backlog lives in
-  `feed.db`, and `--web` is where you read it.
-- the standalone `tui inoreader` TUI and the terminal `all` view fetch live, so
-  they'll look empty. The picker's badge reads the cache instead and says
-  `unread on --web` so it isn't lying to you.
-- `--web-drain=false` turns it off, at the cost of only ever seeing Inoreader's
+  `feed.db`, and the terminal and web clients both read it through `tui serve`.
+- the standalone `tui inoreader` TUI fetches live, so it will look empty. Bare
+  `tui` reads the service backlog instead.
+- `tui serve --drain-inoreader=false` turns draining off, at the cost of only ever seeing Inoreader's
   first page. Every other service pages honestly (folo walks a cursor) or has no
   server-side read state at all (x, reddit, douban, and bilibili keep their read
   markers in `feed.db`), and none of them is ever marked read at fetch time.
@@ -445,10 +424,10 @@ make                # first signing use: keychain dialog → Always Allow
 make firewall       # register the signed binary with the firewall (asks for sudo)
 ```
 
-then restart `tui --web` and Allow the popup one last time. From then on every
+then restart `tui serve` and Allow the popup one last time. From then on every
 build signs with the same identity, so the firewall rule keeps matching across
 rebuilds. `make launcher` uses the cert automatically whenever it exists and
-falls back to ad-hoc signing otherwise; if serving `--web` from another Mac,
+falls back to ad-hoc signing otherwise; if running `tui serve` from another Mac,
 run `make signing-cert` there once too. If the CLI route fails, the GUI
 equivalent is Keychain Access → Certificate Assistant → Create a Certificate
 (name `tui-codesign`, Self-Signed Root, Code Signing), then Trust → Code
@@ -456,24 +435,21 @@ Signing: Always Trust.
 
 ## Layout
 
-Each app stays a self-contained Go module with its own `Makefile`, `README`,
-and `.env`, so it still builds and runs on its own:
+The main binary contains the feed service, both feed clients, and every app
+plugin. `tui serve` runs each logged-in feed plugin's JSON and mark-read
+commands behind one SQLite-backed backlog. Bare `tui` renders that backlog by
+calling the service API; it never shells out to plugins or opens the database.
+
+Each standalone app keeps its own `Makefile`, `README`, and `.env`, so it can
+still build and run independently:
 
 ```sh
-cd x && make run      # same for inoreader, slack, folo
+make x
+./tui x
 ```
 
-The launcher (`launcher/`) just runs the selected project's `make run` / `make
-auth` as a subprocess, which is why quitting a child returns to the picker. It
-decides "logged in?" by sourcing each project's `.env` and checking for the
-tokens that project needs. Unread counts work the same way: it runs each
-project's `make count`, which prints a single number the picker shows as a
-badge.
-
-The `all` timeline extends that same contract: each feed app also answers `make
-json` (its unread items as a normalized JSON array) and `make mark-read` (ids on
-stdin), so the launcher can render and triage across apps without importing any
-of them. The launcher owns only the merge, sort, and UI; each app still owns its
-own session and read state.
+Each feed app implements the same normalized JSON and mark-read contract. The
+service owns merging, persistence, scheduling, and retries; each app still owns
+its source-specific session and API behavior.
 
 See each app's README for its keys, configuration, and cookie-capture details.

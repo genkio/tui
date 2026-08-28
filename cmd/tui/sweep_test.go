@@ -305,14 +305,14 @@ func TestFullPageIsCapped(t *testing.T) {
 	}
 }
 
-// --web-drain=false leaves Inoreader's own unread list intact, at the cost of
+// --drain-inoreader=false leaves Inoreader's own unread list intact, at the cost of
 // only ever seeing its first page.
 func TestDrainOffLeavesInoreaderAlone(t *testing.T) {
 	s, c, m, fetches := newTestSweeper(t, false, [][]core.Item{page("inoreader", 0, 3), page("inoreader", 3, 3)})
 	s.sweepApp(context.Background(), "inoreader")
 
 	if *fetches != 1 || len(m.marked()) != 0 {
-		t.Fatalf("fetched %d times and marked %v; --web-drain=false should do neither", *fetches, m.marked())
+		t.Fatalf("fetched %d times and marked %v; --drain-inoreader=false should do neither", *fetches, m.marked())
 	}
 	if got := c.unreadCount(); got != 3 {
 		t.Fatalf("collected %d, want the single page", got)

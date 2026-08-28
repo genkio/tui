@@ -6,8 +6,7 @@ import (
 	"github.com/genkio/tui/core"
 )
 
-// allKeyMap is the "all" timeline's keys: the shared feed bindings plus Back,
-// which drops to the picker rather than quitting the launcher.
+// allKeyMap is the server-backed feed's terminal key set.
 type allKeyMap struct {
 	core.FeedKeys
 	Back      key.Binding
@@ -17,7 +16,7 @@ type allKeyMap struct {
 func defaultAllKeys() allKeyMap {
 	return allKeyMap{
 		FeedKeys:  core.NewFeedKeys(),
-		Back:      key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "back to picker")),
+		Back:      key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "quit")),
 		ContinueX: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "continue on x For You")),
 	}
 }

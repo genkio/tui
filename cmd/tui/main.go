@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -283,7 +284,7 @@ func newModel(root string, pollEvery time.Duration) model {
 		countErr:   map[string]bool{},
 		countStale: map[string]bool{},
 		countWeb:   map[string]bool{},
-		all:        newAllModel(root),
+		all:        newAllModel(defaultFeedServer()),
 	}
 	m.authed = make([]bool, len(m.apps))
 	m.refreshAuth()
@@ -426,7 +427,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.screen = screenAll
 				var cmd tea.Cmd
-				m.all, cmd = m.all.enter(apps, m.width, m.height)
+				m.all, cmd = m.all.enter(m.width, m.height)
 				return m, cmd
 			}
 			a := m.apps[m.appIndex(m.cursor)]
@@ -703,53 +704,11 @@ var (
 var version = "dev"
 
 func main() {
-	// `tui x`, `tui inoreader`, ... run that app in this same binary and exit.
 	runPluginIfRequested()
-
-	// Default 5m, overridable by TUI_POLL (env) then --poll (flag). 0 disables.
-	interval := 5 * time.Minute
-	if v := os.Getenv("TUI_POLL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			interval = d
+	if err := runCommand(os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
 		}
-	}
-	showVersion := flag.Bool("version", false, "print version and exit")
-	poll := flag.Duration("poll", interval, "unread-count poll interval (e.g. 5m; 0 disables)")
-	web := flag.Bool("web", false, "run the web UI (all timeline) instead of the terminal app")
-	webAddr := flag.String("web-addr", "0.0.0.0:8080", "address:port to bind the web UI to")
-	webFetch := flag.Duration("web-fetch", 10*time.Minute, "with --web: how often the server fetches every service into its backlog cache (jittered ±15%; 0 fetches only on demand)")
-	webDrain := flag.Bool("web-drain", true, "with --web: let the server mark a fetched Inoreader article read there, the only way past its first page (off keeps Inoreader's own unread list intact)")
-	dev := flag.Bool("dev", false, "with --web: reload cmd/tui/page.tmpl from disk on every request (no rebuild)")
-	syncDir := flag.String("sync-dir", os.Getenv("TUI_SYNC_DIR"), "sync snapshots, credentials, read state, and configs through this dir (e.g. ~/Dropbox/tui); env TUI_SYNC_DIR")
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Println("tui " + version)
-		return
-	}
-
-	// Export the sync dir so every self-exec'd `tui <app>` subprocess resolves
-	// the same env/read-state/config paths as the launcher.
-	if *syncDir != "" {
-		exportSyncDir(*syncDir)
-	}
-
-	// root locates the dev source tree for per-plugin .env; an installed binary
-	// works without it, reading creds from ~/.config/tui/env (each self-exec'd
-	// `tui <app>` loads that file itself, so a re-login is picked up live).
-	root, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tui: "+err.Error())
-		os.Exit(1)
-	}
-	if *web {
-		if err := runWeb(root, *webAddr, *dev, *webDrain, *webFetch); err != nil {
-			fmt.Fprintln(os.Stderr, "tui --web: "+err.Error())
-			os.Exit(1)
-		}
-		return
-	}
-	if _, err := tea.NewProgram(newModel(root, *poll)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "tui: "+err.Error())
 		os.Exit(1)
 	}

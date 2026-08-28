@@ -1,8 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,13 +20,21 @@ import (
 // Messages flowing back into the "all" screen's update loop.
 type (
 	allItemsMsg struct {
-		items []core.Item
-		note  string // non-fatal trouble, e.g. "couldn't load: folo"
+		items    []core.Item
+		apps     []string
+		updated  time.Time
+		fetching bool
+		capped   bool
+		note     string // non-fatal trouble, e.g. "couldn't load: folo"
 	}
 	markFlushedMsg struct {
 		app string
 		ids []string
 		err error
+	}
+	unmarkFlushedMsg struct {
+		item core.Item
+		err  error
 	}
 	flushTickMsg      struct{}
 	openedMsg         struct{}
@@ -36,75 +48,139 @@ type (
 // subprocess per app instead of one per keystroke.
 const flushDebounce = 1500 * time.Millisecond
 
-// fetchAll runs each authed app's `make json` concurrently, parses the unread
-// items, and returns them merged and sorted newest-first. One app failing (an
-// expired cookie, say) drops only that app, noted for the status line. xTab
-// (following|foryou) selects which x timeline to read.
-func fetchAll(root string, apps []string, xTab string) tea.Cmd {
+type feedAPIResponse struct {
+	Items    []core.Wire `json:"items"`
+	Apps     []string    `json:"apps,omitempty"`
+	Failed   []string    `json:"failed,omitempty"`
+	Warn     string      `json:"warn,omitempty"`
+	Updated  string      `json:"updated,omitempty"`
+	Fetching bool        `json:"fetching,omitempty"`
+	Capped   bool        `json:"capped,omitempty"`
+}
+
+var feedServerHTTP = &http.Client{Timeout: 110 * time.Second}
+var feedMutationHTTP = &http.Client{Timeout: 15 * time.Second}
+
+func fetchAll(server, xTab string) tea.Cmd {
 	return func() tea.Msg {
+		feed, err := fetchServerFeed(server, xTab)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		items := make([]core.Item, 0, len(feed.Items))
 		now := time.Now()
-		type res struct {
-			app    string
-			items  []core.Item
-			err    error
-			stderr string
+		for _, wire := range feed.Items {
+			items = append(items, wire.Item(now))
 		}
-		ch := make(chan res, len(apps))
-		for _, app := range apps {
-			go func(app string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-				defer cancel()
-				args := []string{app, "--json"}
-				if app == "x" {
-					args = append(args, "--tab", xTab) // For You / Following
-				}
-				cmd := exec.CommandContext(ctx, self(), args...)
-				cmd.Env = appEnv(filepath.Join(root, "plugins", app))
-				var stderr bytes.Buffer
-				cmd.Stderr = &stderr
-				out, err := cmd.Output()
-				if err != nil {
-					ch <- res{app: app, err: err, stderr: stderr.String()}
-					return
-				}
-				items, perr := core.ParseItems(out, now)
-				ch <- res{app: app, items: items, err: perr}
-			}(app)
-		}
-		var all []core.Item
-		var failed, stale []string
-		for range apps {
-			r := <-ch
-			if r.err != nil {
-				failed = append(failed, r.app)
-				// every plugin emits this marker for an expired session, so the
-				// user knows to re-auth rather than assume the app is broken.
-				if strings.Contains(r.stderr, "session is stale") {
-					stale = append(stale, r.app)
-				}
-				continue
-			}
-			all = append(all, r.items...)
-		}
-		core.MergeSort(all)
 		note := ""
-		if len(failed) > 0 {
-			note = "couldn't load: " + strings.Join(failed, ", ")
-			for _, app := range stale {
-				note += " — " + app + " session stale, run `tui " + app + " --auth`"
-			}
+		if len(feed.Failed) > 0 {
+			note = "couldn't load: " + strings.Join(feed.Failed, ", ")
 		}
-		return allItemsMsg{items: all, note: note}
+		note = trimJoin(note, feed.Warn)
+		updated, _ := time.Parse(time.RFC3339, feed.Updated)
+		return allItemsMsg{
+			items: items, apps: feed.Apps, updated: updated,
+			fetching: feed.Fetching, capped: feed.Capped, note: note,
+		}
 	}
 }
 
-// flushMarks marks read, in one app, every id accumulated since the last flush,
-// via the same `make mark-read` contract the count uses. Marking is idempotent,
-// so a retried id is harmless.
-func flushMarks(root, app string, ids []string) tea.Cmd {
-	return func() tea.Msg {
-		return markFlushedMsg{app: app, ids: ids, err: runMarkRead(root, app, ids, 90*time.Second)}
+func fetchServerFeed(server, xTab string) (feedAPIResponse, error) {
+	u, err := serverEndpoint(server, "/")
+	if err != nil {
+		return feedAPIResponse{}, err
 	}
+	q := u.Query()
+	q.Set("json", "1")
+	q.Set("order", "desc")
+	if xTab == "foryou" {
+		q.Set("x", "foryou")
+	}
+	u.RawQuery = q.Encode()
+	res, err := feedServerHTTP.Get(u.String())
+	if err != nil {
+		return feedAPIResponse{}, fmt.Errorf("cannot reach feed server %s; start `tui serve` or pass --server: %w", server, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return feedAPIResponse{}, serverResponseError(server, res)
+	}
+	var feed feedAPIResponse
+	if err := json.NewDecoder(res.Body).Decode(&feed); err != nil {
+		return feedAPIResponse{}, fmt.Errorf("invalid response from feed server %s: %w", server, err)
+	}
+	return feed, nil
+}
+
+func flushMarks(server, app string, ids []string) tea.Cmd {
+	return func() tea.Msg {
+		return markFlushedMsg{app: app, ids: ids, err: markServerRead(server, app, ids)}
+	}
+}
+
+func markServerRead(server, app string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	u, err := serverEndpoint(server, "/mark")
+	if err != nil {
+		return err
+	}
+	form := url.Values{"app": {app}, "json": {"1"}}
+	for _, id := range ids {
+		form.Add("id", id)
+	}
+	res, err := feedMutationHTTP.PostForm(u.String(), form)
+	if err != nil {
+		return fmt.Errorf("cannot send reads to feed server %s: %w", server, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return serverResponseError(server, res)
+	}
+	return nil
+}
+
+func unmarkServerRead(server, app, id string) error {
+	u, err := serverEndpoint(server, "/unmark")
+	if err != nil {
+		return err
+	}
+	res, err := feedMutationHTTP.PostForm(u.String(), url.Values{"app": {app}, "id": {id}})
+	if err != nil {
+		return fmt.Errorf("cannot restore unread through feed server %s: %w", server, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return serverResponseError(server, res)
+	}
+	return nil
+}
+
+func unmarkServer(server string, item core.Item) tea.Cmd {
+	return func() tea.Msg {
+		return unmarkFlushedMsg{item: item, err: unmarkServerRead(server, item.App, item.ID)}
+	}
+}
+
+func serverEndpoint(server, path string) (*url.URL, error) {
+	u, err := url.Parse(server)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("invalid feed server URL %q", server)
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + path
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u, nil
+}
+
+func serverResponseError(server string, res *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+	message := strings.TrimSpace(string(body))
+	if message == "" {
+		message = res.Status
+	}
+	return fmt.Errorf("feed server %s: %s", server, message)
 }
 
 // runMarkRead pipes ids (one per line) into the app's mark-read subprocess.

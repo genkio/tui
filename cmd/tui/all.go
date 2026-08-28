@@ -14,13 +14,10 @@ import (
 	"github.com/genkio/tui/core"
 )
 
-// allModel is the "all" timeline screen: a merged, time-sorted feed of every
-// authed feed app's unread items, with the same triage behavior as the
-// standalone apps. It is driven by the launcher's top-level model, which owns
-// the home/all screen switch and decides which apps qualify (see app.feed).
+// allModel is the terminal client for the server's merged unread feed.
 type allModel struct {
-	root string   // repo root; used to load each plugin's .env for the self-exec'd data commands
-	apps []string // authed feed apps this screen fetches, set on enter
+	server string
+	apps   []string
 
 	feed    core.Feed
 	spinner spinner.Model
@@ -38,18 +35,20 @@ type allModel struct {
 	statusErr     bool
 	themeAuto     bool
 	lastRefresh   time.Time
+	fetching      bool
+	capped        bool
 
 	xTab     string // which x timeline to show: following | foryou
 	xOffered bool   // whether we've already suggested switching to For You
 }
 
-func newAllModel(root string) allModel {
+func newAllModel(server string) allModel {
 	th := core.NewTheme(true) // dark until the terminal answers the background query
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = th.Spinner
 	return allModel{
-		root:    root,
+		server:  server,
 		th:      th,
 		feed:    core.NewFeed(th, true), // merged view: show the per-source chip
 		spinner: sp,
@@ -60,21 +59,19 @@ func newAllModel(root string) allModel {
 	}
 }
 
-// enter (re)opens the screen for the given authed apps at the current size and
-// kicks off the concurrent fetch. themeAuto asks the terminal for its
-// background so the palette matches, like the standalone apps.
-func (m allModel) enter(apps []string, w, h int) (allModel, tea.Cmd) {
-	m.apps = apps
+// enter opens the server-backed feed and asks the terminal for its background
+// so the palette matches the standalone apps.
+func (m allModel) enter(w, h int) (allModel, tea.Cmd) {
 	m.width, m.height = w, h
 	m.loading = true
-	m.loadingNote = "Loading all timelines…"
+	m.loadingNote = "Loading feed…"
 	m.status = ""
 	m.statusErr = false
 	m.themeAuto = true
 	m.xTab = "following" // every entry starts on x Following
 	m.xOffered = false
 	m.layout()
-	return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, apps, "following"), tea.RequestBackgroundColor)
+	return m, tea.Batch(m.spinner.Tick, fetchAll(m.server, "following"), tea.RequestBackgroundColor)
 }
 
 func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
@@ -97,8 +94,13 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 
 	case allItemsMsg:
 		m.loading = false
-		m.lastRefresh = time.Now()
+		m.lastRefresh = msg.updated
+		m.fetching = msg.fetching
+		m.capped = msg.capped
+		m.apps = msg.apps
+		m.feed.ClearRead()
 		m.feed.SetItems(msg.items, true)
+		m.clearStatus()
 		if msg.note != "" {
 			m.setStatus(msg.note, true)
 		}
@@ -115,6 +117,13 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 			// is idempotent, so a duplicate id is harmless.
 			m.pending[msg.app] = append(append([]string{}, msg.ids...), m.pending[msg.app]...)
 			m.setStatus("mark-read failed for "+msg.app+"; will retry", true)
+		}
+		return m, nil
+
+	case unmarkFlushedMsg:
+		if msg.err != nil {
+			m.feed.RevertKeep(msg.item.Key())
+			m.setStatus("could not keep item unread: "+friendlyAllError(msg.err), true)
 		}
 		return m, nil
 
@@ -157,8 +166,8 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		m.clearStatus()
 		m.flushNow() // land pending marks first so they don't reappear unread
 		m.loading = true
-		m.loadingNote = "Refreshing…"
-		return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, m.apps, m.xTab))
+		m.loadingNote = "Reloading…"
+		return m, tea.Batch(m.spinner.Tick, fetchAll(m.server, m.xTab))
 
 	case key.Matches(msg, m.keys.ContinueX):
 		// 'f' switches x to For You once Following is exhausted.
@@ -168,7 +177,7 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 			m.xOffered = false
 			m.loading = true
 			m.loadingNote = "Loading x For You…"
-			return m, tea.Batch(m.spinner.Tick, fetchAll(m.root, m.apps, "foryou"))
+			return m, tea.Batch(m.spinner.Tick, fetchAll(m.server, "foryou"))
 		}
 		return m, nil
 
@@ -224,6 +233,7 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		if kept, _ := m.feed.ToggleKeep(); kept {
 			m.unqueue(it)
 			m.setStatus("Kept unread; scrolling won't mark it read. K again to unlock.", false)
+			return m, unmarkServer(m.server, it)
 		} else {
 			m.setStatus("Keep removed.", false)
 		}
@@ -308,7 +318,7 @@ func (m *allModel) drainPending() tea.Cmd {
 	var cmds []tea.Cmd
 	for app, ids := range m.pending {
 		if len(ids) > 0 {
-			cmds = append(cmds, flushMarks(m.root, app, ids))
+			cmds = append(cmds, flushMarks(m.server, app, ids))
 		}
 	}
 	m.pending = map[string][]string{}
@@ -323,7 +333,7 @@ func (m *allModel) drainPending() tea.Cmd {
 // nothing triaged here is lost.
 func (m *allModel) flushNow() {
 	for app, ids := range m.pending {
-		_ = runMarkRead(m.root, app, ids, 30*time.Second)
+		_ = markServerRead(m.server, app, ids)
 	}
 	m.pending = map[string][]string{}
 	m.flushArmed = false
@@ -351,10 +361,16 @@ func (m allModel) View() string {
 func (m allModel) headerView() string {
 	th := m.th
 	left := th.Header.Render("all")
-	left += th.Meta.Render(fmt.Sprintf("  %d unread · %s", m.feed.Len(), strings.Join(m.apps, " · ")))
+	count := fmt.Sprint(m.feed.Len())
+	if m.capped {
+		count += "+"
+	}
+	left += th.Meta.Render(fmt.Sprintf("  %s unread · %s", count, strings.Join(m.apps, " · ")))
 
 	var meta []string
-	if !m.lastRefresh.IsZero() {
+	if m.fetching {
+		meta = append(meta, "fetching")
+	} else if !m.lastRefresh.IsZero() {
 		meta = append(meta, "updated "+m.lastRefresh.Format("15:04:05"))
 	}
 	right := ""

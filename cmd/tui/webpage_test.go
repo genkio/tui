@@ -1653,6 +1653,19 @@ func TestOrderToggle(t *testing.T) {
 
 // Which layout you get is the browser's to ask for, and there is no flag on the
 // server to argue with: the deck is asked for, and anything else is the list.
+func TestTailnetReachable(t *testing.T) {
+	for _, host := range []string{"", "0.0.0.0", "::", "100.121.244.89"} {
+		if !tailnetReachable(host, "100.121.244.89") {
+			t.Errorf("host %q should advertise the tailnet URL", host)
+		}
+	}
+	for _, host := range []string{"127.0.0.1", "localhost", "192.168.1.10"} {
+		if tailnetReachable(host, "100.121.244.89") {
+			t.Errorf("host %q should not advertise an unreachable tailnet URL", host)
+		}
+	}
+}
+
 func TestDeckWanted(t *testing.T) {
 	cases := []struct {
 		q    string

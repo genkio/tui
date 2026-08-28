@@ -4,13 +4,13 @@ CODESIGN_ID := tui-codesign
 .DEFAULT_GOAL := build
 .PHONY: build run launcher apps firewall signing-cert clean help $(APPS)
 
-build: launcher apps ## Build the launcher and every TUI
+build: launcher apps ## Build tui and every standalone app binary
 
 # The firewall remembers "Allow" by code signature. Ad-hoc signing (-s -)
 # yields a new identity every build, so each rebuild re-triggers the popup;
 # signing with the stable self-signed cert (make signing-cert) survives
 # rebuilds, so Allow is answered once.
-launcher: ## Build the launcher binary into ./tui
+launcher: ## Build the main tui binary into ./tui
 	go build -o ./tui ./cmd/tui
 	@if [ "$$(uname)" = Darwin ]; then \
 	  if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CODESIGN_ID)"; then \
@@ -34,7 +34,7 @@ signing-cert: ## One-time: create a stable self-signed codesign cert so the fire
 	  rm -rf $$tmp; \
 	fi
 
-firewall: launcher ## Allow ./tui through the macOS firewall so other devices reach --web (asks for sudo)
+firewall: launcher ## Allow other devices to reach tui serve (asks for sudo)
 	sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$(CURDIR)/tui"
 	sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$(CURDIR)/tui"
 
@@ -43,7 +43,7 @@ apps: $(APPS) ## Build each TUI binary
 $(APPS): ## Build one TUI (e.g. make x)
 	$(MAKE) -C plugins/$@ build
 
-run: launcher ## Launch the picker (each TUI compiles on first open)
+run: launcher ## Open the terminal All client
 	./tui
 
 clean: ## Remove built binaries

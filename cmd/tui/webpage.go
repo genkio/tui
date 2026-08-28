@@ -1069,50 +1069,13 @@ func linkLabel(u string) string {
 	return s
 }
 
-// writeJSONItems writes the merged feed as JSON, for API clients.
-func writeJSONItems(w io.Writer, items []core.Item, failed []string) {
-	type wireItem struct {
-		App     string      `json:"app"`
-		ID      string      `json:"id"`
-		Title   string      `json:"title"`
-		Body    string      `json:"body,omitempty"`
-		Source  string      `json:"source,omitempty"`
-		Author  string      `json:"author,omitempty"`
-		URL     string      `json:"url,omitempty"`
-		Age     string      `json:"age,omitempty"`
-		TS      string      `json:"ts,omitempty"`
-		Video   string      `json:"video,omitempty"`
-		Poster  string      `json:"poster,omitempty"`
-		VidSecs int         `json:"vidsecs,omitempty"`
-		Audio   string      `json:"audio,omitempty"`
-		Images  []string    `json:"images,omitempty"`
-		Quote   *core.Quote `json:"quote,omitempty"`
-	}
-	out := make([]wireItem, 0, len(items))
+// writeJSONItems writes the merged feed and service metadata for terminal
+// clients. Saved and blocked exports pass an empty meta value.
+func writeJSONItems(w io.Writer, items []core.Item, failed []string, response feedAPIResponse) {
+	response.Items = make([]core.Wire, 0, len(items))
 	for _, it := range items {
-		wi := wireItem{
-			App:     it.App,
-			ID:      it.ID,
-			Title:   it.Title,
-			Body:    it.Body,
-			Source:  it.Source,
-			Author:  it.Author,
-			URL:     it.URL,
-			Age:     it.Age,
-			Video:   it.Video,
-			Poster:  it.Poster,
-			VidSecs: it.VidSecs,
-			Audio:   it.Audio,
-			Images:  it.Images,
-			Quote:   it.Quote,
-		}
-		if !it.At.IsZero() {
-			wi.TS = it.At.UTC().Format(time.RFC3339)
-		}
-		out = append(out, wi)
+		response.Items = append(response.Items, it.Wire())
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"items":  out,
-		"failed": failed,
-	})
+	response.Failed = failed
+	_ = json.NewEncoder(w).Encode(response)
 }

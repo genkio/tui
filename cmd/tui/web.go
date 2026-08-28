@@ -47,8 +47,8 @@ var appLabels = map[string]string{
 	"bilibili":  "bili",
 }
 
-// runWeb serves the merged "all" timeline over HTTP, bound to addr (default
-// 0.0.0.0:8080) so other devices on the tailnet can reach it.
+// runServer owns the feed backlog and serves its API and web interface. The
+// default listener is 0.0.0.0:8080 so other tailnet devices can reach it.
 //
 // A page load reads the backlog cache off disk; it does not scrape anything. A
 // background sweeper owns the fetching, on a jittered interval, and it is the
@@ -63,7 +63,7 @@ var appLabels = map[string]string{
 //
 // The feed is served as a scrolling list or as a deck of one card at a time; see
 // deckWanted for why that is the browser's to say and not a flag here.
-func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
+func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	devPath := ""
 	if dev {
 		devPath = filepath.Join(root, "cmd", "tui", "page.tmpl")
@@ -191,7 +191,7 @@ func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return fmt.Errorf("invalid --web-addr %q: %w", addr, err)
+		return fmt.Errorf("invalid --addr %q: %w", addr, err)
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -199,7 +199,7 @@ func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 	}
 	defer ln.Close()
 
-	fmt.Printf("tui --web serving the all timeline on %s\n", addr)
+	fmt.Printf("tui serve listening on %s\n", addr)
 	if u := tailscaleURL(host, port); u != "" {
 		fmt.Printf("  tailnet:  %s\n", u)
 	}
@@ -238,11 +238,23 @@ func tailscaleURL(host, port string) string {
 	if p, err := exec.LookPath("tailscale"); err == nil {
 		if out, err := exec.Command(p, "ip", "-4").Output(); err == nil {
 			if ip := strings.Fields(string(out)); len(ip) > 0 {
+				if !tailnetReachable(host, ip[0]) {
+					return ""
+				}
 				return "http://" + ip[0] + ":" + port + "/"
 			}
 		}
 	}
 	return ""
+}
+
+func tailnetReachable(host, tailnetIP string) bool {
+	switch host {
+	case "", "0.0.0.0", "::":
+		return true
+	default:
+		return host == tailnetIP
+	}
 }
 
 // fetchAllItems runs each named app's `--json` concurrently and returns the
@@ -341,7 +353,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		items := selectItems(all, sel)
 		if q.Get("json") == "1" {
 			w.Header().Set("Content-Type", "application/json")
-			writeJSONItems(w, items, nil)
+			writeJSONItems(w, items, nil, feedAPIResponse{})
 			return
 		}
 		writePage(w, tmpl, pageInput{
@@ -359,7 +371,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		items := selectItems(all, sel)
 		if q.Get("json") == "1" {
 			w.Header().Set("Content-Type", "application/json")
-			writeJSONItems(w, items, nil)
+			writeJSONItems(w, items, nil, feedAPIResponse{})
 			return
 		}
 		writePage(w, tmpl, pageInput{
@@ -406,7 +418,11 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	if q.Get("json") == "1" {
 		w.Header().Set("Content-Type", "application/json")
-		writeJSONItems(w, items, failed)
+		meta := feedAPIResponse{Apps: apps, Warn: warn, Fetching: sweep.sweeping(), Capped: capped}
+		if updated := cache.sweptAt(); !updated.IsZero() {
+			meta.Updated = updated.UTC().Format(time.RFC3339)
+		}
+		writeJSONItems(w, items, failed, meta)
 		return
 	}
 

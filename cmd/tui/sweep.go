@@ -58,7 +58,7 @@ const (
 )
 
 func logf(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "tui --web: "+format+"\n", a...)
+	fmt.Fprintf(os.Stderr, "tui serve: "+format+"\n", a...)
 }
 
 // fetchFunc reads one app's unread items; markFunc tells one app that ids have
