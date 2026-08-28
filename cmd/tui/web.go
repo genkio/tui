@@ -128,15 +128,21 @@ func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 		}
 		handleMark(w, r, cache, flusher)
 	})
-	mux.HandleFunc("/refresh", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/unmark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		sweep.kick()
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ok":true}`)
+		handleUnmark(w, r, cache)
+	})
+	mux.HandleFunc("/mark-all", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleMarkAll(w, r, cache, flusher)
 	})
 	// How the page knows when a fetch it asked for has finished: a sweep can
 	// take minutes, so the alternative is guessing at a delay and reloading into
@@ -160,6 +166,14 @@ func runWeb(root, addr string, dev, drain bool, every time.Duration) error {
 			return
 		}
 		handleKeywords(w, r, block, cache)
+	})
+	mux.HandleFunc("/blocked/clear", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleClearBlocked(w, block)
 	})
 	mux.HandleFunc("/pos", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -321,6 +335,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// The saved view reads straight from the store: no fetch, so it loads
 	// instantly and still works when a service (or the network) is down.
 	if q.Get("saved") == "1" {
+		compact := q.Get("compact") == "1"
 		all := saved.list(now) // newest save first; publish order is not what you saved for
 		tally := tallyItems(all)
 		items := selectItems(all, sel)
@@ -331,7 +346,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, savedView: true,
-			block: block, swipe: deck, sel: sel, tally: &tally, query: q,
+			savedCompact: compact, block: block, swipe: deck, sel: sel, tally: &tally, query: q,
 		})
 		return
 	}
@@ -479,6 +494,16 @@ func handleKeywords(w http.ResponseWriter, r *http.Request, block *blocker, cach
 	fmt.Fprintf(w, `{"ok":true,"keywords":%d,"blocked":%d,"moved":%d}`, len(words), block.count(), moved)
 }
 
+func handleClearBlocked(w http.ResponseWriter, block *blocker) {
+	cleared, err := block.clearItems()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"cleared":%d}`, cleared)
+}
+
 // maxPosSrc caps the stream URL a position is pinned to, so a stray post can't
 // grow the store.
 const maxPosSrc = 2048
@@ -571,6 +596,52 @@ func handleMark(w http.ResponseWriter, r *http.Request, cache *feedCache, flushe
 		back = "/"
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+func handleUnmark(w http.ResponseWriter, r *http.Request, cache *feedCache) {
+	app, id := r.FormValue("app"), r.FormValue("id")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	changed := cache.markUnread(app, id)
+	if changed {
+		if err := cache.save(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"changed":%t}`, changed)
+}
+
+func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flusher *markFlusher) {
+	if err := r.ParseMultipartForm(1 << 20); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	sel := parseSel(r.Form)
+	if sel.Kind == "x" {
+		http.Error(w, "live timelines have no cached backlog", http.StatusBadRequest)
+		return
+	}
+	items := selectItems(cache.unread(time.Now(), ""), sel)
+	byApp := map[string][]string{}
+	for _, it := range items {
+		byApp[it.App] = append(byApp[it.App], it.ID)
+	}
+	for app, ids := range byApp {
+		cache.markRead(app, ids, time.Now())
+	}
+	if len(items) > 0 {
+		if err := cache.save(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		flusher.kick()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"marked":%d}`, len(items))
 }
 
 // handleDownload streams an x video through the server with an attachment

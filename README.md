@@ -192,7 +192,7 @@ downloads any of it, then counts down what's left of it once it's playing. A
 **loop** button at the end of the row repeats video (off by default). A footer
 with a player in it outgrows a phone, so the row scrolls sideways. Since
 scroll-to-read can't reach the last few cards, a **mark all read** button sits
-at the end of the feed to clear the tail in one tap. x's **For You** is a chip of
+at the end of the feed to clear the full backlog in one tap. x's **For You** is a chip of
 its own in the header (see below) rather than something offered at the end of the
 feed. It reuses the same `--json` / `--mark-read`
 contract the terminal `all` view uses, so read state stays consistent between
@@ -260,10 +260,16 @@ no service to be up or down, the chips are plain: there, a group that would ligh
 up the whole list narrows nothing and isn't drawn, so a saved list of one kind
 from one app gets no chips at all.
 
+The saved header's **full** / **compact** control switches between complete
+cards and title-only rows. The mode rides in the URL, so source and type chips
+keep it while narrowing the saved list; compact rows still link to the original
+item but leave bodies, media, controls, and tags out.
+
 The chips are also what **mark all read** applies to: with one on, the page is
 that chip's items alone, so it clears those and leaves the rest unread — you can
-sweep reddit away and keep the articles for later. The pick lives in the URL, so
-the reload that fetches the next window of a deep backlog comes back to it.
+sweep reddit away and keep the articles for later. The server applies that pick
+to the complete SQLite backlog, not only the 100 list cards or 20 deck cards sent
+to the browser.
 
 A saved item also remembers **where you left off**. The position in its player
 is posted back as you watch or listen and rides along in `feed.db`, so
@@ -295,13 +301,13 @@ the `feed_items` table in the local `feed.db`, keyed by app and id, and a page
 load reads that database. Two things follow: the page is as fast as the saved
 list already was, and
 the count is the **real** backlog, because it grows across sweeps instead of
-being replaced by one. Tap the count to ask for a fetch now; it says
-`fetching…` while one is in flight and how stale it is otherwise (`4m`).
+being replaced by one. The count says `fetching…` while a sweep is in flight
+and how stale the last one is otherwise (`4m`); tapping it opens settings.
 
 The scrolling list carries at most **100 cards** and the swipe deck carries
 **20**. The header and chips still count the complete backlog. Finishing a
-partial deck flushes its read marks and loads the next 20; clearing a partial
-list does the same for its next window.
+partial deck flushes its read marks and loads the next 20. Mark-all applies to
+the complete filtered backlog rather than either client window.
 
 **Read marks are ours now.** Marking something read writes to the cache and the
 request returns; carrying it to the app's own `--mark-read` is a background job,
@@ -371,8 +377,9 @@ The blocked list renders as **titles alone** — no body, no player, no stills �
 with the keyword that caught each one on its row, so a long list stays
 scannable and it's obvious which word is doing too much work. The chips narrow
 it the way they narrow the saved list, and nothing on it can be marked read,
-because none of it was ever unread. The `blocked_items` table keeps the full
-history.
+because none of it was ever unread. **clear** in the header asks for
+confirmation, then deletes the stored blocked history without changing the
+keywords that continue screening later sweeps.
 
 ### Swipe mode
 
@@ -389,34 +396,28 @@ same thing by hand).
 A browser that has never said gets **one guess from the device it is**: a coarse
 pointer is a thumb, and a thumb wants a card at a time, so a phone opens the
 deck and everything else opens the list. One tap settles it either way, for good.
-The layout stays server-rendered — a swiped card gets a longer text budget than
+The layout stays server-rendered — a deck card gets a longer text budget than
 a listed one, and the clipping is done in Go — so switching is a page load, and
 a browser that wants the deck spends one redirect on arriving at a bare URL.
 
-**Swipe left** to mark the card read and deal the next one; **swipe right** to
-walk back through what you've already dealt, one card per pull, as far back as
-the first one (they stay read — it's a second look, not an undo). **→**/**l**
-deals the next one and **←**/**h** walks back, and a mouse can drag. Only
-sideways is a
-gesture: up and down scroll the page as usual, and everything else is a footer
-button, saving included. Once the deck is dealt out the two floating ticks go
-away and a note says so; where to go next is the chip row, which the deck
-carries above it like the feed does.
+By default, the chevron at the right edge marks the card read and deals the next
+one. The left edge restores the previous card to tui's unread backlog and walks
+back to it, as far as the first card. The setting behind the unread count swaps
+those two actions for left-handed use and is remembered by that browser. This
+unread state is local to tui; it does not ask the source service to reverse a
+read already sent there. **→**/**l** and **←**/**h** follow the same mapping.
+Once the deck is dealt out the chevrons go away and a note says so; where to go
+next is the chip row, which the deck carries above it like the feed does.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
 to roughly a screenful, so the footer actions — open, save, share, image
 toggle, video controls, the video **keep** download — are always in reach
-(swipe the row itself sideways when they outrun the screen; only the card
-behind it throws).
+(scroll the row itself sideways when they outrun the screen).
 Anything past the clip sits behind the same "+N words" toggle.
 
-The two gestures also have buttons, floating in the bottom corners under either
-thumb: a **tick** on the left marks the card on screen read and deals the next,
-the same as a left swipe, and a **double tick** on the right clears the whole
-deck. Marks rather than words, because the gestures they stand in for have no
-words either and a label long enough to explain itself would reach halfway
-across the card; a long press says which is which. Both are drawn as SVG rather
-than set in ✓ characters, so the pair shares one stroke weight and one scale.
+The muted **tick** in the bottom-right asks for confirmation, then clears the
+whole current feed, including items beyond the 20-card window. A long press names
+each icon for a browser without hover.
 The saved and blocked lists are for looking back over rather than triage, so
 they stay scrolling lists whatever the feed is set to, and the toggle isn't
 drawn on them.

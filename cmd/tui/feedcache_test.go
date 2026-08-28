@@ -75,6 +75,30 @@ func TestFeedCacheMarkReadReportsUnknown(t *testing.T) {
 	}
 }
 
+func TestFeedCacheMarkUnreadKeepsUpstreamState(t *testing.T) {
+	c := newTestCache(t)
+	now := time.Now()
+	c.upsert([]core.Item{item("x", "1", "a")}, now)
+	c.markRead("x", []string{"1"}, now)
+	c.markSynced("x", []string{"1"})
+
+	if !c.markUnread("x", "1") {
+		t.Fatal("a read item should become unread")
+	}
+	e := c.byKey[core.Key("x", "1")]
+	if e.Read || e.ReadAt != "" || !e.Synced {
+		t.Fatalf("unread entry = %+v, want local unread with upstream state preserved", e)
+	}
+	if c.markUnread("x", "1") {
+		t.Fatal("marking an unread item unread should be a no-op")
+	}
+
+	c.markRead("x", []string{"1"}, now)
+	if pending := c.unsynced(); len(pending) != 0 {
+		t.Fatalf("an upstream read that already landed should not be resent: %v", pending)
+	}
+}
+
 // A read mark is queued for its app until it lands, and a drained entry needs
 // no queueing at all: the service was told at fetch time.
 func TestFeedCacheUnsynced(t *testing.T) {

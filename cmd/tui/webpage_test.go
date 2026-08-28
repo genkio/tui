@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -281,52 +283,60 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	}
 }
 
-// The deck's two corner buttons: one tick on the left for this card, two on the
-// right for the lot. A thumb that would rather tap than throw needs the same
-// two things the gestures already do.
-func TestDeckCornerTicks(t *testing.T) {
+func TestDeckEdgeNavigation(t *testing.T) {
 	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}
 	deck := renderSwipePage(t, items)
-	if !strings.Contains(deck, `id="markOne" class="markall fab" type="button" title="mark this card read and deal the next"><svg`) {
-		t.Fatalf("expected a single-tick button for the card on screen: %s", deck)
+	if !strings.Contains(deck, `id="leftCard" class="decknav" type="button" title="mark unread and show the previous card" disabled><svg`) {
+		t.Fatalf("expected a disabled previous control on the first card: %s", deck)
 	}
-	// Drawn, not typeset: one path for the single, two for the double, and the
-	// same stroke on both — which is the whole reason they aren't ✓ and ✓✓.
-	if strings.Count(deck, `<path d="M5 12.5L10 17.5L19 6.5"/>`) != 1 {
-		t.Errorf("expected one drawn tick on the left button: %s", deck)
+	if !strings.Contains(deck, `id="rightCard" class="decknav" type="button" title="mark read and show the next card"><svg`) {
+		t.Fatalf("expected a read-and-next control: %s", deck)
 	}
-	if !strings.Contains(deck, `<path d="M2 12.5L7 17.5L16 6.5"/><path d="M11 12.5L16 17.5L25 6.5"/>`) {
-		t.Errorf("expected two drawn ticks on the right button: %s", deck)
+	if !strings.Contains(deck, `<path d="M15 18L9 12L15 6"/>`) || !strings.Contains(deck, `<path d="M9 18L15 12L9 6"/>`) {
+		t.Errorf("expected a drawn chevron in each direction: %s", deck)
 	}
-	if strings.Count(deck, `stroke-width="2.4"`) != 2 {
-		t.Errorf("both marks have to carry the same stroke or the pair looks wrong: %s", deck)
+	if !strings.Contains(deck, `.decknav#leftCard{left:max(-8px,calc(50% - 328px))}`) ||
+		!strings.Contains(deck, `.decknav#rightCard{right:max(-8px,calc(50% - 328px))}`) {
+		t.Errorf("the chevrons should sit over the card borders: %s", deck)
 	}
-	// Height is what's pinned, so the wider double keeps the single's stroke.
-	if !strings.Contains(deck, ".markall.fab svg{display:block;height:22px;width:auto}") {
-		t.Errorf("the two marks have to be scaled off their height: %s", deck)
+	if !strings.Contains(deck, `leftBtn.disabled = !SWAP_DECK && at === 0;`) ||
+		!strings.Contains(deck, `rightBtn.disabled = SWAP_DECK && at === 0;`) {
+		t.Error("the unread side should be disabled on the first card")
 	}
-	if strings.Contains(deck, "mark all read") {
-		t.Error("the deck's fab has no room for words; the title attribute carries them")
+	if strings.Contains(deck, `deck.addEventListener('pointerdown'`) {
+		t.Error("the old card drag handler should stay gone")
 	}
-	if !strings.Contains(deck, `title="mark the whole deck read"`) {
-		t.Errorf("a wordless button still has to say what it does on a long press: %s", deck)
+	if strings.Contains(deck, "classList.add('fly')") || strings.Contains(deck, ".deck .card.fly") {
+		t.Error("chevron navigation should switch cards without the old swipe animation")
 	}
-	// Both hide together when the deck is dealt out: neither has anything left
-	// to act on.
-	if !strings.Contains(deck, `if (oneBtn) oneBtn.classList.toggle('hid', done);`) {
-		t.Error("the single tick should go away with the deck")
-	}
-	if !strings.Contains(deck, ".markall.fab#markOne{left:14px}") || !strings.Contains(deck, ".markall.fab#markAll{right:14px}") {
-		t.Errorf("the two ticks belong in opposite corners: %s", deck)
+	if !strings.Contains(deck, `return markFlights.then(function(){`) ||
+		!strings.Contains(deck, `return fetch('/unmark', {method:'POST', body:fd})`) {
+		t.Error("previous should wait for active reads, then restore the card to unread")
 	}
 
-	// The scrolling feed keeps its wordy button: there is no card on screen
-	// there to mark, and the button sits in the flow where a label fits.
-	feed := renderPage(t, items, []string{"x", "reddit"}, nil, "following", "")
-	if strings.Contains(feed, `id="markOne"`) {
-		t.Error("a scrolling feed has no current card, so no single-tick button")
+	// A muted single tick keeps the bulk action available without competing with
+	// the edge controls.
+	if !strings.Contains(deck, `<path d="M5 12.5L10 17.5L19 6.5"/>`) {
+		t.Errorf("expected the drawn single tick: %s", deck)
 	}
-	if !strings.Contains(feed, "mark all read") {
+	if !strings.Contains(deck, `box-shadow:0 6px 18px rgba(0,0,0,.3);color:var(--muted);opacity:.5;`) {
+		t.Errorf("the deck's bulk action should use the muted colour at half opacity: %s", deck)
+	}
+	if !strings.Contains(deck, `title="mark all 2 items in this feed read"`) {
+		t.Errorf("a wordless button still has to say what it does on a long press: %s", deck)
+	}
+	if !strings.Contains(deck, ".markall.fab#markAll{right:14px}") {
+		t.Errorf("the bulk-read tick should remain in the lower-right corner: %s", deck)
+	}
+	if strings.Contains(deck, `id="markOne"`) || strings.Contains(deck, `.markall.fab#markOne`) {
+		t.Error("the lower-left single-item tick should be removed")
+	}
+
+	feed := renderPage(t, items, []string{"x", "reddit"}, nil, "following", "")
+	if strings.Contains(feed, `id="leftCard"`) || strings.Contains(feed, `id="rightCard"`) {
+		t.Error("a scrolling feed should have no deck navigation")
+	}
+	if !strings.Contains(feed, "mark all 2 read") {
 		t.Errorf("the feed's mark-all keeps its label: %s", feed)
 	}
 }
@@ -412,7 +422,7 @@ func TestRenderCardShareButton(t *testing.T) {
 
 func TestRenderPageMarkAll(t *testing.T) {
 	with := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}, []string{"x", "reddit"}, nil, "following", "")
-	if !strings.Contains(with, "mark all read") {
+	if !strings.Contains(with, `id="markAll"`) {
 		t.Fatal("expected mark-all-read button when there are items")
 	}
 	without := renderPage(t, nil, []string{"x"}, nil, "following", "")
@@ -573,9 +583,8 @@ func TestChipGroupsShareOneRow(t *testing.T) {
 	}
 }
 
-// The deck takes h/l as well as the arrows, the vim spelling of sideways.
-// Left walks back, right deals the next: the direction you are travelling, not
-// the direction the card is thrown.
+// The deck takes h/l as well as the arrows, and both follow the browser's
+// chosen left/right action mapping.
 func TestDeckTakesVimKeys(t *testing.T) {
 	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
 	if !strings.Contains(p, `k === 'ArrowLeft' || k === 'h' || k === 'H'`) {
@@ -583,6 +592,10 @@ func TestDeckTakesVimKeys(t *testing.T) {
 	}
 	if !strings.Contains(p, `k === 'ArrowRight' || k === 'l' || k === 'L'`) {
 		t.Error("l should deal the next card, like the right arrow")
+	}
+	if !strings.Contains(p, `function leftAction(){ if(SWAP_DECK) read(); else back(); }`) ||
+		!strings.Contains(p, `function rightAction(){ if(SWAP_DECK) back(); else read(); }`) {
+		t.Error("the edge controls and keyboard should share the swapped mapping")
 	}
 	// j/k are the terminal's vertical pair; up and down stay the page's scroll,
 	// so the deck must not claim them.
@@ -592,7 +605,7 @@ func TestDeckTakesVimKeys(t *testing.T) {
 }
 
 // A read that never reached the server leaves the page lying to you: the card
-// is greyed and off the counts, the server still has it unread. Swiping on from
+// is greyed and off the counts, the server still has it unread. Dealing on from
 // there only widens the gap, so the page repairs itself — one retry for a blip,
 // then a reload, which comes back as whatever the server actually has.
 func TestALostReadResyncs(t *testing.T) {
@@ -613,7 +626,7 @@ func TestALostReadResyncs(t *testing.T) {
 		t.Error("a second failure should reload")
 	}
 	// Marking read again after a recovery gets its own retry.
-	if !strings.Contains(p, "decCount(ids.length); retried = false;") {
+	if !strings.Contains(p, "decCount(ids.length); decBulkCount(ids.length); retried = false;") {
 		t.Error("a landed mark should clear the retry, so the next blip gets one too")
 	}
 	// A page that reloads under you should say why, once, in passing.
@@ -638,7 +651,7 @@ func TestDeckIsNotCentred(t *testing.T) {
 	if strings.Contains(p, "margin:auto 0") {
 		t.Error("the deck should be top-aligned, not centred")
 	}
-	if !strings.Contains(p, ".deckwrap .deck{width:100%}") {
+	if !strings.Contains(p, ".deckwrap .deck{width:100%;min-width:0}") {
 		t.Error("the deck should still fill the width")
 	}
 }
@@ -653,18 +666,28 @@ func TestChipCountsFollowReading(t *testing.T) {
 	if !strings.Contains(p, "scheduleRecount();") {
 		t.Error("marking a card read should schedule a recount")
 	}
-	if !strings.Contains(p, "article.card:not(.read)") {
-		t.Error("the recount should count unread cards")
+	if !strings.Contains(p, "article.card.read") || !strings.Contains(p, "base - off") {
+		t.Error("the recount should subtract this window's reads from server totals")
+	}
+	if strings.Contains(p, "n.textContent = unread.length") || strings.Contains(p, "var byApp =") {
+		t.Error("chip totals must never be rebuilt from the client window")
 	}
 }
 
-// The page is served from the backlog cache, so it says how old that is and
-// offers a fetch on the spot. Both live on the unread count itself, which is
-// the only header element the number belongs next to.
+// The page is served from the backlog cache, so it says how old that is. The
+// unread count opens browser-local settings; background sweeps own fetching.
 func TestRenderPageFreshness(t *testing.T) {
 	p := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
-	if !strings.Contains(p, `id="refresh"`) {
-		t.Fatal("expected the tap-to-fetch control: " + p)
+	if !strings.Contains(p, `id="settingsOpen"`) || !strings.Contains(p, `id="settingsdlg"`) {
+		t.Fatal("expected the count to open settings: " + p)
+	}
+	if strings.Contains(p, `fetch('/refresh'`) || strings.Contains(p, `id="refresh"`) {
+		t.Fatal("the count should no longer trigger a fetch: " + p)
+	}
+	if !strings.Contains(p, `<input id="swapDeck" type="checkbox">`) ||
+		!strings.Contains(p, `localStorage.setItem('tui:swap-deck-arrows', SWAP_DECK ? '1' : '0')`) ||
+		!strings.Contains(p, `settingsDlg.showModal()`) {
+		t.Fatal("the native settings dialog should persist the arrow toggle: " + p)
 	}
 	if !strings.Contains(p, `id="upd">just now`) {
 		t.Fatal("expected the freshness label: " + p)
@@ -687,9 +710,8 @@ func TestRenderPageFreshness(t *testing.T) {
 	}
 }
 
-// A page carries a window of the backlog, not all of it: the count is the whole
-// thing, the button says what it is actually about to clear, and it flags that
-// a reload brings more.
+// A page carries a window of the backlog, but mark-all names and clears the
+// complete server-side selection.
 func TestRenderPageWindowedBacklog(t *testing.T) {
 	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "x", ID: "2", Title: "b"}}
 	deep := feedTally{apps: map[string]int{"x": 812}, types: map[string]int{"text": 812}}
@@ -698,27 +720,17 @@ func TestRenderPageWindowedBacklog(t *testing.T) {
 	if !strings.Contains(p, `<span id="unreadn">812</span>`) {
 		t.Fatal("the count is the whole backlog, not the window: " + p)
 	}
-	if !strings.Contains(p, `data-more="1"`) || !strings.Contains(p, `mark these <span id="markn">2</span> read`) {
-		t.Fatal("expected a windowed mark-all button: " + p)
+	if !strings.Contains(p, `data-more="true"`) || !strings.Contains(p, `data-total="812"`) || !strings.Contains(p, `mark all 812 read`) {
+		t.Fatal("expected mark-all to describe the complete backlog: " + p)
 	}
-	// The two numbers have to add up, or the button reads as a bug next to the
-	// header's count.
-	if !strings.Contains(p, `<span class="behind">810 more behind</span>`) {
-		t.Fatal("a windowed button should say how much is behind it: " + p)
-	}
-	if !strings.Contains(p, "function relabelMarkAll()") {
-		t.Error("the button's number should come down as cards are read")
+	if strings.Contains(p, `id="markn"`) || strings.Contains(p, "more behind") || strings.Contains(p, "function relabelMarkAll()") {
+		t.Fatal("mark-all should not be derived from the client window: " + p)
 	}
 
-	// The whole backlog on one page: plain "mark all read", no number to keep
-	// honest and nothing more behind.
 	in.total = len(items)
 	p = renderInput(t, in)
-	if !strings.Contains(p, `data-more="0"`) || !strings.Contains(p, `mark all read`) {
+	if !strings.Contains(p, `data-more="false"`) || !strings.Contains(p, `data-total="2"`) || !strings.Contains(p, `mark all 2 read`) {
 		t.Fatal("expected the unwindowed mark-all button: " + p)
-	}
-	if strings.Contains(p, `id="markn"`) || strings.Contains(p, "more behind") {
-		t.Fatal("an unwindowed page has nothing behind it to explain: " + p)
 	}
 }
 
@@ -732,7 +744,7 @@ func TestChipTapFlushesBeforeLeaving(t *testing.T) {
 	if !strings.Contains(p, "flushPending().then(function(){ location.assign(href); })") {
 		t.Error("a chip should flush pending marks and then navigate")
 	}
-	if !strings.Contains(p, "return Promise.all(calls)") {
+	if !strings.Contains(p, "var flight = Promise.all(calls)") || !strings.Contains(p, "return flight;") {
 		t.Error("flushPending has to be awaitable for that to be safe")
 	}
 }
@@ -822,7 +834,7 @@ func TestRenderCardVideo(t *testing.T) {
 	if !strings.Contains(out, `<button class="loop" type="button" data-on="0"`) {
 		t.Fatalf("expected a loop toggle, off by default: %s", out)
 	}
-	if !strings.HasSuffix(strings.TrimSuffix(out, "</article>"), ">loop</button></div>") {
+	if !strings.Contains(out, `>loop</button></div><div class="tagrows">`) {
 		t.Fatalf("loop should come last in the footer: %s", out)
 	}
 	// No video -> no player, no controls.
@@ -1334,7 +1346,7 @@ func TestSavedPageAndButton(t *testing.T) {
 		t.Fatal("saved view should flag itself so scroll-to-read stays off")
 	}
 
-	if err := store.add(core.Item{App: "reddit", ID: "7", Title: "kept", Source: "r/go"}, time.Now()); err != nil {
+	if err := store.add(core.Item{App: "reddit", ID: "7", Title: "kept", Body: "compact-hidden-body", Source: "r/go", Video: "https://video.test/7.mp4"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	page := renderSavedPage(t, store)
@@ -1344,6 +1356,41 @@ func TestSavedPageAndButton(t *testing.T) {
 	// Cards in the saved view render as already saved.
 	if !strings.Contains(page, `data-saved="1"`) || !strings.Contains(page, ">saved</button>") {
 		t.Fatalf("expected an unsave-able button: %s", page)
+	}
+	if !strings.Contains(page, `id="savedmode"`) || !strings.Contains(page, `>full</a>`) || !strings.Contains(page, `compact=1`) {
+		t.Fatalf("the full saved view should offer its compact counterpart: %s", page)
+	}
+
+	items := store.list(time.Now())
+	compact := renderInput(t, pageInput{
+		items: items, total: len(items), now: time.Now(), saved: store,
+		savedView: true, savedCompact: true,
+		query: url.Values{"saved": {"1"}, "compact": {"1"}},
+	})
+	if !strings.Contains(compact, `id="savedmode"`) || !strings.Contains(compact, `>compact</a>`) {
+		t.Fatalf("the compact saved view should say which mode it is in: %s", compact)
+	}
+	for _, absent := range []string{"compact-hidden-body", `<video`, `<button class="save"`, `class="tagrows"`} {
+		if strings.Contains(compact, absent) {
+			t.Fatalf("compact saved rows should contain titles only, found %q: %s", absent, compact)
+		}
+	}
+	if !strings.Contains(compact, "kept") {
+		t.Fatalf("compact saved row lost its title: %s", compact)
+	}
+	if got := savedModeHref(url.Values{"saved": {"1"}, "compact": {"1"}, "app": {"reddit"}}, true); got != "/?app=reddit&saved=1" {
+		t.Fatalf("full-mode href = %q, want saved filter preserved", got)
+	}
+	if got := buildSavedCompactCard(core.Item{App: "x", ID: "8", Title: "post text", Body: "post text"}).Title; got != "post text" {
+		t.Fatalf("compact untitled post = %q, want its text as the title", got)
+	}
+	xCompact := renderInput(t, pageInput{
+		items: []core.Item{{App: "x", ID: "8", Title: "post text", Body: "post text"}},
+		total: 1, now: time.Now(), saved: store, savedView: true, savedCompact: true,
+		query: url.Values{"saved": {"1"}, "compact": {"1"}},
+	})
+	if !strings.Contains(xCompact, `class="card compact" data-app="x"`) {
+		t.Fatalf("compact x post needs its compact text treatment: %s", xCompact)
 	}
 
 	// The feed view links to the saved list and shows its count.
@@ -1643,7 +1690,7 @@ func TestDeckLoadsNextWindowAfterFlushing(t *testing.T) {
 		apps: []string{"x"}, now: time.Now(), swipe: true,
 	}
 	p := renderInput(t, in)
-	if !strings.Contains(p, `at >= cards.length && markAllBtn && markAllBtn.dataset.more === '1'`) {
+	if !strings.Contains(p, `at >= cards.length && MORE`) {
 		t.Fatal("a partial deck should detect when its window is exhausted")
 	}
 	if !strings.Contains(p, `flushPending().then(function(){ location.reload(); });`) {
@@ -1762,17 +1809,19 @@ func TestDeckChipsAreLinksToo(t *testing.T) {
 	}
 }
 
-// Mark-all clears what is on screen, which with a chip on is that chip's items
-// and nothing else — the page carries no others to clear by accident.
-func TestMarkAllClearsThePage(t *testing.T) {
+func TestMarkAllClearsTheServerSelection(t *testing.T) {
 	page := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
-	if !strings.Contains(page, `document.querySelectorAll('article.card:not(.read)').forEach`) {
-		t.Error("mark-all should clear every unread card on the page")
+	if !strings.Contains(page, `if(SWIPE && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + ' in this feed read?')) return;`) {
+		t.Error("deck mark-all should ask before changing any card")
 	}
-	// A windowed page always has more behind it, chip or no chip, and the chip
-	// rides along in the URL, so the reload comes back to the same pick.
-	if !strings.Contains(page, `if (markAllBtn.dataset.more === '1') {`) {
-		t.Error("a windowed page should reload for the next window unconditionally")
+	if !strings.Contains(page, `fetch('/mark-all', {method:'POST', body:fd})`) {
+		t.Error("mark-all should ask the server to clear the full selection")
+	}
+	if !strings.Contains(page, `['app', 'type', 'x', 'sub'].forEach`) {
+		t.Error("mark-all should carry the active filter to the server")
+	}
+	if strings.Contains(page, `var groups = {};`) || strings.Contains(page, `groups[app]`) {
+		t.Error("mark-all must not group rendered card ids in the browser")
 	}
 }
 
@@ -1909,6 +1958,96 @@ func TestFeedCardCarriesSavedPosition(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), `data-pos="42"`) {
 		t.Errorf("a saved item in the feed should resume too: %s", b.String())
+	}
+}
+
+func TestUnmarkHandler(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{{App: "x", ID: "50", Title: "post"}}, now)
+	cache.markRead("x", []string{"50"}, now)
+
+	post := func(values url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/unmark", strings.NewReader(values.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handleUnmark(rec, r, cache)
+		return rec
+	}
+
+	rec := post(url.Values{"app": {"x"}, "id": {"50"}})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"changed":true`) {
+		t.Fatalf("got %d %s, want the read reversed", rec.Code, rec.Body.String())
+	}
+	if cache.unreadCount() != 1 {
+		t.Fatal("the reversed item should be back in the unread backlog")
+	}
+	rec = post(url.Values{"app": {"x"}, "id": {"50"}})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"changed":false`) {
+		t.Fatalf("second reversal should be a no-op: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post(url.Values{"app": {"x"}}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing id status = %d, want 400", rec.Code)
+	}
+}
+
+func TestMarkAllHandlerClearsFullFilteredBacklog(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "x", ID: "1", Title: "keep"},
+		{App: "reddit", ID: "2", Title: "clear"},
+		{App: "reddit", ID: "3", Title: "clear too"},
+	}, now)
+	flusher := &markFlusher{cache: cache, wake: make(chan struct{}, 1)}
+	form := url.Values{"app": {"reddit"}}
+	req := httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handleMarkAll(rec, req, cache, flusher)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":2`) {
+		t.Fatalf("got %d %s, want both filtered items marked", rec.Code, rec.Body.String())
+	}
+	left := cache.unread(now, "")
+	if len(left) != 1 || left[0].App != "x" || left[0].ID != "1" {
+		t.Fatalf("unread after filtered mark-all = %+v, want only x/1", left)
+	}
+	select {
+	case <-flusher.wake:
+	default:
+		t.Fatal("mark-all should wake the upstream flusher")
+	}
+}
+
+func TestMarkAllHandlerReadsBrowserFormData(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "x", ID: "1", Title: "keep"},
+		{App: "bilibili", ID: "2", Title: "clear"},
+	}, now)
+	flusher := &markFlusher{cache: cache, wake: make(chan struct{}, 1)}
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	if err := form.WriteField("app", "bilibili"); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mark-all", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	handleMarkAll(rec, req, cache, flusher)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":1`) {
+		t.Fatalf("got %d %s, want only bilibili marked", rec.Code, rec.Body.String())
+	}
+	left := cache.unread(now, "")
+	if len(left) != 1 || left[0].App != "x" || left[0].ID != "1" {
+		t.Fatalf("unread after multipart mark-all = %+v, want only x/1", left)
 	}
 }
 
@@ -2217,9 +2356,6 @@ func TestSourceChipFollowsReadingUnderASubcategory(t *testing.T) {
 	// The source chip states the whole source, not the stream on the page.
 	if !strings.Contains(page, `data-key="reddit" data-on="1" title="reddit: live"><span class="chip" style="background:#ff6b33">rdt</span><span class="fn ok">4</span>`) {
 		t.Errorf("the source chip counts the whole source:\n%s", page)
-	}
-	if !strings.Contains(page, `data-sub="r/golang"`) {
-		t.Errorf("the page should know which stream it is:\n%s", page)
 	}
 	for _, want := range []string{
 		"chip.dataset.n0 = n.textContent", // the baseline, stashed before anything writes over it

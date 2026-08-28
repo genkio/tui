@@ -157,6 +157,20 @@ func (b *blocker) count() int {
 	return len(b.items)
 }
 
+func (b *blocker) clearItems() (int, error) {
+	b.mu.Lock()
+	old := b.items
+	b.items = []blockedItem{}
+	b.mu.Unlock()
+	if err := b.saveItems(); err != nil {
+		b.mu.Lock()
+		b.items = append(old, b.items...)
+		b.mu.Unlock()
+		return 0, err
+	}
+	return len(old), nil
+}
+
 // match reports which keyword the title carries, blank when none does. Plain
 // case-insensitive substring: the list is hand-written and short, and a
 // substring is what "keep posts about X out" means for a Chinese title as much

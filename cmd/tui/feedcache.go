@@ -254,6 +254,22 @@ func (c *feedCache) markRead(app string, ids []string, now time.Time) []string {
 	return unknown
 }
 
+// markUnread puts one cached item back in tui's backlog. Synced stays as it
+// was: upstream may already know about the read, but this local queue does not
+// need to send the same read again when the item is dealt a second time.
+func (c *feedCache) markUnread(app, id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.byKey[core.Key(app, id)]
+	if !ok || !e.Read {
+		return false
+	}
+	e.Read = false
+	e.ReadAt = ""
+	c.rev++
+	return true
+}
+
 // markSynced records that the app itself now has these read marks.
 func (c *feedCache) markSynced(app string, ids []string) {
 	c.mu.Lock()

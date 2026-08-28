@@ -413,7 +413,7 @@ func TestKeywordsModal(t *testing.T) {
 	}
 
 	feed := renderPage(t, nil, []string{"x"}, nil, "following", "")
-	if strings.Contains(feed, "<dialog") {
+	if strings.Contains(feed, `<dialog id="kwdlg"`) {
 		t.Error("the block list is edited from the blocked view, not from the feed")
 	}
 }
@@ -430,6 +430,62 @@ func TestBlockedLinkInTheHeader(t *testing.T) {
 	blocked := renderBlockedPage(t, newTestBlocker(t))
 	if !strings.Contains(blocked, `<a class="viewlink" href="/">unread</a>`) {
 		t.Errorf("the blocked view should link back to the feed: %s", blocked)
+	}
+}
+
+func TestClearBlockedKeepsKeywordsAndReferencedItems(t *testing.T) {
+	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.db.Close()
+	b, err := loadBlockerDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.setKeywords([]string{"crypto"}); err != nil {
+		t.Fatal(err)
+	}
+	_, caught := b.split([]core.Item{
+		{App: "reddit", ID: "1", Title: "crypto shared"},
+		{App: "reddit", ID: "2", Title: "crypto orphan"},
+	}, time.Now())
+	if _, err := b.file(caught); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := loadSavedDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saved.add(core.Item{App: "reddit", ID: "1", Title: "crypto shared"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	page := renderBlockedPage(t, b)
+	if !strings.Contains(page, `id="clearBlocked"`) || !strings.Contains(page, `data-total="2"`) ||
+		!strings.Contains(page, `window.confirm('Delete all ' + total + ' blocked '`) {
+		t.Fatalf("blocked history should offer a counted, confirmed clear: %s", page)
+	}
+	rec := httptest.NewRecorder()
+	handleClearBlocked(rec, b)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cleared":2`) {
+		t.Fatalf("clear answered %d %s", rec.Code, rec.Body.String())
+	}
+	if b.count() != 0 || b.keywordCount() != 1 {
+		t.Fatalf("after clear: blocked=%d keywords=%d, want 0 and 1", b.count(), b.keywordCount())
+	}
+	var blockedRows, itemRows int
+	if err := db.db.QueryRow(`SELECT count(*) FROM blocked_items`).Scan(&blockedRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.db.QueryRow(`SELECT count(*) FROM items`).Scan(&itemRows); err != nil {
+		t.Fatal(err)
+	}
+	if blockedRows != 0 || itemRows != 1 {
+		t.Fatalf("database after clear: blocked=%d items=%d, want 0 and shared saved item only", blockedRows, itemRows)
+	}
+	if page := renderBlockedPage(t, b); strings.Contains(page, `id="clearBlocked"`) {
+		t.Fatal("an empty blocked history should have no clear action")
 	}
 }
 

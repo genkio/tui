@@ -139,17 +139,18 @@ func tallyCards(cards []cardData) feedTally {
 // pageInput is everything a render needs; a struct because the feed view and
 // the saved view fill in different halves of it.
 type pageInput struct {
-	items     []core.Item
-	total     int // everything the pick matched, of which items is at most a window
-	apps      []string
-	failed    []string
-	now       time.Time
-	sel       feedSel
-	tally     *feedTally // the chip counts from before sel narrowed items; nil when it didn't
-	query     url.Values // this page's query, which the chip links are built from
-	warn      string
-	saved     *savedStore
-	savedView bool
+	items        []core.Item
+	total        int // everything the pick matched, of which items is at most a window
+	apps         []string
+	failed       []string
+	now          time.Time
+	sel          feedSel
+	tally        *feedTally // the chip counts from before sel narrowed items; nil when it didn't
+	query        url.Values // this page's query, which the chip links are built from
+	warn         string
+	saved        *savedStore
+	savedView    bool
+	savedCompact bool
 	// The block list, on every view: the header counts it from the feed and the
 	// saved list, and the blocked view renders it.
 	block       *blocker
@@ -165,23 +166,26 @@ type pageData struct {
 	// Every source's unread, whichever chip is on: the chips already say what
 	// each of them holds, so the header saying the same thing over again would
 	// leave nothing stating the whole. JS decrements it in place.
-	Unread    int
-	Shown     int  // how much of the pick this page carries
-	More      bool // ...and there is more of it behind, so reload after clearing
-	Behind    int  // how much more, stated on the button so the two numbers add up
-	Capped    bool // even the backlog is short of the truth; render it as "N+"
-	Updated   string
-	Fetching  bool
-	Saved     int  // size of the saved list, in the header and its link
-	SavedView bool // rendering the saved list rather than the live feed
+	Unread        int
+	Total         int  // everything the current pick matched, before client windowing
+	More          bool // ...and there is another client window after this one
+	Capped        bool // even the backlog is short of the truth; render it as "N+"
+	Updated       string
+	Fetching      bool
+	Saved         int  // size of the saved list, in the header and its link
+	SavedView     bool // rendering the saved list rather than the live feed
+	SavedCompact  bool
+	SavedModeHref string
 	// The block list. Blocked is its size, in the header and its link on every
 	// view; Keywords is how many words fill it, and KeywordText is those words
 	// as the modal's textarea shows them — one per line, blocked view only.
-	Blocked     int
-	BlockedView bool
-	Keywords    int
-	KeywordText string
-	Swipe       bool // deck of one card at a time, swiped through
+	Blocked      int
+	BlockedView  bool
+	ClearBlocked bool
+	Keywords     int
+	KeywordText  string
+	Swipe        bool // deck of one card at a time, swiped through
+	BulkMark     bool // the cached backlog can clear the whole pick server-side
 	// Where to go for the other layout, blank on the views that have no say
 	// (saved, blocked, nothing logged in).
 	DeckHref string
@@ -193,7 +197,6 @@ type pageData struct {
 	Warn      string
 	HasApps   bool
 	Sel       string // the chip that is on ("app:x"), blank for the whole list
-	Sub       string // ...and the subcategory narrowing it further, blank when none is
 	ClearHref string // ...and where to go to put it back, blank when none is on
 	Filters   []filterGroup
 	// The second row: this source's subcategories, busiest first. Only ever
@@ -323,6 +326,10 @@ func buildPageData(in pageInput) pageData {
 			cards = append(cards, buildBlockedCard(it, in.block.caughtBy(it.App, it.ID)))
 			continue
 		}
+		if in.savedView && in.savedCompact {
+			cards = append(cards, buildSavedCompactCard(it))
+			continue
+		}
 		// In the saved view every card is saved by definition; in the feed ask
 		// the store.
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
@@ -372,37 +379,42 @@ func buildPageData(in pageInput) pageData {
 	// toggle over nothing to lay out would be a control that does nothing.
 	flip := ""
 	deck := ""
+	savedMode := ""
 	if !in.savedView && !in.blockedView && len(in.apps) > 0 {
 		flip = orderHref(in.query, in.asc)
 		deck = deckHref(in.query, swipe)
+	} else if in.savedView && len(in.items) > 0 {
+		savedMode = savedModeHref(in.query, in.savedCompact)
 	}
 
 	return pageData{
-		Unread:      tally.unread(),
-		Shown:       len(in.items),
-		More:        in.total > len(in.items),
-		Behind:      max(0, in.total-len(in.items)),
-		Capped:      in.capped,
-		Updated:     updated,
-		Fetching:    in.fetching,
-		Saved:       savedCount,
-		SavedView:   in.savedView,
-		Blocked:     in.block.count(),
-		BlockedView: in.blockedView,
-		Keywords:    in.block.keywordCount(),
-		KeywordText: keywordText,
-		Filters:     filters,
-		Subs:        subs,
-		Sel:         in.sel.String(),
-		Sub:         in.sel.Sub,
-		ClearHref:   clear,
-		Asc:         in.asc,
-		SortHref:    flip,
-		Swipe:       swipe,
-		DeckHref:    deck,
-		Warn:        in.warn,
-		HasApps:     len(in.apps) > 0,
-		Cards:       cards,
+		Unread:        tally.unread(),
+		Total:         in.total,
+		More:          in.total > len(in.items),
+		Capped:        in.capped,
+		Updated:       updated,
+		Fetching:      in.fetching,
+		Saved:         savedCount,
+		SavedView:     in.savedView,
+		SavedCompact:  in.savedCompact,
+		SavedModeHref: savedMode,
+		Blocked:       in.block.count(),
+		BlockedView:   in.blockedView,
+		ClearBlocked:  in.blockedView && in.block.count() > 0,
+		Keywords:      in.block.keywordCount(),
+		KeywordText:   keywordText,
+		Filters:       filters,
+		Subs:          subs,
+		Sel:           in.sel.String(),
+		ClearHref:     clear,
+		Asc:           in.asc,
+		SortHref:      flip,
+		Swipe:         swipe,
+		BulkMark:      !in.savedView && !in.blockedView && in.sel.Kind != "x",
+		DeckHref:      deck,
+		Warn:          in.warn,
+		HasApps:       len(in.apps) > 0,
+		Cards:         cards,
 	}
 }
 
@@ -458,6 +470,17 @@ func buildBlockedCard(it core.Item, why string) cardData {
 		Keyword: why,
 		Compact: true,
 	}
+}
+
+func buildSavedCompactCard(it core.Item) cardData {
+	card := buildBlockedCard(it, "")
+	if card.Title == "" {
+		card.Title = strings.TrimSpace(it.Title)
+	}
+	if card.Title == "" {
+		card.Title = strings.TrimSpace(it.Body)
+	}
+	return card
 }
 
 func buildCard(it core.Item, starred bool, cl clips) cardData {
@@ -791,6 +814,21 @@ func deckHref(q url.Values, deck bool) string {
 		out.Set("deck", "0")
 	} else {
 		out.Set("deck", "1")
+	}
+	return "/?" + out.Encode()
+}
+
+func savedModeHref(q url.Values, compact bool) string {
+	out := url.Values{}
+	for k, v := range q {
+		switch k {
+		case "compact", "json", "deck":
+		default:
+			out[k] = v
+		}
+	}
+	if !compact {
+		out.Set("compact", "1")
 	}
 	return "/?" + out.Encode()
 }
