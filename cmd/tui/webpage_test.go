@@ -295,13 +295,13 @@ func TestDeckEdgeNavigation(t *testing.T) {
 	if !strings.Contains(deck, `<path d="M15 18L9 12L15 6"/>`) || !strings.Contains(deck, `<path d="M9 18L15 12L9 6"/>`) {
 		t.Errorf("expected a drawn chevron in each direction: %s", deck)
 	}
-	if !strings.Contains(deck, `.decknav#leftCard{left:max(-8px,calc(50% - 328px))}`) ||
-		!strings.Contains(deck, `.decknav#rightCard{right:max(-8px,calc(50% - 328px))}`) {
-		t.Errorf("the chevrons should sit over the card borders: %s", deck)
+	if !strings.Contains(deck, `id="deckControls" class="deckcontrols"`) ||
+		!strings.Contains(deck, `left:max(-8px,calc(50% - 328px))`) ||
+		!strings.Contains(deck, `.deckcontrols.right{left:auto;right:max(-8px,calc(50% - 328px))}`) {
+		t.Errorf("the chevrons should share one movable edge control: %s", deck)
 	}
-	if !strings.Contains(deck, `leftBtn.disabled = !SWAP_DECK && at === 0;`) ||
-		!strings.Contains(deck, `rightBtn.disabled = SWAP_DECK && at === 0;`) {
-		t.Error("the unread side should be disabled on the first card")
+	if !strings.Contains(deck, `leftBtn.disabled = at === 0;`) {
+		t.Error("previous should be disabled on the first card")
 	}
 	if strings.Contains(deck, `deck.addEventListener('pointerdown'`) {
 		t.Error("the old card drag handler should stay gone")
@@ -604,8 +604,8 @@ func TestChipGroupsShareOneRow(t *testing.T) {
 	}
 }
 
-// The deck takes h/l as well as the arrows, and both follow the browser's
-// chosen left/right action mapping.
+// The deck takes h/l as well as the arrows; moving the controls does not change
+// what either direction does.
 func TestDeckTakesVimKeys(t *testing.T) {
 	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
 	if !strings.Contains(p, `k === 'ArrowLeft' || k === 'h' || k === 'H'`) {
@@ -614,9 +614,9 @@ func TestDeckTakesVimKeys(t *testing.T) {
 	if !strings.Contains(p, `k === 'ArrowRight' || k === 'l' || k === 'L'`) {
 		t.Error("l should deal the next card, like the right arrow")
 	}
-	if !strings.Contains(p, `function leftAction(){ if(SWAP_DECK) read(); else back(); }`) ||
-		!strings.Contains(p, `function rightAction(){ if(SWAP_DECK) back(); else read(); }`) {
-		t.Error("the edge controls and keyboard should share the swapped mapping")
+	if !strings.Contains(p, `function leftAction(){ back(); }`) ||
+		!strings.Contains(p, `function rightAction(){ read(); }`) {
+		t.Error("moving the controls must not swap their actions")
 	}
 	// j/k are the terminal's vertical pair; up and down stay the page's scroll,
 	// so the deck must not claim them.
@@ -705,8 +705,9 @@ func TestRenderPageFreshness(t *testing.T) {
 	if strings.Contains(p, `fetch('/refresh'`) || strings.Contains(p, `id="refresh"`) {
 		t.Fatal("the count should no longer trigger a fetch: " + p)
 	}
-	if !strings.Contains(p, `<input id="swapDeck" type="checkbox">`) ||
-		!strings.Contains(p, `localStorage.setItem('tui:swap-deck-arrows', SWAP_DECK ? '1' : '0')`) ||
+	if !strings.Contains(p, `<span>place deck arrows on right</span><input id="arrowsRight" type="checkbox">`) ||
+		!strings.Contains(p, `localStorage.setItem('tui:deck-arrows-right', ARROWS_RIGHT ? '1' : '0')`) ||
+		!strings.Contains(p, `controls.classList.toggle('right', ARROWS_RIGHT)`) ||
 		!strings.Contains(p, `settingsDlg.showModal()`) {
 		t.Fatal("the native settings dialog should persist the arrow toggle: " + p)
 	}

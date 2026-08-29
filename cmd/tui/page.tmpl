@@ -215,15 +215,17 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall.fab#markAll{right:14px}
 .markall.fab svg{display:block;height:22px;width:auto}
 .markall.hid{display:none} /* .hid alone loses to .markall.fab */
-.decknav{
-  position:fixed;z-index:20;top:50%;transform:translateY(-50%);
-  width:44px;height:52px;padding:0;display:flex;align-items:center;justify-content:center;
-  border:0;background:transparent;color:var(--muted);cursor:pointer;
+.deckcontrols{
+  position:fixed;z-index:20;top:50%;left:max(-8px,calc(50% - 328px));
+  display:flex;flex-direction:column;transform:translateY(-50%);
 }
-.decknav#leftCard{left:max(-8px,calc(50% - 328px))}
-.decknav#rightCard{right:max(-8px,calc(50% - 328px))}
+.deckcontrols.right{left:auto;right:max(-8px,calc(50% - 328px))}
+.decknav{
+  width:44px;height:52px;padding:0;display:flex;align-items:center;justify-content:center;
+  border:0;background:transparent;color:var(--muted);cursor:pointer;opacity:.55;
+}
 .decknav svg{display:block;width:24px;height:24px}
-.decknav:disabled{opacity:.25;cursor:default}
+.decknav:disabled{opacity:.18;cursor:default}
 .decknav.hid{display:none}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
@@ -396,9 +398,9 @@ video.ffs{object-fit:cover !important}
 {{end}}</div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Swipe .Cards}}<button id="leftCard" class="decknav" type="button" title="mark unread and show the previous card" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18L9 12L15 6"/></svg></button><button id="rightCard" class="decknav" type="button" title="mark read and show the next card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18L15 12L9 6"/></svg></button>
+{{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckControls" class="deckcontrols"><button id="leftCard" class="decknav" type="button" title="mark unread and show the previous card" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18L9 12L15 6"/></svg></button><button id="rightCard" class="decknav" type="button" title="mark read and show the next card"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18L15 12L9 6"/></svg></button></div>
 {{end}}{{if and .Cards .BulkMark}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-total="{{.Total}}"{{if .Swipe}} title="mark all {{.Total}} items in this feed read"{{end}}>{{if .Swipe}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg>{{else}}✓ mark all {{.Total}} read{{end}}</button>
-{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>swap deck arrows</span><input id="swapDeck" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
+{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck arrows on right</span><input id="arrowsRight" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -408,8 +410,8 @@ video.ffs{object-fit:cover !important}
 // between the two modes; only the layout and what marks a card read differ.
 var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
 var MORE = document.getElementById('state').getAttribute('data-more') === 'true';
-var SWAP_DECK = false;
-try { SWAP_DECK = localStorage.getItem('tui:swap-deck-arrows') === '1'; } catch(e){}
+var ARROWS_RIGHT = false;
+try { ARROWS_RIGHT = localStorage.getItem('tui:deck-arrows-right') === '1'; } catch(e){}
 var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview') === 'true';
 // The blocked list: rows the feed never carried, so nothing here is unread, and
 // each one is a title alone rather than a card to play or expand.
@@ -1201,20 +1203,24 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
 });
 var settingsDlg = document.getElementById('settingsdlg');
 var settingsOpen = document.getElementById('settingsOpen');
-var swapDeck = document.getElementById('swapDeck');
-if(settingsDlg && settingsOpen && swapDeck){
-  swapDeck.checked = SWAP_DECK;
+var arrowsRight = document.getElementById('arrowsRight');
+function positionDeckArrows(){
+  var controls = document.getElementById('deckControls');
+  if(controls) controls.classList.toggle('right', ARROWS_RIGHT);
+}
+positionDeckArrows();
+if(settingsDlg && settingsOpen && arrowsRight){
+  arrowsRight.checked = ARROWS_RIGHT;
   settingsOpen.addEventListener('click', function(){ settingsDlg.showModal(); });
-  swapDeck.addEventListener('change', function(){
-    SWAP_DECK = swapDeck.checked;
-    try { localStorage.setItem('tui:swap-deck-arrows', SWAP_DECK ? '1' : '0'); } catch(e){}
-    document.dispatchEvent(new Event('deckactionschange'));
+  arrowsRight.addEventListener('change', function(){
+    ARROWS_RIGHT = arrowsRight.checked;
+    try { localStorage.setItem('tui:deck-arrows-right', ARROWS_RIGHT ? '1' : '0'); } catch(e){}
+    positionDeckArrows();
   });
 }
 
-// The deck (?deck=1): one card on screen, with an edge control in either
-// direction. Settings decide which side reads and which restores unread; the
-// arrow keys and h/l follow the same mapping.
+// The deck (?deck=1): one card on screen, with both controls under one thumb.
+// The setting moves them together; their actions and keyboard mappings stay put.
 if (SWIPE) (function(){
   var deck = document.getElementById('deck');
   if (!deck) return;
@@ -1227,13 +1233,10 @@ if (SWIPE) (function(){
   function current(){ return at < cards.length ? cards[at] : null; }
   function updateControls(done){
     if(leftBtn){
-      leftBtn.title = SWAP_DECK ? 'mark read and show the next card' : 'mark unread and show the previous card';
-      leftBtn.disabled = !SWAP_DECK && at === 0;
+      leftBtn.disabled = at === 0;
       leftBtn.classList.toggle('hid', done);
     }
     if(rightBtn){
-      rightBtn.title = SWAP_DECK ? 'mark unread and show the previous card' : 'mark read and show the next card';
-      rightBtn.disabled = SWAP_DECK && at === 0;
       rightBtn.classList.toggle('hid', done);
     }
   }
@@ -1288,11 +1291,10 @@ if (SWIPE) (function(){
     var card = current();
     if (card) mark(card);
   }
-  function leftAction(){ if(SWAP_DECK) read(); else back(); }
-  function rightAction(){ if(SWAP_DECK) back(); else read(); }
+  function leftAction(){ back(); }
+  function rightAction(){ read(); }
   if (leftBtn) leftBtn.addEventListener('click', leftAction);
   if (rightBtn) rightBtn.addEventListener('click', rightAction);
-  document.addEventListener('deckactionschange', function(){ updateControls(at >= cards.length); });
 
   // The arrows and h/l mirror the edge controls; up and down remain scrolling.
   document.addEventListener('keydown', function(e){
