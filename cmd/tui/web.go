@@ -82,6 +82,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		return err
 	}
 	feedback := loadFeedbackDB(db)
+	tags := loadTagsDB(db)
 	block, err := loadBlockerDB(db)
 	if err != nil {
 		return err
@@ -119,7 +120,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, sweep, saved, feedback, block, rendered)
+		handleAll(w, r, root, loader, cache, sweep, saved, feedback, tags, block, rendered)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -167,6 +168,14 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			return
 		}
 		handleFeedback(w, r, feedback, cache, rendered)
+	})
+	mux.HandleFunc("/tags", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleTag(w, r, tags, saved)
 	})
 	mux.HandleFunc("/keywords", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -336,7 +345,7 @@ func clientWindow(deck bool) int {
 // live and deliberately left out of the backlog, being an endless firehose
 // rather than a list to get to the end of, so that chip serves only what the
 // fetch brings back.
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, feedback *feedbackStore, block *blocker, rendered *renderedItems) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, feedback *feedbackStore, tags *tagStore, block *blocker, rendered *renderedItems) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
 	tmpl, err := loader.load()
@@ -358,8 +367,18 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	if q.Get("saved") == "1" {
 		compact := q.Get("compact") == "1"
 		all := saved.list(now) // newest save first; publish order is not what you saved for
+		itemTags, err := tags.all()
+		if err != nil {
+			http.Error(w, "tags: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tag := q.Get("tag")
+		if tag != "untagged" && !validSavedTag(tag) {
+			tag = ""
+		}
 		tally := tallyItems(all)
 		items := selectItems(all, sel)
+		items = filterSavedByTag(items, itemTags, tag)
 		if q.Get("json") == "1" {
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONItems(w, items, nil, feedAPIResponse{})
@@ -368,6 +387,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, savedView: true,
 			savedCompact: compact, block: block, swipe: deck, sel: sel, tally: &tally, query: q,
+			tags: itemTags, tagFilters: savedTagFilters(all, itemTags, tag, q),
 		})
 		return
 	}
@@ -528,6 +548,38 @@ func handleFeedback(w http.ResponseWriter, r *http.Request, feedback *feedbackSt
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"feedback":%q}`, choice)
+}
+
+func handleTag(w http.ResponseWriter, r *http.Request, tags *tagStore, saved *savedStore) {
+	app, id, tag := r.FormValue("app"), r.FormValue("id"), r.FormValue("tag")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	if !validSavedTag(tag) {
+		http.Error(w, "unknown tag", http.StatusBadRequest)
+		return
+	}
+	onValue := r.FormValue("on")
+	if onValue != "0" && onValue != "1" {
+		http.Error(w, "on must be 0 or 1", http.StatusBadRequest)
+		return
+	}
+	if !saved.has(app, id) {
+		http.Error(w, errTagItemNotSaved.Error(), http.StatusConflict)
+		return
+	}
+	on := onValue == "1"
+	if err := tags.set(app, id, tag, on, time.Now()); err != nil {
+		if errors.Is(err, errTagItemNotSaved) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"tag":%q,"on":%t}`, tag, on)
 }
 
 // handleKeywords replaces the block list with what the modal's textarea holds,

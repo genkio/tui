@@ -101,6 +101,14 @@ CREATE TABLE IF NOT EXISTS item_feedback (
   PRIMARY KEY (app, id),
   FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS item_tags (
+  app TEXT NOT NULL,
+  id TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  tagged_at TEXT NOT NULL,
+  PRIMARY KEY (app, id, tag),
+  FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS keywords (
   keyword TEXT PRIMARY KEY COLLATE NOCASE,
   ordinal INTEGER NOT NULL

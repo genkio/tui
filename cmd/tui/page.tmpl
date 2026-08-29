@@ -153,6 +153,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 /* groups are set apart by a wider gap, not a rule: the row wraps as chips are
    added, and a rule at the start of a wrapped line reads as a stray mark */
 .fgroup+.fgroup>.fchip:first-child{margin-left:8px}
+.filtersep{color:var(--line);font-size:16px;margin:0 2px}
 .fchip{
   display:inline-flex;align-items:center;gap:5px;cursor:pointer;
   background:var(--card);border:1px solid var(--line);border-radius:999px;
@@ -237,6 +238,13 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
 .save[data-saved="1"]{color:var(--accent)}
+.tagrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.itemtag{
+  min-height:30px;padding:3px 9px;border:1px solid var(--line);border-radius:999px;
+  background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+}
+.itemtag[data-on="1"]{border-color:var(--accent);color:var(--accent);background:rgba(74,158,255,.08)}
+.itemtag:disabled{opacity:.5;cursor:default}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
 /* which way the feed runs and which shape it is in, at the far end of the
    header: each word is what the page already is, and the tap turns it around.
@@ -391,10 +399,10 @@ video.ffs{object-fit:cover !important}
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if .Filters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
+{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
-{{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
+{{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
@@ -416,6 +424,8 @@ var MORE = document.getElementById('state').getAttribute('data-more') === 'true'
 var FEEDBACK_RIGHT = false;
 try { FEEDBACK_RIGHT = localStorage.getItem('tui:deck-feedback-right') === '1'; } catch(e){}
 var FEEDBACK = {{.Feedback}};
+var SAVED_TAGS = {{.SavedTags}};
+var TAG_OPTIONS = {{.TagOptions}};
 var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview') === 'true';
 // The blocked list: rows the feed never carried, so nothing here is unread, and
 // each one is a title alone rather than a card to play or expand.
@@ -666,6 +676,64 @@ document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.save') : null;
   if (!b) return;
   setSaved(b.closest('article.card'), b.dataset.saved !== '1');
+});
+
+if(SAVED_VIEW) document.querySelectorAll('article.card').forEach(function(card){
+  var footer = card.querySelector(':scope > .footer');
+  if(!footer) return;
+  var key = card.dataset.app + '\u0000' + card.dataset.id;
+  var selected = SAVED_TAGS[key] || [];
+  var row = document.createElement('div');
+  row.className = 'tagrow';
+  TAG_OPTIONS.forEach(function(tag){
+    var button = document.createElement('button');
+    button.className = 'itemtag';
+    button.type = 'button';
+    button.dataset.tag = tag;
+    button.dataset.on = selected.indexOf(tag) >= 0 ? '1' : '0';
+    button.setAttribute('aria-pressed', button.dataset.on === '1' ? 'true' : 'false');
+    button.textContent = tag;
+    row.appendChild(button);
+  });
+  footer.insertAdjacentElement('afterend', row);
+});
+
+function adjustTagCount(tag, amount){
+  var chip = document.querySelector('#tagfilters a[data-key="' + tag + '"]');
+  if(!chip) return;
+  var count = chip.querySelector('.fn');
+  var next = Math.max(0, (parseInt(count.textContent, 10) || 0) + amount);
+  count.textContent = next;
+  chip.classList.toggle('hid', next === 0 && chip.dataset.on !== '1');
+}
+document.addEventListener('click', function(e){
+  var button = e.target.closest ? e.target.closest('button.itemtag') : null;
+  if(!button) return;
+  var card = button.closest('article.card');
+  var row = button.closest('.tagrow');
+  var before = row.querySelectorAll('button.itemtag[data-on="1"]').length;
+  var on = button.dataset.on !== '1';
+  var fd = new FormData();
+  fd.append('app', card.dataset.app);
+  fd.append('id', card.dataset.id);
+  fd.append('tag', button.dataset.tag);
+  fd.append('on', on ? '1' : '0');
+  button.disabled = true;
+  fetch('/tags', {method:'POST', body:fd})
+    .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'item is no longer saved' : 'could not update tag'); return res.json(); })
+    .then(function(d){
+      button.dataset.on = d.on ? '1' : '0';
+      button.setAttribute('aria-pressed', d.on ? 'true' : 'false');
+      adjustTagCount(d.tag, d.on ? 1 : -1);
+      if(before === 0 && d.on) adjustTagCount('untagged', -1);
+      if(before === 1 && !d.on) adjustTagCount('untagged', 1);
+      var active = document.querySelector('#tagfilters a[data-on="1"]');
+      if(active && ((active.dataset.key === d.tag && !d.on) || (active.dataset.key === 'untagged' && before === 0 && d.on))){
+        location.reload();
+      }
+    })
+    .catch(function(err){ toast(err.message || 'could not update tag'); })
+    .then(function(){ button.disabled = false; });
 });
 
 // Share hands the item's own text (not its quoted post's) to the OS share

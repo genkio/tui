@@ -1451,6 +1451,68 @@ func TestSavedPageAndButton(t *testing.T) {
 	}
 }
 
+func TestSavedTagControlsAndFilters(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Title: "tagged twice"},
+		{App: "x", ID: "2", Title: "fun"},
+		{App: "reddit", ID: "3", Title: "nothing yet"},
+	}
+	tags := map[string][]string{
+		items[0].Key(): {"later", "useful"},
+		items[1].Key(): {"fun"},
+	}
+	q := url.Values{"saved": {"1"}, "compact": {"1"}, "app": {"reddit"}, "tag": {"later"}}
+	chips := savedTagFilters(items, tags, "later", q)
+	page := renderInput(t, pageInput{
+		items: items, total: len(items), now: time.Now(), savedView: true, savedCompact: true,
+		query: q, tags: tags, tagFilters: chips,
+	})
+	for _, want := range []string{
+		`id="tagfilters"`,
+		`<span class="filtersep">|</span>`,
+		`data-key="untagged"`,
+		`data-key="later" data-on="1"`,
+		`class="fchip hid"`,
+		`var TAG_OPTIONS = ["later","useful","list","fun","nsfw"]`,
+		`if(SAVED_VIEW) document.querySelectorAll('article.card')`,
+		`footer.insertAdjacentElement('afterend', row)`,
+		`fetch('/tags', {method:'POST', body:fd})`,
+		`chip.classList.toggle('hid', next === 0 && chip.dataset.on !== '1')`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("saved tag UI missing %q: %s", want, page)
+		}
+	}
+	if strings.Contains(page, `<div class="filters tagfilters"`) {
+		t.Fatal("tag filters should share the source/type row")
+	}
+	counts := map[string]int{}
+	for _, chip := range chips {
+		counts[chip.Key] = chip.Count
+	}
+	if counts["later"] != 1 || counts["useful"] != 1 || counts["fun"] != 1 || counts["untagged"] != 1 || counts["list"] != 0 {
+		t.Fatalf("tag counts = %v", counts)
+	}
+	if got := filterSavedByTag(items, tags, "later"); len(got) != 1 || got[0].ID != "1" {
+		t.Fatalf("later filter = %+v", got)
+	}
+	if got := filterSavedByTag(items, tags, "untagged"); len(got) != 1 || got[0].ID != "3" {
+		t.Fatalf("untagged filter = %+v", got)
+	}
+	if got := tagHref(q, "later", true); got != "/?app=reddit&compact=1&saved=1" {
+		t.Fatalf("cleared tag href = %q", got)
+	}
+	if got := tagHref(q, "fun", false); got != "/?app=reddit&compact=1&saved=1&tag=fun" {
+		t.Fatalf("changed tag href = %q", got)
+	}
+	if got := chipHref(q, feedSel{Kind: "app", Key: "x"}); got != "/?app=x&compact=1&saved=1&tag=later" {
+		t.Fatalf("source href dropped tag filter: %q", got)
+	}
+	if got := savedModeHref(q, true); got != "/?app=reddit&compact=0&saved=1&tag=later" {
+		t.Fatalf("layout href dropped tag filter: %q", got)
+	}
+}
+
 func TestCardType(t *testing.T) {
 	cases := []struct {
 		name string
@@ -2106,6 +2168,55 @@ func TestFeedbackHandlerStoresAndRevisesChoice(t *testing.T) {
 	}
 	if title != live.Title {
 		t.Fatalf("rendered-only item title = %q, want %q", title, live.Title)
+	}
+}
+
+func TestTagHandlerTogglesMultipleSavedTags(t *testing.T) {
+	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	saved, err := loadSavedDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags := loadTagsDB(db)
+	it := core.Item{App: "reddit", ID: "saved", Title: "label me"}
+	if err := saved.add(it, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	post := func(app, id, tag, on string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{"app": {app}, "id": {id}, "tag": {tag}, "on": {on}}
+		r := httptest.NewRequest(http.MethodPost, "/tags", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handleTag(rec, r, tags, saved)
+		return rec
+	}
+
+	for _, tag := range []string{"later", "useful"} {
+		if rec := post(it.App, it.ID, tag, "1"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"on":true`) {
+			t.Fatalf("adding %s = %d %s", tag, rec.Code, rec.Body.String())
+		}
+	}
+	got, err := tags.all()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !itemHasTag(got, it.Key(), "later") || !itemHasTag(got, it.Key(), "useful") {
+		t.Fatalf("stored tags = %v", got[it.Key()])
+	}
+	if rec := post(it.App, it.ID, "later", "0"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"on":false`) {
+		t.Fatalf("removing later = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post(it.App, it.ID, "unknown", "1"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown tag status = %d, want 400", rec.Code)
+	}
+	if rec := post(it.App, "missing", "fun", "1"); rec.Code != http.StatusConflict {
+		t.Fatalf("unsaved item status = %d, want 409", rec.Code)
 	}
 }
 

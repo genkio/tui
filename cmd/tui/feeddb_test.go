@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -297,6 +298,52 @@ func TestFeedDBKeepsFeedbackAndItsItem(t *testing.T) {
 	}
 	if title != it.Title {
 		t.Fatalf("labeled item title = %q, want %q", title, it.Title)
+	}
+}
+
+func TestSavedItemTagsPersistUntilUnsave(t *testing.T) {
+	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	saved, err := loadSavedDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags := loadTagsDB(db)
+	now := time.Now()
+	it := core.Item{App: "reddit", ID: "tagged", Title: "keep these labels"}
+	if err := saved.add(it, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []string{"later", "useful"} {
+		if err := tags.set(it.App, it.ID, tag, true, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := saved.setPos(it.App, it.ID, "https://media.test/a.mp4", 42); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tags.all()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !itemHasTag(got, it.Key(), "later") || !itemHasTag(got, it.Key(), "useful") {
+		t.Fatalf("tags after saved-store rewrite = %v", got[it.Key()])
+	}
+	if err := saved.remove(it.App, it.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = tags.all()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got[it.Key()]) != 0 {
+		t.Fatalf("tags survived unsave: %v", got[it.Key()])
+	}
+	if err := tags.set(it.App, it.ID, "fun", true, now); !errors.Is(err, errTagItemNotSaved) {
+		t.Fatalf("tagging an unsaved item = %v, want %v", err, errTagItemNotSaved)
 	}
 }
 

@@ -157,6 +157,8 @@ type pageInput struct {
 	warn         string
 	saved        *savedStore
 	feedback     map[string]string
+	tags         map[string][]string
+	tagFilters   []filterChip
 	savedView    bool
 	savedCompact bool
 	// The block list, on every view: the header counts it from the feed and the
@@ -184,6 +186,7 @@ type pageData struct {
 	SavedView     bool // rendering the saved list rather than the live feed
 	SavedCompact  bool
 	SavedModeHref string
+	TagSelected   bool
 	// The block list. Blocked is its size, in the header and its link on every
 	// view; Keywords is how many words fill it, and KeywordText is those words
 	// as the modal's textarea shows them — one per line, blocked view only.
@@ -209,9 +212,12 @@ type pageData struct {
 	Filters   []filterGroup
 	// The second row: this source's subcategories, busiest first. Only ever
 	// filled when a source chip that has them is the one on.
-	Subs     []filterChip
-	Cards    []cardData
-	Feedback map[string]string
+	Subs       []filterChip
+	Cards      []cardData
+	Feedback   map[string]string
+	TagFilters []filterChip
+	SavedTags  map[string][]string
+	TagOptions []string
 }
 
 // filterGroup is one axis a list can be narrowed along. Its chips are all
@@ -222,13 +228,14 @@ type filterGroup struct {
 }
 
 type filterChip struct {
-	Kind  string // "app", "type" or "x", the axis this chip picks along
-	Key   string
-	Label string
-	Color string // the source's own chip color; blank for the content types
-	Count int
-	Href  string // the page this chip loads; the one already on links back to the whole list
-	On    bool
+	Kind   string // "app", "type" or "x", the axis this chip picks along
+	Key    string
+	Label  string
+	Color  string // the source's own chip color; blank for the content types
+	Count  int
+	Href   string // the page this chip loads; the one already on links back to the whole list
+	On     bool
+	Hidden bool
 	// x's For You is scraped on the spot and never cached, so from anywhere else
 	// there is no backlog of it to count: the chip is the icon alone until a
 	// round of it has actually been fetched.
@@ -402,6 +409,17 @@ func buildPageData(in pageInput) pageData {
 	if feedback == nil {
 		feedback = map[string]string{}
 	}
+	tags := in.tags
+	if tags == nil {
+		tags = map[string][]string{}
+	}
+	tagSelected := false
+	for _, chip := range in.tagFilters {
+		if chip.On {
+			tagSelected = true
+			break
+		}
+	}
 
 	return pageData{
 		Unread:        tally.unread(),
@@ -414,6 +432,7 @@ func buildPageData(in pageInput) pageData {
 		SavedView:     in.savedView,
 		SavedCompact:  in.savedCompact,
 		SavedModeHref: savedMode,
+		TagSelected:   tagSelected,
 		Blocked:       in.block.count(),
 		BlockedView:   in.blockedView,
 		ClearBlocked:  in.blockedView && in.block.count() > 0,
@@ -432,7 +451,68 @@ func buildPageData(in pageInput) pageData {
 		HasApps:       len(in.apps) > 0,
 		Cards:         cards,
 		Feedback:      feedback,
+		TagFilters:    in.tagFilters,
+		SavedTags:     tags,
+		TagOptions:    savedTagOptions,
 	}
+}
+
+func filterSavedByTag(items []core.Item, tags map[string][]string, tag string) []core.Item {
+	if tag == "" {
+		return items
+	}
+	out := make([]core.Item, 0, len(items))
+	for _, item := range items {
+		assigned := tags[item.Key()]
+		if tag == "untagged" {
+			if len(assigned) == 0 {
+				out = append(out, item)
+			}
+			continue
+		}
+		if itemHasTag(tags, item.Key(), tag) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func savedTagFilters(items []core.Item, tags map[string][]string, current string, q url.Values) []filterChip {
+	counts := map[string]int{}
+	for _, item := range items {
+		assigned := tags[item.Key()]
+		if len(assigned) == 0 {
+			counts["untagged"]++
+		}
+		for _, tag := range assigned {
+			if validSavedTag(tag) {
+				counts[tag]++
+			}
+		}
+	}
+	options := append([]string{"untagged"}, savedTagOptions...)
+	out := make([]filterChip, 0, len(options))
+	for _, tag := range options {
+		on := current == tag
+		out = append(out, filterChip{
+			Kind: "tag", Key: tag, Label: tag, Count: counts[tag], On: on,
+			Href: tagHref(q, tag, on), Hidden: counts[tag] == 0 && !on,
+		})
+	}
+	return out
+}
+
+func tagHref(q url.Values, tag string, on bool) string {
+	out := url.Values{}
+	for key, values := range q {
+		if key != "tag" && key != "json" {
+			out[key] = values
+		}
+	}
+	if !on {
+		out.Set("tag", tag)
+	}
+	return "/?" + out.Encode()
 }
 
 // appLabel and appColor are how a service shows up on a card: its short chip

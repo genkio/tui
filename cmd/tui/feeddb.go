@@ -292,6 +292,10 @@ func (s *feedDB) replaceSaved(items []savedItem) error {
 			return err
 		}
 	}
+	if _, err := tx.Exec(`DELETE FROM item_tags
+WHERE NOT EXISTS (SELECT 1 FROM saved_items WHERE saved_items.app=item_tags.app AND saved_items.id=item_tags.id)`); err != nil {
+		return err
+	}
 	if err := deleteUnreferencedItems(tx); err != nil {
 		return err
 	}
