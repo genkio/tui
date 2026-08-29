@@ -366,6 +366,12 @@ func TestBlockedPageIsTitlesOnly(t *testing.T) {
 	if !strings.Contains(page, "crypto again") {
 		t.Fatalf("the title should be on the row: %s", page)
 	}
+	if !strings.Contains(page, `class="card compact"`) || strings.Contains(page, `class="card compact expandable"`) {
+		t.Fatalf("blocked rows should keep their visible compact title: %s", page)
+	}
+	if !strings.Contains(page, `#state[data-blockedview="true"]+.wrap .ctitle{font-weight:400}`) {
+		t.Fatalf("blocked titles should use regular weight: %s", page)
+	}
 	for _, gone := range []string{
 		"a body nobody asked for",
 		`class="save"`,

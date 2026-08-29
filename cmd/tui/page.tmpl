@@ -4,18 +4,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <script>
-// Which way the feed runs, and whether it is a list or a deck, are this
-// browser's to remember; doing the sorting and the laying out is the server's,
-// because a page carries a window of the backlog and rearranging the cards
-// already here would work on a slice rather than the feed. So both live in the
-// URL, and this is all localStorage has to do with them: ask for the remembered
-// ones when the URL names none, before anything is drawn. A URL that does name
-// one is the answer instead, and becomes what is remembered — including the one
-// a toggle just sent us to. Both are settled in one pass so a browser that
-// wants the other of each is one redirect, not two.
+// Which way the feed runs, whether it is a list or a deck, and how saved items
+// are laid out are this browser's to remember. The server does the sorting and
+// laying out because a page carries a window of the backlog; rearranging cards
+// already here would work on a slice rather than the feed. These choices live
+// in the URL. localStorage supplies a remembered choice when the URL names
+// none; an explicit URL replaces the remembered choice. All preferences settle
+// in one pass, so restoration redirects at most once.
 //
-// The server serves the list to anyone who doesn't ask otherwise, so only the
-// deck is ever worth a redirect. A browser with nothing remembered yet gets one
+// The server defaults to the list and full saved cards, so only remembered
+// alternatives need a redirect. A browser with nothing remembered yet gets one
 // guess from the device it is: a coarse pointer is a thumb, and a thumb wants a
 // card at a time. Guessing once beats a flag on the server, which could only
 // ever be right about one of the devices reading the same feed.
@@ -23,14 +21,24 @@
   try{
     var u = new URL(location.href);
     if (u.pathname !== '/') return;
-    if (u.searchParams.get('saved') === '1' || u.searchParams.get('blocked') === '1') return;
+    function redirect(){ location.replace(u.toString()); }
+    var moved = false;
+    if (u.searchParams.get('saved') === '1'){
+      var compact = u.searchParams.get('compact');
+      if (compact === '1' || compact === '0') localStorage.setItem('tui:saved-compact', compact);
+      else if (localStorage.getItem('tui:saved-compact') === '1'){
+        u.searchParams.set('compact', '1'); moved = true;
+      }
+      if (moved) redirect();
+      return;
+    }
+    if (u.searchParams.get('blocked') === '1') return;
     // In the list a card is marked read by scrolling past it, which makes where
     // the page starts ours rather than the browser's to restore: Firefox puts a
     // reload back at the old offset, and every card above it would then be
     // reported as scrolled past by an observer that never saw you scroll. Start
     // at the top, where what is left of the list begins.
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-    var moved = false;
     var order = u.searchParams.get('order');
     if (order === 'asc' || order === 'desc') localStorage.setItem('tui:order', order);
     else if (localStorage.getItem('tui:order') === 'desc'){ u.searchParams.set('order', 'desc'); moved = true; }
@@ -41,7 +49,7 @@
       if (kept !== '1' && kept !== '0' && matchMedia('(pointer: coarse)').matches) kept = '1';
       if (kept === '1'){ u.searchParams.set('deck', '1'); moved = true; }
     }
-    if (moved) location.replace(u.toString());
+    if (moved) redirect();
   }catch(e){}
 })();
 </script>
@@ -81,19 +89,20 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   padding:14px 16px;margin-bottom:12px;
 }
 .ctitle{font-size:17px;line-height:1.35;font-weight:650;color:var(--fg)}
+#state[data-blockedview="true"]+.wrap .ctitle{font-weight:400}
 .compact-only{display:none}
-.card.compact>.preview>.ctitle:not(.compact-only),
-.card.compact>.preview>.body,
-.card.compact>.full,
-.card.compact>.vidbox,
-.card.compact>.aud,
-.card.compact>.imgbox,
-.card.compact>.quote,
-.card.compact>.yt,
-.card.compact>.yt-embed,
-.card.compact>.yt-blocked,
-.card.compact>.tagrows{display:none}
-.card.compact .compact-only{display:block}
+.card.compact.expandable>.preview>.ctitle:not(.compact-only),
+.card.compact.expandable>.preview>.body,
+.card.compact.expandable>.full,
+.card.compact.expandable>.vidbox,
+.card.compact.expandable>.aud,
+.card.compact.expandable>.imgbox,
+.card.compact.expandable>.quote,
+.card.compact.expandable>.yt,
+.card.compact.expandable>.yt-embed,
+.card.compact.expandable>.yt-blocked,
+.card.compact.expandable>.tagrows{display:none}
+.card.compact.expandable .compact-only{display:block}
 .card.compact[data-app="x"] .ctitle{
   display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:3;
   font-size:15px;font-weight:400;white-space:pre-wrap;word-break:break-word;
@@ -1462,4 +1471,4 @@ document.addEventListener('click', function(e){
 });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card{{if .Compact}} compact{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div>{{if .ShowActions}}<div class="tagrows"><div class="tagrow pos"><span class="tagpol">+</span><button class="tag" type="button">useful</button><button class="tag" type="button">insightful</button><button class="tag" type="button">novel</button><button class="tag" type="button">entertaining</button><button class="tag" type="button">follow-up</button><button class="tagadd" type="button" title="add or edit positive tags">+</button></div><div class="tagrow neg"><span class="tagpol">−</span><button class="tag" type="button">repetitive</button><button class="tag" type="button">shallow</button><button class="tag" type="button">clickbait</button><button class="tag" type="button">irrelevant</button><button class="tag" type="button">too long</button><button class="tagadd" type="button" title="add or edit negative tags">+</button></div></div>{{end}}</article>{{end}}
+{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div>{{if .ShowActions}}<div class="tagrows"><div class="tagrow pos"><span class="tagpol">+</span><button class="tag" type="button">useful</button><button class="tag" type="button">insightful</button><button class="tag" type="button">novel</button><button class="tag" type="button">entertaining</button><button class="tag" type="button">follow-up</button><button class="tagadd" type="button" title="add or edit positive tags">+</button></div><div class="tagrow neg"><span class="tagpol">−</span><button class="tag" type="button">repetitive</button><button class="tag" type="button">shallow</button><button class="tag" type="button">clickbait</button><button class="tag" type="button">irrelevant</button><button class="tag" type="button">too long</button><button class="tagadd" type="button" title="add or edit negative tags">+</button></div></div>{{end}}</article>{{end}}

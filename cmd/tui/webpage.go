@@ -832,6 +832,8 @@ func savedModeHref(q url.Values, compact bool) string {
 	}
 	if !compact {
 		out.Set("compact", "1")
+	} else {
+		out.Set("compact", "0")
 	}
 	return "/?" + out.Encode()
 }

@@ -1360,6 +1360,15 @@ func TestSavedPageAndButton(t *testing.T) {
 	if !strings.Contains(page, `id="savedmode"`) || !strings.Contains(page, `>full</a>`) || !strings.Contains(page, `compact=1`) {
 		t.Fatalf("the full saved view should offer its compact counterpart: %s", page)
 	}
+	for _, persistence := range []string{
+		`localStorage.setItem('tui:saved-compact', compact)`,
+		`localStorage.getItem('tui:saved-compact') === '1'`,
+		`u.searchParams.set('compact', '1')`,
+	} {
+		if !strings.Contains(page, persistence) {
+			t.Fatalf("saved layout should persist through %q: %s", persistence, page)
+		}
+	}
 
 	items := store.list(time.Now())
 	compact := renderInput(t, pageInput{
@@ -1383,7 +1392,7 @@ func TestSavedPageAndButton(t *testing.T) {
 	if !strings.Contains(compact, "kept") {
 		t.Fatalf("compact saved row lost its title: %s", compact)
 	}
-	if got := savedModeHref(url.Values{"saved": {"1"}, "compact": {"1"}, "app": {"reddit"}}, true); got != "/?app=reddit&saved=1" {
+	if got := savedModeHref(url.Values{"saved": {"1"}, "compact": {"1"}, "app": {"reddit"}}, true); got != "/?app=reddit&compact=0&saved=1" {
 		t.Fatalf("full-mode href = %q, want saved filter preserved", got)
 	}
 	if got := buildSavedCompactCard(core.Item{App: "x", ID: "8", Title: "post text", Body: "post text"}, listClips).ListTitle; got != "post text" {
@@ -1394,7 +1403,7 @@ func TestSavedPageAndButton(t *testing.T) {
 		total: 1, now: time.Now(), saved: store, savedView: true, savedCompact: true,
 		query: url.Values{"saved": {"1"}, "compact": {"1"}},
 	})
-	if !strings.Contains(xCompact, `class="card compact" data-app="x"`) {
+	if !strings.Contains(xCompact, `class="card compact expandable" data-app="x"`) {
 		t.Fatalf("compact x post needs its compact text treatment: %s", xCompact)
 	}
 
