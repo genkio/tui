@@ -283,31 +283,41 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	}
 }
 
-func TestDeckEdgeNavigation(t *testing.T) {
+func TestDeckFeedbackNavigation(t *testing.T) {
 	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}
-	deck := renderSwipePage(t, items)
-	if !strings.Contains(deck, `id="leftCard" class="decknav" type="button" title="mark unread and show the previous card" disabled><svg`) {
-		t.Fatalf("expected a disabled previous control on the first card: %s", deck)
+	deck := renderInput(t, pageInput{
+		items: items, total: len(items), apps: []string{"x", "reddit"}, now: time.Now(), swipe: true,
+		feedback: map[string]string{items[0].Key(): "down"},
+	})
+	if !strings.Contains(deck, `id="thumbDown" class="feedbackbtn"`) ||
+		!strings.Contains(deck, `id="thumbUp" class="feedbackbtn"`) {
+		t.Fatalf("expected both feedback controls: %s", deck)
 	}
-	if !strings.Contains(deck, `id="rightCard" class="decknav" type="button" title="mark read and show the next card"><svg`) {
-		t.Fatalf("expected a read-and-next control: %s", deck)
-	}
-	if !strings.Contains(deck, `<path d="M15 18L9 12L15 6"/>`) || !strings.Contains(deck, `<path d="M9 18L15 12L9 6"/>`) {
-		t.Errorf("expected a drawn chevron in each direction: %s", deck)
-	}
-	if !strings.Contains(deck, `id="deckControls" class="deckcontrols"`) ||
+	if !strings.Contains(deck, `id="deckFeedback" class="deckfeedback"`) ||
 		!strings.Contains(deck, `left:max(-8px,calc(50% - 328px))`) ||
-		!strings.Contains(deck, `.deckcontrols.right{left:auto;right:max(-8px,calc(50% - 328px))}`) {
-		t.Errorf("the chevrons should share one movable edge control: %s", deck)
+		!strings.Contains(deck, `.deckfeedback.right{left:auto;right:max(-8px,calc(50% - 328px))}`) {
+		t.Errorf("the thumbs should share one movable edge control: %s", deck)
 	}
-	if !strings.Contains(deck, `leftBtn.disabled = at === 0;`) {
-		t.Error("previous should be disabled on the first card")
+	if !strings.Contains(deck, `"x\u00001":"down"`) ||
+		!strings.Contains(deck, `downBtn.classList.toggle('chosen', choice === 'down')`) ||
+		!strings.Contains(deck, `upBtn.classList.toggle('chosen', choice === 'up')`) {
+		t.Error("a revisited card should show its persisted feedback")
+	}
+	if !strings.Contains(deck, `footer.insertBefore(button, footer.firstChild)`) ||
+		!strings.Contains(deck, `button.className = 'deckback'`) ||
+		!strings.Contains(deck, `if(backBtn) backBtn.disabled = at === 0`) {
+		t.Error("each deck footer should put a disabled back button before open on the first card")
+	}
+	if !strings.Contains(deck, `fetch('/feedback', {method:'POST', body:fd})`) ||
+		!strings.Contains(deck, `fd.append('feedback', choice)`) ||
+		!strings.Contains(deck, `mark(card)`) {
+		t.Error("both feedback choices should persist, mark read, and advance")
 	}
 	if strings.Contains(deck, `deck.addEventListener('pointerdown'`) {
 		t.Error("the old card drag handler should stay gone")
 	}
 	if strings.Contains(deck, "classList.add('fly')") || strings.Contains(deck, ".deck .card.fly") {
-		t.Error("chevron navigation should switch cards without the old swipe animation")
+		t.Error("feedback navigation should switch cards without the old swipe animation")
 	}
 	if !strings.Contains(deck, `return markFlights.then(function(){`) ||
 		!strings.Contains(deck, `return fetch('/unmark', {method:'POST', body:fd})`) {
@@ -604,19 +614,18 @@ func TestChipGroupsShareOneRow(t *testing.T) {
 	}
 }
 
-// The deck takes h/l as well as the arrows; moving the controls does not change
-// what either direction does.
+// The deck takes h/l as quick negative/positive feedback; moving the controls
+// does not change that mapping.
 func TestDeckTakesVimKeys(t *testing.T) {
 	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
 	if !strings.Contains(p, `k === 'ArrowLeft' || k === 'h' || k === 'H'`) {
-		t.Error("h should walk back, like the left arrow")
+		t.Error("h should give negative feedback, like the left arrow")
 	}
 	if !strings.Contains(p, `k === 'ArrowRight' || k === 'l' || k === 'L'`) {
-		t.Error("l should deal the next card, like the right arrow")
+		t.Error("l should give positive feedback, like the right arrow")
 	}
-	if !strings.Contains(p, `function leftAction(){ back(); }`) ||
-		!strings.Contains(p, `function rightAction(){ read(); }`) {
-		t.Error("moving the controls must not swap their actions")
+	if !strings.Contains(p, `sendFeedback('down')`) || !strings.Contains(p, `sendFeedback('up')`) {
+		t.Error("the keyboard should use the same feedback path as the thumb buttons")
 	}
 	// j/k are the terminal's vertical pair; up and down stay the page's scroll,
 	// so the deck must not claim them.
@@ -705,11 +714,11 @@ func TestRenderPageFreshness(t *testing.T) {
 	if strings.Contains(p, `fetch('/refresh'`) || strings.Contains(p, `id="refresh"`) {
 		t.Fatal("the count should no longer trigger a fetch: " + p)
 	}
-	if !strings.Contains(p, `<span>place deck arrows on right</span><input id="arrowsRight" type="checkbox">`) ||
-		!strings.Contains(p, `localStorage.setItem('tui:deck-arrows-right', ARROWS_RIGHT ? '1' : '0')`) ||
-		!strings.Contains(p, `controls.classList.toggle('right', ARROWS_RIGHT)`) ||
+	if !strings.Contains(p, `<span>place feedback buttons on right</span><input id="feedbackRight" type="checkbox">`) ||
+		!strings.Contains(p, `localStorage.setItem('tui:deck-feedback-right', FEEDBACK_RIGHT ? '1' : '0')`) ||
+		!strings.Contains(p, `controls.classList.toggle('right', FEEDBACK_RIGHT)`) ||
 		!strings.Contains(p, `settingsDlg.showModal()`) {
-		t.Fatal("the native settings dialog should persist the arrow toggle: " + p)
+		t.Fatal("the native settings dialog should persist the feedback placement toggle: " + p)
 	}
 	if !strings.Contains(p, `id="upd">just now`) {
 		t.Fatal("expected the freshness label: " + p)
@@ -2041,6 +2050,62 @@ func TestUnmarkHandler(t *testing.T) {
 	}
 	if rec := post(url.Values{"app": {"x"}}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing id status = %d, want 400", rec.Code)
+	}
+}
+
+func TestFeedbackHandlerStoresAndRevisesChoice(t *testing.T) {
+	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	cache, err := loadFeedCacheDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := loadFeedbackDB(db)
+	rendered := newRenderedItems()
+	it := core.Item{App: "x", ID: "50", Title: "post"}
+	cache.upsert([]core.Item{it}, time.Now())
+
+	post := func(app, id, choice string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{"app": {app}, "id": {id}, "feedback": {choice}}
+		r := httptest.NewRequest(http.MethodPost, "/feedback", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handleFeedback(rec, r, store, cache, rendered)
+		return rec
+	}
+
+	for _, choice := range []string{"down", "up"} {
+		rec := post(it.App, it.ID, choice)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"feedback":"`+choice+`"`) {
+			t.Fatalf("%s response = %d %s", choice, rec.Code, rec.Body.String())
+		}
+		got, err := store.all()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[it.Key()] != choice {
+			t.Fatalf("stored feedback = %q, want %q", got[it.Key()], choice)
+		}
+	}
+	if rec := post(it.App, it.ID, "maybe"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid feedback status = %d, want 400", rec.Code)
+	}
+
+	live := core.Item{App: "x", ID: "live", Title: "for you"}
+	rendered.put([]core.Item{live})
+	if rec := post(live.App, live.ID, "up"); rec.Code != http.StatusOK {
+		t.Fatalf("rendered-only feedback = %d %s", rec.Code, rec.Body.String())
+	}
+	var title string
+	if err := db.db.QueryRow(`SELECT title FROM items WHERE app=? AND id=?`, live.App, live.ID).Scan(&title); err != nil {
+		t.Fatal(err)
+	}
+	if title != live.Title {
+		t.Fatalf("rendered-only item title = %q, want %q", title, live.Title)
 	}
 }
 

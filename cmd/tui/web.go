@@ -81,6 +81,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	if err != nil {
 		return err
 	}
+	feedback := loadFeedbackDB(db)
 	block, err := loadBlockerDB(db)
 	if err != nil {
 		return err
@@ -118,7 +119,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, sweep, saved, block, rendered)
+		handleAll(w, r, root, loader, cache, sweep, saved, feedback, block, rendered)
 	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -158,6 +159,14 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			return
 		}
 		handleSave(w, r, saved, cache, rendered)
+	})
+	mux.HandleFunc("/feedback", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleFeedback(w, r, feedback, cache, rendered)
 	})
 	mux.HandleFunc("/keywords", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -327,7 +336,7 @@ func clientWindow(deck bool) int {
 // live and deliberately left out of the backlog, being an endless firehose
 // rather than a list to get to the end of, so that chip serves only what the
 // fetch brings back.
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, block *blocker, rendered *renderedItems) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, feedback *feedbackStore, block *blocker, rendered *renderedItems) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
 	tmpl, err := loader.load()
@@ -435,11 +444,17 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// Remember what this page showed so a save button can post back just an
 	// app+id and still persist the whole item, even for the uncached For You.
 	rendered.put(items)
+	feedbacks, err := feedback.all()
+	if err != nil {
+		http.Error(w, "feedback: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	writePage(w, tmpl, pageInput{
 		items: items, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
-		swipe: deck, asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
+		feedback: feedbacks,
+		swipe:    deck, asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
 }
 
@@ -486,6 +501,33 @@ func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, cache
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"saved":%d}`, saved.count())
+}
+
+func handleFeedback(w http.ResponseWriter, r *http.Request, feedback *feedbackStore, cache *feedCache, rendered *renderedItems) {
+	app, id, choice := r.FormValue("app"), r.FormValue("id"), r.FormValue("feedback")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	if choice != "up" && choice != "down" {
+		http.Error(w, "feedback must be up or down", http.StatusBadRequest)
+		return
+	}
+	now := time.Now()
+	it, ok := cache.item(app, id, now)
+	if !ok {
+		it, ok = rendered.get(app, id)
+	}
+	if !ok {
+		http.Error(w, "item is no longer in view; reload the page", http.StatusConflict)
+		return
+	}
+	if err := feedback.set(it, choice, now); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"feedback":%q}`, choice)
 }
 
 // handleKeywords replaces the block list with what the modal's textarea holds,

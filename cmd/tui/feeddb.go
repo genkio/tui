@@ -174,6 +174,7 @@ func deleteUnreferencedItems(tx *sql.Tx) error {
 	_, err := tx.Exec(`DELETE FROM items
 WHERE NOT EXISTS (SELECT 1 FROM feed_items WHERE feed_items.app=items.app AND feed_items.id=items.id)
   AND NOT EXISTS (SELECT 1 FROM saved_items WHERE saved_items.app=items.app AND saved_items.id=items.id)
+  AND NOT EXISTS (SELECT 1 FROM item_feedback WHERE item_feedback.app=items.app AND item_feedback.id=items.id)
   AND NOT EXISTS (SELECT 1 FROM blocked_items WHERE blocked_items.app=items.app AND blocked_items.id=items.id)`)
 	return err
 }

@@ -156,6 +156,7 @@ type pageInput struct {
 	query        url.Values // this page's query, which the chip links are built from
 	warn         string
 	saved        *savedStore
+	feedback     map[string]string
 	savedView    bool
 	savedCompact bool
 	// The block list, on every view: the header counts it from the feed and the
@@ -208,8 +209,9 @@ type pageData struct {
 	Filters   []filterGroup
 	// The second row: this source's subcategories, busiest first. Only ever
 	// filled when a source chip that has them is the one on.
-	Subs  []filterChip
-	Cards []cardData
+	Subs     []filterChip
+	Cards    []cardData
+	Feedback map[string]string
 }
 
 // filterGroup is one axis a list can be narrowed along. Its chips are all
@@ -396,6 +398,10 @@ func buildPageData(in pageInput) pageData {
 	} else if in.savedView && len(in.items) > 0 {
 		savedMode = savedModeHref(in.query, in.savedCompact)
 	}
+	feedback := in.feedback
+	if feedback == nil {
+		feedback = map[string]string{}
+	}
 
 	return pageData{
 		Unread:        tally.unread(),
@@ -425,6 +431,7 @@ func buildPageData(in pageInput) pageData {
 		Warn:          in.warn,
 		HasApps:       len(in.apps) > 0,
 		Cards:         cards,
+		Feedback:      feedback,
 	}
 }
 

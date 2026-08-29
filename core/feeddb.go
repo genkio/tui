@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS saved_items (
   PRIMARY KEY (app, id),
   FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS item_feedback (
+  app TEXT NOT NULL,
+  id TEXT NOT NULL,
+  feedback TEXT NOT NULL CHECK (feedback IN ('up', 'down')),
+  feedback_at TEXT NOT NULL,
+  PRIMARY KEY (app, id),
+  FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS keywords (
   keyword TEXT PRIMARY KEY COLLATE NOCASE,
   ordinal INTEGER NOT NULL
