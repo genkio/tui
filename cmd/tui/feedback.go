@@ -48,3 +48,13 @@ ON CONFLICT(app,id) DO UPDATE SET feedback=excluded.feedback,feedback_at=exclude
 	}
 	return tx.Commit()
 }
+
+func feedbackForItems(items []core.Item, feedback map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, item := range items {
+		if choice := feedback[item.Key()]; choice != "" {
+			out[item.Key()] = choice
+		}
+	}
+	return out
+}

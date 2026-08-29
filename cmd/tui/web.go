@@ -447,8 +447,16 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	if q.Get("json") == "1" {
 		rendered.put(items)
+		feedbacks, err := feedback.all()
+		if err != nil {
+			http.Error(w, "feedback: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		meta := feedAPIResponse{Apps: apps, Warn: warn, Fetching: sweep.sweeping(), Capped: capped}
+		meta := feedAPIResponse{
+			Apps: apps, Warn: warn, Fetching: sweep.sweeping(), Capped: capped,
+			Feedback: feedbackForItems(items, feedbacks),
+		}
 		if updated := cache.sweptAt(); !updated.IsZero() {
 			meta.Updated = updated.UTC().Format(time.RFC3339)
 		}

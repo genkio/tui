@@ -2,11 +2,14 @@ package core
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 )
+
+var ansiStyleRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func TestTruncateDisplayWidth(t *testing.T) {
 	if got := truncate("hello", 10); got != "hello" {
@@ -88,7 +91,7 @@ func TestMediaTypePrefixesTitle(t *testing.T) {
 		{App: "inoreader", ID: "2", Type: "audio", Title: "listen to this"},
 		{App: "reddit", ID: "3", Type: "text", Title: "read this"},
 	}, true)
-	view := f.View()
+	view := ansiStyleRE.ReplaceAllString(f.View(), "")
 	for _, want := range []string{"🎬 watch this", "🔊 listen to this", "read this"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("feed missing %q:\n%s", want, view)
@@ -96,6 +99,29 @@ func TestMediaTypePrefixesTitle(t *testing.T) {
 	}
 	if strings.Contains(view, "🎬 read this") || strings.Contains(view, "🔊 read this") {
 		t.Fatalf("text item gained a media prefix:\n%s", view)
+	}
+}
+
+func TestFeedbackMarkerFollowsAge(t *testing.T) {
+	f := NewFeed(NewTheme(true), false)
+	f.SetSize(48, 8)
+	f.SetItems([]Item{
+		{App: "x", ID: "1", Title: "positive", Age: "2m", Feedback: "up"},
+		{App: "x", ID: "2", Title: "negative", Age: "3m", Feedback: "down"},
+		{App: "x", ID: "3", Title: "neutral", Age: "4m"},
+	}, true)
+	view := ansiStyleRE.ReplaceAllString(f.View(), "")
+	for _, want := range []string{"2m +", "3m -"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("feed missing feedback suffix %q:\n%s", want, view)
+		}
+	}
+	f.SetFeedback(Key("x", "3"), "up")
+	if got := f.Items()[2].Feedback; got != "up" {
+		t.Fatalf("SetFeedback stored %q, want up", got)
+	}
+	if !strings.Contains(ansiStyleRE.ReplaceAllString(f.View(), ""), "4m +") {
+		t.Fatalf("updated marker missing:\n%s", f.View())
 	}
 }
 

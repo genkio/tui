@@ -63,6 +63,72 @@ func TestAllHelpKeepsReadBehaviorImplicit(t *testing.T) {
 	}
 }
 
+func TestAllHighLowFeedbackMarksAndMoves(t *testing.T) {
+	var choices []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/feedback" {
+			t.Fatalf("feedback path = %q", r.URL.Path)
+		}
+		choices = append(choices, r.FormValue("feedback"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	items := []core.Item{
+		{App: "x", ID: "1", Title: "first"},
+		{App: "reddit", ID: "2", Title: "second"},
+	}
+	m := xFeed(t, items)
+	m.server = server.URL
+
+	got, cmd := m.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if cmd == nil {
+		t.Fatal("h should send positive feedback")
+	}
+	msg := cmd().(feedbackMsg)
+	got, _ = got.Update(msg)
+	if choices[0] != "up" || got.feed.Items()[0].Feedback != "up" || !got.feed.IsRead(items[0].Key()) || got.feed.Cursor() != 1 {
+		t.Fatalf("after h: choices=%v item=%+v read=%t cursor=%d", choices, got.feed.Items()[0], got.feed.IsRead(items[0].Key()), got.feed.Cursor())
+	}
+	if got.status != "High (+)." {
+		t.Fatalf("high status = %q", got.status)
+	}
+
+	got, cmd = got.handleKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	msg = cmd().(feedbackMsg)
+	got, _ = got.Update(msg)
+	if choices[1] != "down" || got.feed.Items()[1].Feedback != "down" || !got.feed.IsRead(items[1].Key()) {
+		t.Fatalf("after l: choices=%v item=%+v read=%t", choices, got.feed.Items()[1], got.feed.IsRead(items[1].Key()))
+	}
+	if got.status != "Low (-)." {
+		t.Fatalf("low status = %q", got.status)
+	}
+
+	keys := defaultAllKeys()
+	if keys.High.Help().Key != "h" || keys.Low.Help().Key != "l" {
+		t.Fatalf("feedback help = %q, %q", keys.High.Help().Key, keys.Low.Help().Key)
+	}
+}
+
+func TestAllFeedbackFailureKeepsItemInPlace(t *testing.T) {
+	item := core.Item{App: "x", ID: "1", Title: "post"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	m := xFeed(t, []core.Item{item})
+	m.server = server.URL
+
+	got, cmd := m.handleKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	got, _ = got.Update(cmd().(feedbackMsg))
+	if got.feed.Items()[0].Feedback != "" || got.feed.IsRead(item.Key()) || got.feed.Cursor() != 0 {
+		t.Fatalf("failed feedback changed the row: %+v", got.feed.Items()[0])
+	}
+	if !got.statusErr || !strings.Contains(got.status, "database unavailable") {
+		t.Fatalf("failure status = %q", got.status)
+	}
+}
+
 func TestOfferableX(t *testing.T) {
 	mk := func(apps []string, xTab string, items []core.Item) allModel {
 		m := xFeed(t, items)

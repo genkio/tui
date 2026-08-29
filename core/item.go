@@ -14,22 +14,23 @@ import (
 // identifies it across apps, since ids collide between services (a numeric
 // inoreader id and an x tweet id).
 type Item struct {
-	App     string
-	ID      string
-	Title   string
-	Body    string
-	Source  string // @handle for x; a feed title in the readers
-	Author  string
-	URL     string
-	Age     string
-	At      time.Time // publish time for the merged sort; zero sinks to the bottom
-	Type    string    // text, video, or audio when the feed service classified it
-	Video   string    // direct mp4 of an attached video, when the app provides one
-	Poster  string    // still frame shown before Video plays
-	VidSecs int       // Video's length in seconds; 0 when the app reported none
-	Audio   string    // direct audio file of an attached episode (a podcast enclosure)
-	Images  []string  // attached still images; the web card reveals them on demand
-	Quote   *Quote    // the post this one embeds (an x quote), if any
+	App      string
+	ID       string
+	Title    string
+	Body     string
+	Source   string // @handle for x; a feed title in the readers
+	Author   string
+	URL      string
+	Age      string
+	Feedback string    // "up" or "down" from the shared server; empty when unreacted
+	At       time.Time // publish time for the merged sort; zero sinks to the bottom
+	Type     string    // text, video, or audio when the feed service classified it
+	Video    string    // direct mp4 of an attached video, when the app provides one
+	Poster   string    // still frame shown before Video plays
+	VidSecs  int       // Video's length in seconds; 0 when the app reported none
+	Audio    string    // direct audio file of an attached episode (a podcast enclosure)
+	Images   []string  // attached still images; the web card reveals them on demand
+	Quote    *Quote    // the post this one embeds (an x quote), if any
 }
 
 // Quote is the post an item embeds. It stays structured rather than folded into

@@ -98,6 +98,16 @@ func (f *Feed) SetSize(w, h int) {
 
 func (f *Feed) MarkRead(key string) { f.read[key] = true; f.render() }
 
+func (f *Feed) SetFeedback(key, feedback string) {
+	for i := range f.items {
+		if f.items[i].Key() == key {
+			f.items[i].Feedback = feedback
+			f.render()
+			return
+		}
+	}
+}
+
 // Unmark undoes a mark whose persist failed (or an optimistic mark the caller
 // revokes), so the row returns to unread.
 func (f *Feed) Unmark(key string) { delete(f.read, key); f.render() }
@@ -275,6 +285,17 @@ func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 	if read {
 		age = th.Read.Render(it.Age)
 	}
+	marker := "  "
+	if symbol := feedbackMarker(it.Feedback); symbol != "" {
+		style := th.StatusErr
+		if it.Feedback == "up" {
+			style = th.StatusInfo
+		}
+		if read {
+			style = th.Read
+		}
+		marker = " " + style.Render(symbol)
+	}
 
 	titleSt := th.Title
 	switch {
@@ -284,7 +305,7 @@ func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 		titleSt = th.TitleSel
 	}
 
-	fixed := lipgloss.Width(gutter) + chipSegW + srcSegW + 1 + lipgloss.Width(age)
+	fixed := lipgloss.Width(gutter) + chipSegW + srcSegW + 1 + lipgloss.Width(age) + lipgloss.Width(marker)
 	avail := f.width - fixed
 	if avail < 8 {
 		avail = 8
@@ -298,18 +319,29 @@ func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 	}
 	title := titleSt.Render(truncate(oneLine, avail))
 
-	used := lipgloss.Width(gutter) + chipSegW + srcSegW + lipgloss.Width(title) + lipgloss.Width(age)
+	used := lipgloss.Width(gutter) + chipSegW + srcSegW + lipgloss.Width(title) + lipgloss.Width(age) + lipgloss.Width(marker)
 	pad := f.width - used
 	if pad < 1 {
 		pad = 1
 	}
-	header := gutter + chipSeg + srcSeg + title + strings.Repeat(" ", pad) + age
+	header := gutter + chipSeg + srcSeg + title + strings.Repeat(" ", pad) + age + marker
 	lines := []string{header}
 
 	if expanded {
 		lines = append(lines, f.renderBody(it)...)
 	}
 	return lines
+}
+
+func feedbackMarker(feedback string) string {
+	switch feedback {
+	case "up":
+		return "+"
+	case "down":
+		return "-"
+	default:
+		return ""
+	}
 }
 
 func mediaPrefix(it Item) string {
