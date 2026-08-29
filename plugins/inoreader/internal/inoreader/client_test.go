@@ -98,6 +98,17 @@ func TestUnreadsScrapesAndOrders(t *testing.T) {
 	}
 }
 
+func TestScrapeArticleExpandsTruncatedURLLabel(t *testing.T) {
+	const href = "https://housecat.com/blog/the-hugs-stack-hypermedia-unix-go-sqlite"
+	frag := `<a class="article_title_link" href="https://news.ycombinator.com/item?id=49480627">Comment</a>` +
+		`<div id="article_contents_inner_1"><p>More thoughts:</p><a href="` + href + `">https://housecat.com/blog/the-hugs-stack-hypermedia-unix-go-...</a></div>`
+
+	a := scrapeArticle("1", frag)
+	if a.Content != "More thoughts:\n"+href {
+		t.Errorf("content = %q, want full link destination", a.Content)
+	}
+}
+
 // A podcast subscription hangs the episode file off the player chrome, which
 // sits outside the article body, so the whole fragment has to be searched.
 func TestScrapeArticleFindsPodcastEnclosure(t *testing.T) {

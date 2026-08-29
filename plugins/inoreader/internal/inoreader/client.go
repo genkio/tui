@@ -311,6 +311,7 @@ func scrapeArticle(id, fragment string) Article {
 	walk(doc)
 
 	if content != nil {
+		expandTruncatedURLLabels(content)
 		var sb strings.Builder
 		for ch := content.FirstChild; ch != nil; ch = ch.NextSibling {
 			html.Render(&sb, ch)
@@ -320,6 +321,24 @@ func scrapeArticle(id, fragment string) Article {
 		a.Images = core.ImagesFromHTML(body)
 	}
 	return a
+}
+
+func expandTruncatedURLLabels(n *html.Node) {
+	if n.Type == html.ElementNode && n.Data == "a" {
+		label := strings.TrimSpace(textOf(n))
+		prefix := strings.TrimSuffix(strings.TrimSuffix(label, "..."), "…")
+		href := strings.TrimSpace(attr(n, "href"))
+		u, err := url.Parse(href)
+		if err == nil && prefix != label && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && strings.HasPrefix(href, prefix) {
+			for n.FirstChild != nil {
+				n.RemoveChild(n.FirstChild)
+			}
+			n.AppendChild(&html.Node{Type: html.TextNode, Data: href})
+		}
+	}
+	for ch := n.FirstChild; ch != nil; ch = ch.NextSibling {
+		expandTruncatedURLLabels(ch)
+	}
 }
 
 func attr(n *html.Node, key string) string {
