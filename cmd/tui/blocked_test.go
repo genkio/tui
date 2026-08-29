@@ -388,7 +388,7 @@ func TestBlockedPageIsTitlesOnly(t *testing.T) {
 	if !strings.Contains(page, `class="kw"`) || !strings.Contains(page, ">crypto</span>") {
 		t.Errorf("the row should name the keyword that caught it: %s", page)
 	}
-	if !strings.Contains(page, `href="https://x.test/1"`) {
+	if !strings.Contains(page, `href="https://old.reddit.com/comments/1/"`) {
 		t.Errorf("the row should still open the original: %s", page)
 	}
 	if !strings.Contains(page, `<span id="blockedn">1</span> blocked`) {

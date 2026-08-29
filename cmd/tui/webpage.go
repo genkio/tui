@@ -562,7 +562,7 @@ func buildBlockedCard(it core.Item, why string) cardData {
 		Author:  author,
 		Age:     it.Age,
 		Title:   itemTitle(it),
-		URL:     it.URL,
+		URL:     originalPostURL(it),
 		Type:    itemType(it),
 		Keyword: why,
 		Compact: true,
@@ -598,7 +598,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 		Author: author,
 		Age:    it.Age,
 		Title:  title,
-		URL:    it.URL,
+		URL:    originalPostURL(it),
 		Video:  it.Video,
 		Poster: it.Poster,
 		VidLen: vidLen(it.VidSecs),
@@ -632,6 +632,13 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	c.Type = itemType(it)
 	return c
+}
+
+func originalPostURL(it core.Item) string {
+	if it.App == "reddit" && it.ID != "" {
+		return "https://old.reddit.com/comments/" + url.PathEscape(it.ID) + "/"
+	}
+	return it.URL
 }
 
 // biliVideoRe matches the bvid in a bilibili watch URL. A series episode

@@ -894,6 +894,12 @@ func TestRenderCardRedgif(t *testing.T) {
 	if !strings.Contains(out, `<button class="rgv" type="button" data-on="0" data-id="elementaryhoarseflea"`) {
 		t.Fatalf("expected the footer video button, off until tapped: %s", out)
 	}
+	if !strings.Contains(out, `href="https://old.reddit.com/comments/1abc/"`) {
+		t.Fatalf("expected the footer to open the reddit post: %s", out)
+	}
+	if strings.Contains(out, `href="https://www.redgifs.com/watch/ElementaryHoarseFlea"`) {
+		t.Fatalf("redgifs should only provide the inline video, not the open target: %s", out)
+	}
 	// Nothing plays yet, so none of the player controls are rendered: the button
 	// brings them along when it swaps itself for the player.
 	if strings.Contains(out, "<video") || strings.Contains(out, `class="speed"`) {
