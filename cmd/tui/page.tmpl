@@ -1395,6 +1395,10 @@ if (SWIPE) (function(){
         if(upBtn) upBtn.disabled = false;
       });
   }
+  function read(){
+    var card = current();
+    if(card) mark(card);
+  }
   if (downBtn) downBtn.addEventListener('click', function(){ sendFeedback('down'); });
   if (upBtn) upBtn.addEventListener('click', function(){ sendFeedback('up'); });
   deck.addEventListener('click', function(e){
@@ -1402,14 +1406,14 @@ if (SWIPE) (function(){
     if(b) back();
   });
 
-  // Left/down and right/up preserve the deck's existing keyboard rhythm.
+  // Horizontal arrows navigate without preference; vertical arrows react.
   document.addEventListener('keydown', function(e){
     if (ffs || e.metaKey || e.ctrlKey || e.altKey) return;
     var k = e.key;
-    if (k === 'ArrowLeft' || k === 'h' || k === 'H'){ e.preventDefault(); sendFeedback('down'); }
-    else if (k === 'ArrowRight' || k === 'l' || k === 'L'){
-      e.preventDefault(); sendFeedback('up');
-    }
+    if (k === 'ArrowLeft'){ e.preventDefault(); back(); }
+    else if (k === 'ArrowRight'){ e.preventDefault(); read(); }
+    else if (k === 'ArrowUp'){ e.preventDefault(); sendFeedback('up'); }
+    else if (k === 'ArrowDown'){ e.preventDefault(); sendFeedback('down'); }
   });
   show();
 })();

@@ -614,23 +614,22 @@ func TestChipGroupsShareOneRow(t *testing.T) {
 	}
 }
 
-// The deck takes h/l as quick negative/positive feedback; moving the controls
-// does not change that mapping.
-func TestDeckTakesVimKeys(t *testing.T) {
+func TestDeckSeparatesKeyboardNavigationFromFeedback(t *testing.T) {
 	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
-	if !strings.Contains(p, `k === 'ArrowLeft' || k === 'h' || k === 'H'`) {
-		t.Error("h should give negative feedback, like the left arrow")
+	if !strings.Contains(p, `if (k === 'ArrowLeft'){ e.preventDefault(); back(); }`) {
+		t.Error("left should restore the previous item to unread")
 	}
-	if !strings.Contains(p, `k === 'ArrowRight' || k === 'l' || k === 'L'`) {
-		t.Error("l should give positive feedback, like the right arrow")
+	if !strings.Contains(p, `else if (k === 'ArrowRight'){ e.preventDefault(); read(); }`) {
+		t.Error("right should mark read and advance without feedback")
 	}
-	if !strings.Contains(p, `sendFeedback('down')`) || !strings.Contains(p, `sendFeedback('up')`) {
-		t.Error("the keyboard should use the same feedback path as the thumb buttons")
+	if !strings.Contains(p, `else if (k === 'ArrowUp'){ e.preventDefault(); sendFeedback('up'); }`) {
+		t.Error("up should give positive feedback")
 	}
-	// j/k are the terminal's vertical pair; up and down stay the page's scroll,
-	// so the deck must not claim them.
-	if strings.Contains(p, `=== 'j'`) || strings.Contains(p, `=== 'k'`) {
-		t.Error("the deck should not bind the vertical keys")
+	if !strings.Contains(p, `else if (k === 'ArrowDown'){ e.preventDefault(); sendFeedback('down'); }`) {
+		t.Error("down should give negative feedback")
+	}
+	if strings.Contains(p, `k === 'ArrowLeft' || k === 'h'`) || strings.Contains(p, `k === 'ArrowRight' || k === 'l'`) {
+		t.Error("web h/l bindings should stay out of the arrow-only mapping")
 	}
 }
 
