@@ -14,6 +14,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/muesli/cancelreader v0.2.2
 	github.com/sahilm/fuzzy v0.1.1
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/net v0.56.0
 	modernc.org/sqlite v1.57.0
 )

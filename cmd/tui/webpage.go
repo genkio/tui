@@ -15,6 +15,13 @@ import (
 	"unicode"
 
 	"github.com/genkio/tui/core"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	extensionast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/renderer"
+	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/util"
 )
 
 // The page markup/CSS/JS lives in page.tmpl, embedded so the release stays a
@@ -1023,43 +1030,100 @@ func redgifID(texts ...string) string {
 	return ""
 }
 
-// linkRe matches a URL plus any trailing punctuation (so "see http://x.com."
-// renders the period as plain text, not part of the link).
-var linkRe = regexp.MustCompile(`(https?://[^\s<>"']+)([.,;:!?)\]}"']*)`)
-var markdownLinkRe = regexp.MustCompile(`\[([^\]\r\n]+)\]\((https?://[^\s<>"']+)\)`)
+var cardMarkdown = func() goldmark.Markdown {
+	md := goldmark.New(
+		goldmark.WithExtensions(extension.Table, extension.Linkify),
+		goldmark.WithRendererOptions(goldmarkhtml.WithHardWraps()),
+	)
+	md.Renderer().AddOptions(renderer.WithNodeRenderers(util.Prioritized(cardHTMLRenderer{}, 100)))
+	return md
+}()
 
-// linkify HTML-escapes text and turns embedded URLs into clickable links that
-// open in a new tab; non-URL text is escaped as before.
+type cardHTMLRenderer struct{}
+
+func (cardHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindLink, renderCardLink)
+	reg.Register(ast.KindAutoLink, renderCardAutoLink)
+	reg.Register(ast.KindRawHTML, renderCardRawHTML)
+	reg.Register(ast.KindHTMLBlock, renderCardHTMLBlock)
+	reg.Register(extensionast.KindTable, renderCardTable)
+}
+
+func renderCardLink(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		writeCardLinkStart(w, node.(*ast.Link).Destination, true)
+	} else {
+		_, _ = w.WriteString("</a>")
+	}
+	return ast.WalkContinue, nil
+}
+
+func renderCardAutoLink(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	n := node.(*ast.AutoLink)
+	destination := string(n.URL(source))
+	if n.AutoLinkType == ast.AutoLinkEmail && !strings.HasPrefix(strings.ToLower(destination), "mailto:") {
+		destination = "mailto:" + destination
+	}
+	writeCardLinkStart(w, []byte(destination), false)
+	label := string(n.Label(source))
+	if n.AutoLinkType != ast.AutoLinkEmail {
+		label = linkLabel(label)
+	}
+	_, _ = w.Write(util.EscapeHTML([]byte(label)))
+	_, _ = w.WriteString("</a>")
+	return ast.WalkContinue, nil
+}
+
+func writeCardLinkStart(w util.BufWriter, destination []byte, escapeURL bool) {
+	href := util.URLEscape(destination, escapeURL)
+	_, _ = w.WriteString(`<a class="link" href="`)
+	if !goldmarkhtml.IsDangerousURL(href) {
+		_, _ = w.Write(util.EscapeHTML(href))
+	}
+	_, _ = w.WriteString(`" target="_blank" rel="noopener" title="`)
+	_, _ = w.Write(util.EscapeHTML(destination))
+	_, _ = w.WriteString(`">`)
+}
+
+func renderCardRawHTML(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.Write(util.EscapeHTML(node.(*ast.RawHTML).Text(source)))
+	}
+	return ast.WalkSkipChildren, nil
+}
+
+func renderCardHTMLBlock(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	n := node.(*ast.HTMLBlock)
+	if entering {
+		for i := range n.Lines().Len() {
+			line := n.Lines().At(i)
+			_, _ = w.Write(util.EscapeHTML(line.Value(source)))
+		}
+	} else if n.HasClosure() {
+		_, _ = w.Write(util.EscapeHTML(n.ClosureLine.Value(source)))
+	}
+	return ast.WalkContinue, nil
+}
+
+func renderCardTable(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString(`<div class="table-scroll"><table>`)
+	} else {
+		_, _ = w.WriteString("</table></div>\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+// linkify renders safe Markdown, including GFM tables and bare links.
 func linkify(s string) string {
 	var b strings.Builder
-	last := 0
-	for _, m := range markdownLinkRe.FindAllStringSubmatchIndex(s, -1) {
-		b.WriteString(linkifyURLs(s[last:m[0]]))
-		b.WriteString(linkAnchor(s[m[4]:m[5]], s[m[2]:m[3]]))
-		last = m[1]
+	if err := cardMarkdown.Convert([]byte(s), &b); err != nil {
+		return escape(s)
 	}
-	b.WriteString(linkifyURLs(s[last:]))
 	return b.String()
-}
-
-func linkifyURLs(s string) string {
-	var b strings.Builder
-	last := 0
-	for _, m := range linkRe.FindAllStringSubmatchIndex(s, -1) {
-		b.WriteString(escape(s[last:m[2]])) // text before the URL
-		u := s[m[2]:m[3]]
-		b.WriteString(linkAnchor(u, linkLabel(u)))
-		if m[4] >= 0 { // trailing punctuation kept as plain text
-			b.WriteString(escape(s[m[4]:m[5]]))
-		}
-		last = m[1]
-	}
-	b.WriteString(escape(s[last:]))
-	return b.String()
-}
-
-func linkAnchor(url, label string) string {
-	return `<a class="link" href="` + escape(url) + `" target="_blank" rel="noopener" title="` + escape(url) + `">` + escape(label) + `</a>`
 }
 
 // linkLabel trims the scheme/www and shortens a URL for link text, keeping the

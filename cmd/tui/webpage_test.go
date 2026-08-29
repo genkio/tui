@@ -490,6 +490,27 @@ func TestLinkifyMarkdownLink(t *testing.T) {
 	}
 }
 
+func TestLinkifyMarkdownTable(t *testing.T) {
+	in := `|Dimension|Opus 4.6|Opus 4.7|Opus 5|
+|:-|:-|:-|:-|
+|Tooling commits scanned|\~60|\~50 (via fork)|145 (direct)|
+|Findings|**15**|9|7 + opinion|
+|Source|[report](https://example.com/?a=1&b=2)|plain|` + "`code`" + `|`
+	out := linkify(in)
+	for _, want := range []string{
+		`<div class="table-scroll"><table>`, "<thead>", "<tbody>", `<th style="text-align:left">Dimension</th>`,
+		`<td style="text-align:left">~60</td>`, "<strong>15</strong>", "<code>code</code>",
+		`class="link" href="https://example.com/?a=1&amp;b=2" target="_blank"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("Markdown table missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "|:-|") {
+		t.Fatalf("table delimiter leaked into rendered output: %s", out)
+	}
+}
+
 func TestRenderPageEmptyAndNote(t *testing.T) {
 	// No authed apps: the page tells the user to log in.
 	p := renderPage(t, nil, nil, nil, "following", "")
@@ -834,8 +855,11 @@ func TestRenderCardVideo(t *testing.T) {
 	if !strings.Contains(out, `<button class="loop" type="button" data-on="0"`) {
 		t.Fatalf("expected a loop toggle, off by default: %s", out)
 	}
-	if !strings.Contains(out, `>loop</button></div><div class="tagrows">`) {
+	if !strings.Contains(out, `>loop</button></div></article>`) {
 		t.Fatalf("loop should come last in the footer: %s", out)
+	}
+	if strings.Contains(out, `class="tagrows"`) {
+		t.Fatalf("card should not include the retired tag prototype: %s", out)
 	}
 	// No video -> no player, no controls.
 	it.Video, it.Poster = "", ""
@@ -1379,7 +1403,7 @@ func TestSavedPageAndButton(t *testing.T) {
 	if !strings.Contains(compact, `id="savedmode"`) || !strings.Contains(compact, `>compact</a>`) {
 		t.Fatalf("the compact saved view should say which mode it is in: %s", compact)
 	}
-	for _, content := range []string{"compact-hidden-body", `<video`, `class="tagrows"`} {
+	for _, content := range []string{"compact-hidden-body", `<video`} {
 		if !strings.Contains(compact, content) {
 			t.Fatalf("compact saved rows should retain hidden detail %q: %s", content, compact)
 		}
