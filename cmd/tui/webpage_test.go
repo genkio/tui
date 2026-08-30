@@ -289,14 +289,16 @@ func TestDeckFeedbackNavigation(t *testing.T) {
 		items: items, total: len(items), apps: []string{"x", "reddit"}, now: time.Now(), swipe: true,
 		feedback: map[string]string{items[0].Key(): "down"},
 	})
-	// - < > + in that order: react, walk, walk, react.
-	if !strings.Contains(deck, `id="thumbDown" class="deckbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button><button id="thumbUp" class="deckbtn"`) {
-		t.Fatalf("expected the four deck controls in - < > + order: %s", deck)
+	// One edge reacts (-+), the other walks (<>), a column to a thumb.
+	if !strings.Contains(deck, `id="deckReact" class="deckctl"><button id="thumbDown" class="deckbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="thumbUp" class="deckbtn" type="button" title="interested and show the next item" aria-label="interested">+</button></div>`) {
+		t.Fatalf("expected the -+ column: %s", deck)
 	}
-	if !strings.Contains(deck, `id="deckControls" class="deckctl"`) ||
-		!strings.Contains(deck, `left:max(-8px,calc(50% - 328px))`) ||
-		!strings.Contains(deck, `.deckctl.right{left:auto;right:max(-8px,calc(50% - 328px))}`) {
-		t.Errorf("the four controls should share one movable edge column: %s", deck)
+	if !strings.Contains(deck, `id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button></div>`) {
+		t.Fatalf("expected the <> column: %s", deck)
+	}
+	if !strings.Contains(deck, `.deckctl.atleft{left:max(-8px,calc(50% - 328px))}`) ||
+		!strings.Contains(deck, `.deckctl.atright{right:max(-8px,calc(50% - 328px))}`) {
+		t.Errorf("either column should sit at either edge: %s", deck)
 	}
 	if !strings.Contains(deck, `"x\u00001":"down"`) ||
 		!strings.Contains(deck, `downBtn.classList.toggle('chosen', choice === 'down')`) ||
@@ -717,11 +719,12 @@ func TestRenderPageFreshness(t *testing.T) {
 	if strings.Contains(p, `fetch('/refresh'`) || strings.Contains(p, `id="refresh"`) {
 		t.Fatal("the count should no longer trigger a fetch: " + p)
 	}
-	if !strings.Contains(p, `<span>place deck card controls on right</span><input id="controlsRight" type="checkbox">`) ||
-		!strings.Contains(p, `localStorage.setItem('tui:deck-feedback-right', CONTROLS_RIGHT ? '1' : '0')`) ||
-		!strings.Contains(p, `controls.classList.toggle('right', CONTROLS_RIGHT)`) ||
+	if !strings.Contains(p, `<span>swap deck card controls</span><input id="controlsSwap" type="checkbox">`) ||
+		!strings.Contains(p, `localStorage.setItem('tui:deck-feedback-right', CONTROLS_SWAP ? '1' : '0')`) ||
+		!strings.Contains(p, `react.classList.toggle('atleft', !CONTROLS_SWAP); react.classList.toggle('atright', CONTROLS_SWAP);`) ||
+		!strings.Contains(p, `nav.classList.toggle('atleft', CONTROLS_SWAP); nav.classList.toggle('atright', !CONTROLS_SWAP);`) ||
 		!strings.Contains(p, `settingsDlg.showModal()`) {
-		t.Fatal("the native settings dialog should persist the control placement toggle: " + p)
+		t.Fatal("the native settings dialog should persist the swapped edges: " + p)
 	}
 	if !strings.Contains(p, `id="upd">just now`) {
 		t.Fatal("expected the freshness label: " + p)
