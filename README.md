@@ -381,14 +381,20 @@ The layout stays server-rendered — a deck card gets a longer text budget than
 a listed one, and the clipping is done in Go — so switching is a page load, and
 a browser that wants the deck spends one redirect on arriving at a bare URL.
 
-By default, the chevron at the right edge marks the card read and deals the next
-one. The left edge restores the previous card to tui's unread backlog and walks
-back to it, as far as the first card. The setting behind the unread count swaps
-those two actions for left-handed use and is remembered by that browser. This
+Four controls sit stacked at one edge, halfway down: **-**, **&lt;**, **&gt;**,
+**+**. The inner pair only moves through the deck — **&gt;** marks the card read
+and deals the next one, **&lt;** restores the previous card to tui's unread
+backlog and walks back to it, as far as the first card, where it goes dead. The
+outer pair does the same thing plus a reaction: **+** files the card as
+interested and **-** as not, both then marking it read and dealing on, and a
+card walked back to shows the reaction it already carries. The setting behind
+the unread count, *place deck card controls on right*, moves the whole column to
+the other edge for left-handed use and is remembered by that browser. This
 unread state is local to tui; it does not ask the source service to reverse a
-read already sent there. **→**/**l** and **←**/**h** follow the same mapping.
-Once the deck is dealt out the chevrons go away and a note says so; where to go
-next is the chip row, which the deck carries above it like the feed does.
+read already sent there. On a keyboard **→**/**←** are the inner pair and
+**↑**/**↓** the outer one. Once the deck is dealt out the controls go away and a
+note says so; where to go next is the chip row, which the deck carries above it
+like the feed does.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
 to roughly a screenful, so the footer actions — open, save, share, image

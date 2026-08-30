@@ -289,24 +289,28 @@ func TestDeckFeedbackNavigation(t *testing.T) {
 		items: items, total: len(items), apps: []string{"x", "reddit"}, now: time.Now(), swipe: true,
 		feedback: map[string]string{items[0].Key(): "down"},
 	})
-	if !strings.Contains(deck, `id="thumbDown" class="feedbackbtn"`) ||
-		!strings.Contains(deck, `id="thumbUp" class="feedbackbtn"`) {
-		t.Fatalf("expected both feedback controls: %s", deck)
+	// - < > + in that order: react, walk, walk, react.
+	if !strings.Contains(deck, `id="thumbDown" class="deckbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button><button id="thumbUp" class="deckbtn"`) {
+		t.Fatalf("expected the four deck controls in - < > + order: %s", deck)
 	}
-	if !strings.Contains(deck, `id="deckFeedback" class="deckfeedback"`) ||
+	if !strings.Contains(deck, `id="deckControls" class="deckctl"`) ||
 		!strings.Contains(deck, `left:max(-8px,calc(50% - 328px))`) ||
-		!strings.Contains(deck, `.deckfeedback.right{left:auto;right:max(-8px,calc(50% - 328px))}`) {
-		t.Errorf("the thumbs should share one movable edge control: %s", deck)
+		!strings.Contains(deck, `.deckctl.right{left:auto;right:max(-8px,calc(50% - 328px))}`) {
+		t.Errorf("the four controls should share one movable edge column: %s", deck)
 	}
 	if !strings.Contains(deck, `"x\u00001":"down"`) ||
 		!strings.Contains(deck, `downBtn.classList.toggle('chosen', choice === 'down')`) ||
 		!strings.Contains(deck, `upBtn.classList.toggle('chosen', choice === 'up')`) {
 		t.Error("a revisited card should show its persisted feedback")
 	}
-	if !strings.Contains(deck, `footer.insertBefore(button, footer.firstChild)`) ||
-		!strings.Contains(deck, `button.className = 'deckback'`) ||
-		!strings.Contains(deck, `if(backBtn) backBtn.disabled = at === 0`) {
-		t.Error("each deck footer should put a disabled back button before open on the first card")
+	if !strings.Contains(deck, `if(prevBtn) prevBtn.disabled = at === 0`) ||
+		!strings.Contains(deck, `if (prevBtn) prevBtn.addEventListener('click', function(){ back(); })`) ||
+		!strings.Contains(deck, `if (nextBtn) nextBtn.addEventListener('click', function(){ read(); })`) {
+		t.Error("the inner pair should walk the deck, with previous dead on the first card")
+	}
+	// The footer's back button moved to the edge column, where its forward twin is.
+	if strings.Contains(deck, `deckback`) {
+		t.Error("the deck footer should no longer carry its own back button")
 	}
 	if !strings.Contains(deck, `fetch('/feedback', {method:'POST', body:fd})`) ||
 		!strings.Contains(deck, `fd.append('feedback', choice)`) ||
@@ -713,11 +717,11 @@ func TestRenderPageFreshness(t *testing.T) {
 	if strings.Contains(p, `fetch('/refresh'`) || strings.Contains(p, `id="refresh"`) {
 		t.Fatal("the count should no longer trigger a fetch: " + p)
 	}
-	if !strings.Contains(p, `<span>place feedback buttons on right</span><input id="feedbackRight" type="checkbox">`) ||
-		!strings.Contains(p, `localStorage.setItem('tui:deck-feedback-right', FEEDBACK_RIGHT ? '1' : '0')`) ||
-		!strings.Contains(p, `controls.classList.toggle('right', FEEDBACK_RIGHT)`) ||
+	if !strings.Contains(p, `<span>place deck card controls on right</span><input id="controlsRight" type="checkbox">`) ||
+		!strings.Contains(p, `localStorage.setItem('tui:deck-feedback-right', CONTROLS_RIGHT ? '1' : '0')`) ||
+		!strings.Contains(p, `controls.classList.toggle('right', CONTROLS_RIGHT)`) ||
 		!strings.Contains(p, `settingsDlg.showModal()`) {
-		t.Fatal("the native settings dialog should persist the feedback placement toggle: " + p)
+		t.Fatal("the native settings dialog should persist the control placement toggle: " + p)
 	}
 	if !strings.Contains(p, `id="upd">just now`) {
 		t.Fatal("expected the freshness label: " + p)

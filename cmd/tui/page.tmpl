@@ -216,24 +216,27 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall.fab#markAll{right:14px}
 .markall.fab svg{display:block;height:22px;width:auto}
 .markall.hid{display:none} /* .hid alone loses to .markall.fab */
-.deckfeedback{
+/* The deck's four controls under one thumb, stacked - < > + : the outer pair
+   reacts and moves on, the inner pair only walks the deck. What the arrow keys
+   are on a desktop, for a phone that has none. */
+.deckctl{
   position:fixed;z-index:20;top:50%;left:max(-8px,calc(50% - 328px));
   display:flex;flex-direction:column;transform:translateY(-50%);
 }
-.deckfeedback.right{left:auto;right:max(-8px,calc(50% - 328px))}
-.feedbackbtn{
+.deckctl.right{left:auto;right:max(-8px,calc(50% - 328px))}
+.deckbtn{
   width:44px;height:52px;padding:0;display:flex;align-items:center;justify-content:center;
   border:0;background:transparent;color:var(--muted);cursor:pointer;opacity:.5;
   font-size:28px;font-weight:400;line-height:1;transition:opacity .12s,color .12s,transform .12s;
 }
-.feedbackbtn.chosen{color:var(--accent);opacity:.9;transform:scale(1.08)}
-.feedbackbtn#thumbUp{font-size:23px}
-.feedbackbtn:disabled{opacity:.18;cursor:default}
-.deckfeedback.hid{display:none}
+.deckbtn.chosen{color:var(--accent);opacity:.9;transform:scale(1.08)}
+.deckbtn#thumbUp{font-size:23px}
+.deckbtn#deckPrev,.deckbtn#deckNext{height:44px;font-size:20px;font-weight:600}
+.deckbtn:disabled{opacity:.18;cursor:default}
+.deckctl.hid{display:none}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.deckback{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
-.deckback:disabled{opacity:.35;cursor:default}
+.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 .rgv:disabled{opacity:.6;cursor:default}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
@@ -409,9 +412,9 @@ video.ffs{object-fit:cover !important}
 {{end}}</div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckFeedback" class="deckfeedback"><button id="thumbDown" class="feedbackbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="thumbUp" class="feedbackbtn" type="button" title="interested and show the next item" aria-label="interested">+</button></div>
+{{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckControls" class="deckctl"><button id="thumbDown" class="deckbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button><button id="thumbUp" class="deckbtn" type="button" title="interested and show the next item" aria-label="interested">+</button></div>
 {{end}}{{if and .Cards .BulkMark}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-total="{{.Total}}"{{if .Swipe}} title="mark all {{.Total}} items in this feed read"{{end}}>{{if .Swipe}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg>{{else}}✓ mark all {{.Total}} read{{end}}</button>
-{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place feedback buttons on right</span><input id="feedbackRight" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
+{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on right</span><input id="controlsRight" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -421,8 +424,10 @@ video.ffs{object-fit:cover !important}
 // between the two modes; only the layout and what marks a card read differ.
 var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
 var MORE = document.getElementById('state').getAttribute('data-more') === 'true';
-var FEEDBACK_RIGHT = false;
-try { FEEDBACK_RIGHT = localStorage.getItem('tui:deck-feedback-right') === '1'; } catch(e){}
+// The stored key still says feedback, from when the thumbs were all that moved
+// with it; keeping it means the setting survives a browser that already has one.
+var CONTROLS_RIGHT = false;
+try { CONTROLS_RIGHT = localStorage.getItem('tui:deck-feedback-right') === '1'; } catch(e){}
 var FEEDBACK = {{.Feedback}};
 var SAVED_TAGS = {{.SavedTags}};
 var TAG_OPTIONS = {{.TagOptions}};
@@ -1275,24 +1280,24 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
 });
 var settingsDlg = document.getElementById('settingsdlg');
 var settingsOpen = document.getElementById('settingsOpen');
-var feedbackRight = document.getElementById('feedbackRight');
-function positionDeckFeedback(){
-  var controls = document.getElementById('deckFeedback');
-  if(controls) controls.classList.toggle('right', FEEDBACK_RIGHT);
+var controlsRight = document.getElementById('controlsRight');
+function positionDeckControls(){
+  var controls = document.getElementById('deckControls');
+  if(controls) controls.classList.toggle('right', CONTROLS_RIGHT);
 }
-positionDeckFeedback();
-if(settingsDlg && settingsOpen && feedbackRight){
-  feedbackRight.checked = FEEDBACK_RIGHT;
+positionDeckControls();
+if(settingsDlg && settingsOpen && controlsRight){
+  controlsRight.checked = CONTROLS_RIGHT;
   settingsOpen.addEventListener('click', function(){ settingsDlg.showModal(); });
-  feedbackRight.addEventListener('change', function(){
-    FEEDBACK_RIGHT = feedbackRight.checked;
-    try { localStorage.setItem('tui:deck-feedback-right', FEEDBACK_RIGHT ? '1' : '0'); } catch(e){}
-    positionDeckFeedback();
+  controlsRight.addEventListener('change', function(){
+    CONTROLS_RIGHT = controlsRight.checked;
+    try { localStorage.setItem('tui:deck-feedback-right', CONTROLS_RIGHT ? '1' : '0'); } catch(e){}
+    positionDeckControls();
   });
 }
 
-// The deck (?deck=1): one card on screen, with both feedback choices under one
-// thumb. The footer goes back without clearing the choice already made.
+// The deck (?deck=1): one card on screen, and the four ways off it under one
+// thumb. Walking back does not clear the choice already made.
 if (SWIPE) (function(){
   var deck = document.getElementById('deck');
   if (!deck) return;
@@ -1300,31 +1305,19 @@ if (SWIPE) (function(){
   var endEl = document.getElementById('deckEnd');
   var downBtn = document.getElementById('thumbDown');
   var upBtn = document.getElementById('thumbUp');
+  var prevBtn = document.getElementById('deckPrev');
+  var nextBtn = document.getElementById('deckNext');
   var at = 0;
-
-  cards.forEach(function(card){
-    var footer = card.querySelector(':scope > .footer');
-    if(!footer) return;
-    var button = document.createElement('button');
-    button.className = 'deckback';
-    button.type = 'button';
-    button.title = 'mark unread and show the previous item';
-    button.textContent = 'back';
-    footer.insertBefore(button, footer.firstChild);
-  });
 
   function current(){ return at < cards.length ? cards[at] : null; }
   function updateControls(done){
-    var controls = document.getElementById('deckFeedback');
+    var controls = document.getElementById('deckControls');
     if(controls) controls.classList.toggle('hid', done);
     var card = current(), key = card ? card.dataset.app + '\u0000' + card.dataset.id : '';
     var choice = card ? (card.dataset.feedback || FEEDBACK[key] || '') : '';
     if(downBtn) downBtn.classList.toggle('chosen', choice === 'down');
     if(upBtn) upBtn.classList.toggle('chosen', choice === 'up');
-    if(card){
-      var backBtn = card.querySelector('button.deckback');
-      if(backBtn) backBtn.disabled = at === 0;
-    }
+    if(prevBtn) prevBtn.disabled = at === 0;
   }
   function show(){
     cards.forEach(function(c, i){ c.classList.toggle('hid', i !== at); });
@@ -1401,10 +1394,8 @@ if (SWIPE) (function(){
   }
   if (downBtn) downBtn.addEventListener('click', function(){ sendFeedback('down'); });
   if (upBtn) upBtn.addEventListener('click', function(){ sendFeedback('up'); });
-  deck.addEventListener('click', function(e){
-    var b = e.target.closest ? e.target.closest('button.deckback') : null;
-    if(b) back();
-  });
+  if (prevBtn) prevBtn.addEventListener('click', function(){ back(); });
+  if (nextBtn) nextBtn.addEventListener('click', function(){ read(); });
 
   // Horizontal arrows navigate without preference; vertical arrows react.
   document.addEventListener('keydown', function(e){
