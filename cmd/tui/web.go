@@ -379,6 +379,9 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		tally := tallyItems(all)
 		items := selectItems(all, sel)
 		items = filterSavedByTag(items, itemTags, tag)
+		// Unsaving here takes the item out of the store, and the reaction that
+		// follows still has to name a whole item, so remember what was on the page.
+		rendered.put(items)
 		if q.Get("json") == "1" {
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONItems(w, items, nil, feedAPIResponse{})

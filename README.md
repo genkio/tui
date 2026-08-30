@@ -247,6 +247,14 @@ cards and title-only rows. The mode rides in the URL, so source and type chips
 keep it while narrowing the saved list; compact rows still link to the original
 item but leave bodies, media, controls, and tags out.
 
+Tapping **saved** on a saved card lets it go, and only then does the card offer
+**good** and **bad** in front of that button. Saving something is often a way of
+saying *not now* rather than *this was worth it*, and the verdict only arrives
+once you have come back to it and watched or read the thing — which is what
+unsaving means. Either button files the same reaction the deck's **+** and **-**
+do, so the judgement lands in one place however late it comes. Saving the item
+back takes the pair away again.
+
 The chips are also what **mark all read** applies to: with one on, the page is
 that chip's items alone, so it clears those and leaves the rest unread — you can
 sweep reddit away and keep the articles for later. The server applies that pick

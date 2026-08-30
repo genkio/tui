@@ -237,7 +237,9 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .deckctl.hid{display:none}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.react{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.react.chosen{color:var(--accent)}
+.react:disabled{opacity:.5;cursor:default}
 .rgv:disabled{opacity:.6;cursor:default}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
@@ -675,6 +677,7 @@ function setSaved(card, on){
       if (b){ b.dataset.saved = on ? '1' : '0'; b.textContent = on ? 'saved' : 'save'; }
       var n = document.getElementById('savedn');
       if (n) n.textContent = d.saved;
+      if (SAVED_VIEW) offerReaction(card, on);
     })
     .catch(function(err){ toast(err.message || 'could not save'); })
     .then(function(){ if (b) b.disabled = false; });
@@ -683,6 +686,42 @@ document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.save') : null;
   if (!b) return;
   setSaved(b.closest('article.card'), b.dataset.saved !== '1');
+});
+
+// Letting a saved item go is a verdict in itself: it was kept to come back to,
+// and coming back is what just happened. That is the one moment worth asking
+// how it went, so the two reactions appear only on the unsave, in front of the
+// button that did it, and leave again if the item is saved back.
+function offerReaction(card, saved){
+  var b = card.querySelector('button.save');
+  if(!b) return;
+  card.querySelectorAll('button.react').forEach(function(old){ old.remove(); });
+  if(saved) return;
+  [['up', 'good'], ['down', 'bad']].forEach(function(pair){
+    var button = document.createElement('button');
+    button.className = 'react';
+    button.type = 'button';
+    button.dataset.choice = pair[0];
+    button.title = pair[0] === 'up' ? 'this was worth keeping' : 'this was not worth keeping';
+    button.textContent = pair[1];
+    b.parentNode.insertBefore(button, b);
+  });
+}
+document.addEventListener('click', function(e){
+  var button = e.target.closest ? e.target.closest('button.react') : null;
+  if(!button) return;
+  var card = button.closest('article.card');
+  var both = card.querySelectorAll('button.react');
+  var fd = new FormData();
+  fd.append('app', card.dataset.app);
+  fd.append('id', card.dataset.id);
+  fd.append('feedback', button.dataset.choice);
+  both.forEach(function(x){ x.disabled = true; });
+  fetch('/feedback', {method:'POST', body:fd})
+    .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'reload the page and try again' : 'could not save feedback'); return res.json(); })
+    .then(function(d){ both.forEach(function(x){ x.classList.toggle('chosen', x.dataset.choice === d.feedback); }); })
+    .catch(function(err){ toast(err.message || 'could not save feedback'); })
+    .then(function(){ both.forEach(function(x){ x.disabled = false; }); });
 });
 
 if(SAVED_VIEW) document.querySelectorAll('article.card').forEach(function(card){

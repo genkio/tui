@@ -1453,6 +1453,25 @@ func TestSavedPageAndButton(t *testing.T) {
 		t.Fatalf("compact x post needs its compact text treatment: %s", xCompact)
 	}
 
+	// Letting a saved item go is the moment it has been judged, so the two
+	// reactions are built then and there, in front of the button that did it.
+	for _, wiring := range []string{
+		`if (SAVED_VIEW) offerReaction(card, on);`,
+		`if(saved) return;`,
+		`[['up', 'good'], ['down', 'bad']].forEach(`,
+		`b.parentNode.insertBefore(button, b);`,
+		`card.querySelectorAll('button.react').forEach(function(old){ old.remove(); });`,
+		`fd.append('feedback', button.dataset.choice);`,
+	} {
+		if !strings.Contains(page, wiring) {
+			t.Fatalf("the unsave reaction should be wired through %q: %s", wiring, page)
+		}
+	}
+	// They belong to the unsave, not to the page: nothing renders them up front.
+	if strings.Contains(page, `class="react"`) {
+		t.Fatalf("a still-saved card should carry no reaction buttons: %s", page)
+	}
+
 	// The feed view links to the saved list and shows its count.
 	feed := renderPage(t, nil, []string{"x"}, nil, "following", "")
 	if !strings.Contains(feed, `href="/?saved=1"`) {
@@ -2180,6 +2199,68 @@ func TestFeedbackHandlerStoresAndRevisesChoice(t *testing.T) {
 	}
 	if title != live.Title {
 		t.Fatalf("rendered-only item title = %q, want %q", title, live.Title)
+	}
+}
+
+// Unsaving on the saved page asks how the item went, and the reaction that
+// follows can name only an app+id. The item is out of the store by then and was
+// never in the unread cache, so the page has to be what remembers it.
+func TestSavedViewRemembersItemsForFeedbackAfterUnsave(t *testing.T) {
+	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	saved, err := loadSavedDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := loadFeedCacheDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := loadBlockerDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader, err := newPageLoader("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := core.Item{App: "reddit", ID: "watch-later", Title: "a long video"}
+	if err := saved.add(it, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	feedback, tags, rendered := loadFeedbackDB(db), loadTagsDB(db), newRenderedItems()
+	root := t.TempDir()
+	sweep := newSweeper(root, cache, newMarkFlusher(root, cache), block, false, 0)
+
+	rec := httptest.NewRecorder()
+	handleAll(rec, httptest.NewRequest(http.MethodGet, "/?saved=1", nil), root, loader, cache, sweep, saved, feedback, tags, block, rendered)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("saved page = %d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := rendered.get(it.App, it.ID); !ok {
+		t.Fatal("the saved view should remember what it rendered")
+	}
+
+	if err := saved.remove(it.App, it.ID); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"app": {it.App}, "id": {it.ID}, "feedback": {"down"}}
+	r := httptest.NewRequest(http.MethodPost, "/feedback", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	handleFeedback(rec, r, feedback, cache, rendered)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reaction after unsave = %d %s", rec.Code, rec.Body.String())
+	}
+	got, err := feedback.all()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[it.Key()] != "down" {
+		t.Fatalf("stored feedback = %q, want %q", got[it.Key()], "down")
 	}
 }
 
