@@ -235,6 +235,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .deckbtn#deckPrev,.deckbtn#deckNext{font-size:20px;font-weight:600}
 .deckbtn:disabled{opacity:.18;cursor:default}
 .deckctl.hid{display:none}
+/* ...and only there: a mouse has the arrow keys these stand in for, so on a
+   desktop they are two columns of chrome beside the card for nothing. Same
+   test the head script picks the deck by, so the controls show up exactly
+   where the deck is what you land on. */
+@media (pointer: fine){.deckctl{display:none}}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
 .speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.react{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
