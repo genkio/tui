@@ -2480,7 +2480,7 @@ func TestSubcategoryRow(t *testing.T) {
 		t.Errorf("no pick, no second row: %+v", got)
 	}
 	if got := subChips(tally, feedSel{Kind: "app", Key: "x"}, url.Values{"app": {"x"}}); got != nil {
-		t.Errorf("x's sources are people, not streams to pick between: %+v", got)
+		t.Errorf("one account is the whole source, so there is nothing to pick: %+v", got)
 	}
 	if got := subChips(tally, feedSel{Kind: "type", Key: "video"}, url.Values{}); got != nil {
 		t.Errorf("a type pick has no source to break down: %+v", got)
@@ -2541,8 +2541,9 @@ func TestSubcategoryQuery(t *testing.T) {
 	}{
 		{"app=reddit&sub=r%2Fgolang", feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"}},
 		{"app=inoreader&sub=Hacker+News", feedSel{Kind: "app", Key: "inoreader", Sub: "Hacker News"}},
+		{"app=x&sub=%40jeffreyhuber", feedSel{Kind: "app", Key: "x", Sub: "@jeffreyhuber"}},
 		// A source with no streams of its own has nothing for it to mean.
-		{"app=x&sub=r%2Fgolang", feedSel{Kind: "app", Key: "x"}},
+		{"app=douban&sub=r%2Fgolang", feedSel{Kind: "app", Key: "douban"}},
 		{"sub=r%2Fgolang", feedSel{}},
 		{"type=video&sub=r%2Fgolang", feedSel{Kind: "type", Key: "video"}},
 	}
@@ -2578,6 +2579,50 @@ func TestSubcategoryQuery(t *testing.T) {
 	got := selectItems(items, feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"})
 	if len(got) != 1 || got[0].ID != "1" {
 		t.Errorf("a subcategory only ever narrows its own source: %+v", got)
+	}
+}
+
+// On x the second row is one chip per account: grouped by handle, labelled with
+// the display name, and a repost counted against whoever wrote the post rather
+// than filed under a stream of its own.
+func TestXAccountChips(t *testing.T) {
+	items := []core.Item{
+		{App: "x", ID: "1", Source: "@jeffreyhuber", Author: "Jeff Huber"},
+		{App: "x", ID: "2", Source: "🔁 @jeffreyhuber", Author: "Jeff Huber"},
+		{App: "x", ID: "3", Source: "@simonw", Author: "Simon Willison"},
+		{App: "x", ID: "4", Source: "@nobody"}, // arrived without a name
+	}
+	q := url.Values{"app": {"x"}}
+	chips := subChips(tallyItems(items), feedSel{Kind: "app", Key: "x"}, q)
+	want := []struct {
+		key, label string
+		count      int
+	}{
+		{"@jeffreyhuber", "Jeff Huber", 2},
+		{"@nobody", "@nobody", 1},
+		{"@simonw", "Simon Willison", 1},
+	}
+	if len(chips) != len(want) {
+		t.Fatalf("got %d chips, want %d: %+v", len(chips), len(want), chips)
+	}
+	for i, w := range want {
+		c := chips[i]
+		if c.Key != w.key || c.Label != w.label || c.Count != w.count {
+			t.Errorf("chip %d = %q/%q/%d, want %q/%q/%d", i, c.Key, c.Label, c.Count, w.key, w.label, w.count)
+		}
+	}
+	if chips[0].Href != "/?app=x&sub=%40jeffreyhuber" {
+		t.Errorf("chip href = %s", chips[0].Href)
+	}
+
+	// And picking one keeps the account's reposts with its own posts, while
+	// x's For You stays a fetch rather than a slice of any of this.
+	got := selectItems(items, feedSel{Kind: "app", Key: "x", Sub: "@jeffreyhuber"})
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("an account's reposts are its own stream: %+v", got)
+	}
+	if foryou := subChips(tallyItems(items), feedSel{Kind: "x", Key: "foryou"}, url.Values{"x": {"foryou"}}); foryou != nil {
+		t.Errorf("For You is not the backlog to break down: %+v", foryou)
 	}
 }
 

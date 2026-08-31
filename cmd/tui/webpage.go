@@ -94,21 +94,35 @@ type feedTally struct {
 	// app -> subcategory -> count, for the services that have one (see subApps).
 	// Nested rather than flat because two services can name a stream the same
 	// thing, and a subcategory only ever narrows its own source.
-	subs map[string]map[string]int
+	subs map[string]map[string]subCount
+}
+
+// subCount is one subcategory's tally: how many items it holds, and the name to
+// wear on its chip, which is not always the key it is grouped under (x groups by
+// handle and shows the display name).
+type subCount struct {
+	label string
+	n     int
 }
 
 func newTally() feedTally {
-	return feedTally{apps: map[string]int{}, types: map[string]int{}, subs: map[string]map[string]int{}}
+	return feedTally{apps: map[string]int{}, types: map[string]int{}, subs: map[string]map[string]subCount{}}
 }
 
-func (t feedTally) addSub(app, sub string) {
-	if t.subs == nil || !subApps[app] || sub == "" {
+func (t feedTally) addSub(app, source, author string) {
+	key := subKey(app, source)
+	if t.subs == nil || !subApps[app] || key == "" {
 		return
 	}
 	if t.subs[app] == nil {
-		t.subs[app] = map[string]int{}
+		t.subs[app] = map[string]subCount{}
 	}
-	t.subs[app][sub]++
+	s := t.subs[app][key]
+	s.n++
+	if s.label == "" {
+		s.label = subLabel(app, source, author)
+	}
+	t.subs[app][key] = s
 }
 
 // tallyItems counts a whole list; the feed hands this in from before it applied
@@ -118,7 +132,7 @@ func tallyItems(items []core.Item) feedTally {
 	for _, it := range items {
 		t.apps[it.App]++
 		t.types[itemType(it)]++
-		t.addSub(it.App, it.Source)
+		t.addSub(it.App, it.Source, it.Author)
 	}
 	return t
 }
@@ -138,7 +152,7 @@ func tallyCards(cards []cardData) feedTally {
 	for _, c := range cards {
 		t.apps[c.App]++
 		t.types[c.Type]++
-		t.addSub(c.App, c.Source)
+		t.addSub(c.App, c.Source, c.Author)
 	}
 	return t
 }
@@ -787,10 +801,35 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel fe
 }
 
 // subApps are the services whose items arrive already sorted into streams worth
-// picking between: reddit's subreddits, inoreader's feeds. Everywhere else the
-// source name is a person or a single site, and a chip per one of them would be
-// a row as long as the backlog.
-var subApps = map[string]bool{"reddit": true, "inoreader": true}
+// picking between: reddit's subreddits, inoreader's feeds, x's accounts (a
+// following list is short enough that one chip per account is a row, not a
+// backlog). Everywhere else the source name is a single site, and there is
+// nothing for a second row to narrow.
+var subApps = map[string]bool{"reddit": true, "inoreader": true, "x": true}
+
+// repostMark leads an x source when the post reached the timeline as someone
+// else's repost. The chip is per account, so it is dropped from the key: a
+// handle's own posts and its reposted ones are the one stream.
+const repostMark = "🔁 "
+
+// subKey is what a second-row chip groups by, which is the source name except on
+// x, where the name carries the repost mark and the handle is the account.
+func subKey(app, source string) string {
+	if app == "x" {
+		return strings.TrimPrefix(source, repostMark)
+	}
+	return source
+}
+
+// subLabel is what that chip says. A subreddit or feed name is its own label,
+// but a handle is not who you followed: x's chips wear the display name, and
+// fall back to the handle for a post that arrived without one.
+func subLabel(app, source, author string) string {
+	if app == "x" && author != "" {
+		return author
+	}
+	return subKey(app, source)
+}
 
 // subChips is the second row: with a source chip on, its own subcategories,
 // busiest first so the ones worth a tap are the ones that fit before the row
@@ -810,8 +849,12 @@ func subChips(t feedTally, sel feedSel, q url.Values) []filterChip {
 		return nil
 	}
 	out := make([]filterChip, 0, len(subs))
-	for name, n := range subs {
-		out = append(out, filterChip{Kind: "sub", Key: name, Label: name, Count: n, Title: name})
+	for key, s := range subs {
+		label := s.label
+		if label == "" {
+			label = key
+		}
+		out = append(out, filterChip{Kind: "sub", Key: key, Label: label, Count: s.n, Title: key})
 	}
 	sortChips(out)
 	for i := range out {
@@ -980,7 +1023,7 @@ func selectItems(items []core.Item, sel feedSel) []core.Item {
 	for _, it := range items {
 		switch sel.Kind {
 		case "app":
-			if it.App == sel.Key && (sel.Sub == "" || it.Source == sel.Sub) {
+			if it.App == sel.Key && (sel.Sub == "" || subKey(it.App, it.Source) == sel.Sub) {
 				out = append(out, it)
 			}
 		case "type":
