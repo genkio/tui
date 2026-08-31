@@ -232,7 +232,7 @@ func newBlockingSweeper(t *testing.T, drain bool, b *blocker, pages [][]core.Ite
 	s := newSweeper(t.TempDir(), c, nil, b, drain, 0)
 	s.mark = (&fakeMark{}).fn
 	fetches := 0
-	s.fetch = func(context.Context, string, string, int, time.Time) ([]core.Item, bool, error) {
+	s.fetch = func(context.Context, string, int, time.Time) ([]core.Item, bool, error) {
 		if fetches >= len(pages) {
 			return nil, false, nil
 		}

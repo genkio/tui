@@ -161,7 +161,7 @@ func newTestSweeper(t *testing.T, drain bool, pages [][]core.Item) (*sweeper, *f
 	fetches := 0
 	s := newSweeper(t.TempDir(), c, nil, nil, drain, 0)
 	s.mark = m.fn
-	s.fetch = func(context.Context, string, string, int, time.Time) ([]core.Item, bool, error) {
+	s.fetch = func(context.Context, string, int, time.Time) ([]core.Item, bool, error) {
 		if fetches >= len(pages) {
 			return nil, false, nil
 		}
@@ -326,7 +326,7 @@ func TestSweepAppRecordsFailure(t *testing.T) {
 	s := newSweeper(t.TempDir(), c, nil, nil, true, 0)
 	s.mark = (&fakeMark{}).fn
 	c.setStatus("x", appStatus{At: "2026-01-01T00:00:00Z"})
-	s.fetch = func(context.Context, string, string, int, time.Time) ([]core.Item, bool, error) {
+	s.fetch = func(context.Context, string, int, time.Time) ([]core.Item, bool, error) {
 		return nil, true, errors.New("session is stale")
 	}
 	s.sweepApp(context.Background(), "x")

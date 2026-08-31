@@ -94,12 +94,6 @@ background. The web and terminal clients therefore read the same backlog.
 Video titles start with `🎬`; audio titles start with `🔊`. Text items have no
 prefix.
 
-Once you've read everything, `all` offers one more thing: if x is logged in and
-you were on its **Following** feed, it shows *"All read — press `f` to continue
-on x For You"*. `f` swaps the x source to the **For You** timeline and refetches
-through the service. Restarting the terminal client returns to Following, and a
-subsequent refresh keeps whichever timeline is live.
-
 Sorting is by publish time: x and Folo carry an exact timestamp; Inoreader
 exposes only a relative age (`2h`), so its items are placed from that. An item
 with no resolvable time sinks to the bottom rather than jumping the queue.
@@ -175,11 +169,10 @@ downloads any of it, then counts down what's left of it once it's playing. A
 **loop** button at the end of the row repeats video (off by default). A footer
 with a player in it outgrows a phone, so the row scrolls sideways. Since
 scroll-to-read can't reach the last few cards, a **mark all read** button sits
-at the end of the feed to clear the full backlog in one tap. x's **For You** is a chip of
-its own in the header (see below) rather than something offered at the end of the
-feed. The terminal client requests the same live round through the service, so
-read state stays consistent between the TUI and the page — mark something read
-and it's read in the app too (see
+at the end of the feed to clear the full backlog in one tap. x's **For You** is a
+chip of its own in the header, in black beside x's blue one: it is a source like
+any other (see **x has two of them** below). Read state stays consistent between
+the TUI and the page — mark something read and it's read in the app too (see
 **The backlog cache** below for the one place that changes). Items are sorted
 **oldest-first** (triage in the order they arrived), and the saved list is
 ordered by **when you saved things, newest first**. At the far end of the
@@ -271,9 +264,9 @@ resume too when the item is already saved.
 
 The page is server-rendered and responsive (cards stack full-width, tap-sized
 targets, follows your phone's light/dark theme). A feed page comes off the
-cache and is instant, but the For You chip scrapes x live, so a tap that
-refetches puts a **loading…** cover over the page you tapped from rather
-than leaving it looking idle. `?json=1` returns the whole backlog as JSON for
+cache and is instant to fetch, but a chip over a few hundred cards still has to
+render them, so a tap puts a **loading…** cover over the page you tapped from
+rather than leaving it looking idle. `?json=1` returns the whole backlog as JSON for
 scripts (no window). Runs indefinitely until you Ctrl-C.
 
 ### The backlog cache
@@ -333,6 +326,27 @@ The consequences are worth knowing:
   server-side read state at all (x, reddit, douban, and bilibili keep their read
   markers in `feed.db`), and none of them is ever marked read at fetch time.
 
+**x has two of them.** x's home has a Following timeline and a For You one, and
+both are swept, cached and served here as sources in their own right: two chips
+in the header wearing the same `𝕏`, blue for Following and black for For You.
+Each has its own count, its own status light, its own briefing (see
+**Summarizing a backlog**) and its own **mark all read**, and their items sit in
+the merged feed together like everybody else's.
+
+For You used to be the one chip that was not a backlog: a live scrape run inside
+the request that tapped it, kept nowhere, so it could not be counted, summarized
+or cleared. A briefing over a firehose is what makes the firehose usable — read
+what the batch amounts to, then clear the rest in one tap — so it is a source
+like the others now, and the terminal client's old `f` ("continue on x For You")
+is gone with the live path: there is nothing to switch to, the items are already
+in the feed.
+
+Both timelines share one x session, one plugin (`--tab`) and one read state, so a
+tweet you read under either chip is read in x. Overlap is filed once: the
+timeline that cached a tweet first keeps it, and the other's sighting of the same
+id is dropped rather than becoming a second card of the same post. `?app=xforyou`
+is the chip's URL; the old `?x=foryou` still lands on it.
+
 Run one active server for a synced snapshot; if two machines overwrite it, the
 last completed fetch wins. SQLite keeps the full feed, blocked history, saved
 items, and plugin read markers. The limits apply only to what one web response
@@ -379,8 +393,8 @@ tab and come back to after the feed has moved on.
 The item is looked for in the backlog cache first, read or unread, so a URL does
 not go dead the moment you scroll past the card. Failing that it comes from the
 saved list, which is where an item lives on after the cache has pruned it, and
-last from what the running server rendered, which is the only record of a post
-that was never cached at all (x's For You). An item none of them has answers
+last from what the running server rendered, which covers a card the sweep has
+pruned out from under the page it is on. An item none of them has answers
 **404** rather than a blank card. `&json=1` returns that one item in the same
 shape as the feed's JSON.
 

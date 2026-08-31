@@ -463,7 +463,7 @@ video.ffs{object-fit:cover !important}
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-state="idle" title="summarize {{.Key}}'s unread backlog" aria-label="summarize {{.Key}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
+{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
@@ -507,10 +507,6 @@ var ITEM_VIEW = document.getElementById('state').getAttribute('data-itemview') =
 // Set while the briefing is up in place of the cards. The cards are still on the
 // page, hidden, and a hidden card must not count as one you scrolled past.
 var SUMMARY_ON = false;
-// Which chip is on ("app:x"), blank for the whole list. The page carries that
-// chip's items and nothing else, which is what stops the recount below from
-// speaking for the chips it cannot see.
-var SEL = document.getElementById('state').getAttribute('data-sel') || '';
 // Reading = scrolling: the moment a card is fully off-screen (its bottom edge
 // clears the top of the viewport) it is marked read and muted in place — it
 // stays in the list, greyed, so scrolling back up shows what you've read.
@@ -594,11 +590,8 @@ function resync(){
   location.reload();
 }
 // Takes n off the header's unread count; a negative n hands them back, which is
-// what a mark that failed after the count already moved has to do. The For You
-// round is not in the backlog that count is of, so reading it leaves the number
-// where it is rather than dropping it to somewhere a reload would undo.
+// what a mark that failed after the count already moved has to do.
 function decCount(n){
-  if(SEL === 'x:foryou') return;
   var s = document.getElementById('unreadn'); if(!s) return;
   var c = (parseInt(s.textContent, 10) || 0) - n; if(c < 0) c = 0;
   s.textContent = c;
@@ -1482,11 +1475,11 @@ if (SWIPE) (function(){
   show();
 })();
 
-// A feed page comes off the backlog cache and is instant, but the For You chip
-// scrapes x live before a byte of it is sent, and until then the browser just
-// sits on the page you tapped from. Cover it as the tap happens, so the wait
-// looks like a wait. Only links that could refetch: the saved list is served
-// from disk, and anything opening a new tab leaves this page alone.
+// A feed page is a read of the backlog cache, but a chip over a few hundred
+// items still has to render them, and until it does the browser sits on the page
+// you tapped from with nothing happening. Cover it as the tap happens, so the
+// wait looks like a wait. The saved and blocked lists are short and instant, and
+// anything opening a new tab leaves this page alone.
 document.addEventListener('click', function(e){
   var a = e.target.closest ? e.target.closest('a[href]') : null;
   if (!a || a.target || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
@@ -1548,13 +1541,19 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   }
 
   function state(app){ return icons[app] ? icons[app].dataset.state : ''; }
+  // What to call a source out loud. The key is what the server knows it by, and
+  // for x's two timelines that is not a name anybody would recognize.
+  function named(app){
+    var b = icons[app];
+    return (b && b.dataset.says) || app;
+  }
   function setState(app, s){
     var b = icons[app];
     if (!b) return;
     b.dataset.state = s;
-    var says = s === 'running' ? 'summarizing ' + app + '…'
-      : s === 'done' ? 'read the summary of ' + app + "'s backlog"
-      : 'summarize ' + app + "'s unread backlog";
+    var says = s === 'running' ? 'summarizing ' + named(app) + '…'
+      : s === 'done' ? 'read the summary of ' + named(app) + "'s backlog"
+      : 'summarize ' + named(app) + "'s unread backlog";
     b.title = says;
     b.setAttribute('aria-label', says);
   }
@@ -1636,7 +1635,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
       .catch(function(err){
         setState(app, held(app) ? 'done' : 'idle');
         if (app === mine && open) show(false);
-        toast((err && err.message || '').trim() || 'could not summarize ' + app);
+        toast((err && err.message || '').trim() || 'could not summarize ' + named(app));
       });
   }
 
@@ -1655,7 +1654,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
         hold(app, d);
         setState(app, 'done');
         if (reveal && app === mine){ render(d); show(true); return; }
-        if (was === 'running') toast(app + "'s summary is ready");
+        if (was === 'running') toast(named(app) + "'s summary is ready");
       })
       .catch(function(){
         setState(app, held(app) ? 'done' : 'idle');
@@ -1691,7 +1690,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
       if (was === 'running'){
         setState(app, held(app) ? 'done' : 'idle');
         if (app === mine && open) show(false);
-        toast(j.error || ('could not summarize ' + app));
+        toast(j.error || ('could not summarize ' + named(app)));
       }
     });
     return going;

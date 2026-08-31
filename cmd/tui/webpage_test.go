@@ -18,7 +18,7 @@ import (
 
 // renderPage / renderCard execute the embedded page template the way handleAll
 // does, so the tests cover the real markup. xTab is which x timeline the page is
-// showing: "foryou" renders it as the For You chip's page.
+// picked to: "foryou" renders it as the For You source's page.
 func renderPage(t *testing.T, items []core.Item, apps, failed []string, xTab, warn string) string {
 	t.Helper()
 	loader, err := newPageLoader("")
@@ -32,7 +32,7 @@ func renderPage(t *testing.T, items []core.Item, apps, failed []string, xTab, wa
 	var b strings.Builder
 	in := pageInput{items: items, total: len(items), apps: apps, failed: failed, now: time.Now(), warn: warn, updated: time.Now()}
 	if xTab == "foryou" {
-		in.sel = feedSel{Kind: "x", Key: "foryou"}
+		in.sel = feedSel{Kind: "app", Key: xForYouApp}
 	}
 	if err := tmpl.Execute(&b, buildPageData(in)); err != nil {
 		t.Fatal(err)
@@ -343,60 +343,50 @@ func TestDeckNavigation(t *testing.T) {
 	}
 }
 
-// x's For You is a chip of its own, in black so the two x chips are told apart:
-// the blue one is the cached Following backlog, the black one is fetched on the
-// spot. It replaces the end-of-feed offers, which are gone.
-func TestForYouIsAChip(t *testing.T) {
-	items := []core.Item{{App: "x", ID: "1", Title: "a"}}
-	feed := renderPage(t, items, []string{"x"}, nil, "following", "")
-	if !strings.Contains(feed, `href="/?x=foryou" data-kind="x" data-key="foryou" data-on="0"`) {
-		t.Errorf("expected a For You chip the page is not on: %s", feed)
+// x's For You is a source of its own now: swept into the backlog and drawn as a
+// chip like every other, in black so the two x chips are told apart. What it used
+// to be — a live scrape counted only on the page that fetched it, with no
+// briefing and no bulk mark — is gone.
+func TestForYouIsASourceLikeAnyOther(t *testing.T) {
+	items := []core.Item{
+		{App: "x", ID: "1", Title: "from someone you follow"},
+		{App: xForYouApp, ID: "2", Title: "the algorithm's pick"},
 	}
-	if !strings.Contains(feed, `style="background:#000000"`) {
-		t.Errorf("the For You chip should be black: %s", feed)
+	apps := []string{"x", xForYouApp}
+	feed := renderPage(t, items, apps, nil, "following", "")
+	if !strings.Contains(feed, `href="/?app=xforyou" data-kind="app" data-key="xforyou" data-on="0"`) {
+		t.Errorf("For You should be an app chip like the rest: %s", feed)
 	}
-	// It is scraped, not cached, so from here there is nothing to count: the
-	// chip is the icon alone.
-	if !strings.Contains(feed, `style="background:#000000">𝕏</span></a>`) {
-		t.Errorf("the For You chip carries no count until it has fetched: %s", feed)
+	// Counted off the backlog, like any other source, and a status light with it.
+	if !strings.Contains(feed, `style="background:#000000">𝕏</span><span class="fn ok">1</span>`) {
+		t.Errorf("the For You chip should carry its own count: %s", feed)
 	}
-	// It sits beside x's own chip, which keeps its own color and count.
-	i, j := strings.Index(feed, `data-key="x"`), strings.Index(feed, `data-key="foryou"`)
-	if i < 0 || j < i {
-		t.Errorf("the For You chip belongs next to x's own: %s", feed)
+	// ...and it carries the sparkle, which is the point of caching it: the chip
+	// names itself in words there, since both x chips wear the same glyph.
+	if !strings.Contains(feed, `data-app="xforyou" data-says="x For You"`) {
+		t.Errorf("For You should offer a briefing of its backlog: %s", feed)
 	}
-	// On For You the chip is the one that is on, and tapping it again asks for
-	// another round — the link back to the whole list is the clear chip.
-	on := renderPage(t, items, []string{"x"}, nil, "foryou", "")
-	if !strings.Contains(on, `href="/?x=foryou" data-kind="x" data-key="foryou" data-on="1"`) {
-		t.Errorf("For You should render as the picked chip, still good for another round: %s", on)
+	if failed := renderPage(t, items, apps, []string{xForYouApp}, "following", ""); !strings.Contains(failed, `style="background:#000000">𝕏</span><span class="fn bad">1</span>`) {
+		t.Errorf("a sweep that failed should say so in red: %s", failed)
 	}
-	// Fetched: now it has a number, next to the icon like any other chip's, and
-	// it is that round's own — green, because the fetch landed.
-	if !strings.Contains(on, `style="background:#000000">𝕏</span><span class="fn ok">1</span>`) {
-		t.Errorf("a fetched round should state how much it brought: %s", on)
+
+	// Picked, it is an ordinary pick: tapping the chip that is on hands the whole
+	// list back, and the backlog behind it can be cleared in one tap.
+	on := renderPage(t, items, apps, nil, "foryou", "")
+	if !strings.Contains(on, `href="/" data-kind="app" data-key="xforyou" data-on="1"`) {
+		t.Errorf("the picked For You chip should link back to the whole list: %s", on)
 	}
-	if failed := renderPage(t, nil, []string{"x"}, []string{"x"}, "foryou", ""); !strings.Contains(failed, `style="background:#000000">𝕏</span><span class="fn bad">0</span>`) {
-		t.Errorf("a round that failed should say so in red: %s", failed)
+	if !strings.Contains(on, `id="markAll"`) {
+		t.Errorf("For You has a cached backlog to clear: %s", on)
 	}
-	if !strings.Contains(on, `class="fchip fclear" href="/" id="fclear"`) {
-		t.Errorf("expected a way back to the whole list: %s", on)
+	// Its items are backlog, so reading one takes the header's count down with it.
+	if strings.Contains(on, "x:foryou") {
+		t.Errorf("nothing should still treat For You as a live round: %s", on)
 	}
-	// No x at all: no chip.
-	if p := renderPage(t, items, []string{"reddit"}, nil, "following", ""); strings.Contains(p, `data-key="foryou"`) {
+	// No x logged in and nothing of its cached: no For You chip.
+	elsewhere := []core.Item{{App: "reddit", ID: "3", Title: "a post"}}
+	if p := renderPage(t, elsewhere, []string{"reddit"}, nil, "following", ""); strings.Contains(p, `data-key="xforyou"`) {
 		t.Errorf("no x, no For You chip: %s", p)
-	}
-	// The header still counts the backlog, which the round is no part of, so
-	// reading a round leaves that number alone rather than dropping it to
-	// somewhere the next load would undo.
-	if !strings.Contains(on, `if(SEL === 'x:foryou') return;`) {
-		t.Errorf("reading a For You round should not move the backlog count: %s", on)
-	}
-	// The end-of-feed offers are gone; the chip is the only way in.
-	for _, p := range []string{feed, renderSwipePage(t, items)} {
-		if strings.Contains(p, `id="forYouNote"`) || strings.Contains(p, "Continue with For You") {
-			t.Errorf("the end-of-feed offer should be gone: %s", p)
-		}
 	}
 }
 
@@ -1650,8 +1640,8 @@ func TestPickIsServedNotHidden(t *testing.T) {
 }
 
 // One chip at a time, so the request names one and the links swap it rather
-// than piling params up. For You wins the tie: it is the one pick that is not a
-// slice of the backlog.
+// than piling params up. ?x=foryou is the spelling For You had while it was a
+// live fetch, and it still lands on that source.
 func TestChipQueryIsOnePick(t *testing.T) {
 	sels := []struct {
 		q    string
@@ -1661,9 +1651,10 @@ func TestChipQueryIsOnePick(t *testing.T) {
 		{"app=reddit", feedSel{Kind: "app", Key: "reddit"}},
 		{"type=video", feedSel{Kind: "type", Key: "video"}},
 		{"type=nonsense", feedSel{}},
-		{"x=foryou", feedSel{Kind: "x", Key: "foryou"}},
+		{"app=xforyou", feedSel{Kind: "app", Key: xForYouApp}},
+		{"x=foryou", feedSel{Kind: "app", Key: xForYouApp}},
 		{"x=following", feedSel{}},
-		{"x=foryou&app=reddit&type=video", feedSel{Kind: "x", Key: "foryou"}},
+		{"x=foryou&app=reddit&type=video", feedSel{Kind: "app", Key: xForYouApp}},
 		{"app=reddit&type=video", feedSel{Kind: "app", Key: "reddit"}},
 	}
 	for _, c := range sels {
@@ -1684,7 +1675,9 @@ func TestChipQueryIsOnePick(t *testing.T) {
 		{"app=reddit", feedSel{Kind: "app", Key: "x"}, "/?app=x"},
 		{"type=video", feedSel{Kind: "app", Key: "x"}, "/?app=x"},
 		{"app=reddit", feedSel{}, "/"},
+		// The old spelling is dropped rather than carried forward.
 		{"x=foryou", feedSel{}, "/"},
+		{"x=foryou", feedSel{Kind: "app", Key: xForYouApp}, "/?app=xforyou"},
 		// The sort order and the saved view are not picks, so they ride along.
 		{"order=desc&app=x", feedSel{Kind: "type", Key: "audio"}, "/?order=desc&type=audio"},
 		{"saved=1", feedSel{Kind: "app", Key: "x"}, "/?app=x&saved=1"},
@@ -2105,8 +2098,6 @@ func TestUnmarkHandler(t *testing.T) {
 		t.Fatalf("missing id status = %d, want 400", rec.Code)
 	}
 }
-
-
 
 func TestTagHandlerTogglesMultipleSavedTags(t *testing.T) {
 	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))

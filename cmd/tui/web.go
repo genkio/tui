@@ -31,6 +31,7 @@ import (
 // theme so a service is recognizable at a glance.
 var appColors = map[string]string{
 	"x":         "#4a9eff", // blue
+	xForYouApp:  "#000000", // black, so x's two timelines are told apart
 	"inoreader": "#ffb100", // amber
 	"folo":      "#d07df0", // magenta
 	"reddit":    "#ff6b33", // orange
@@ -38,8 +39,11 @@ var appColors = map[string]string{
 	"bilibili":  "#fb7299", // bilibili pink
 }
 
+// x's two timelines wear the same glyph: they are one service, and the color is
+// what says which of them a chip or a card came from.
 var appLabels = map[string]string{
 	"x":         "𝕏",
+	xForYouApp:  "𝕏",
 	"inoreader": "ino",
 	"folo":      "folo",
 	"reddit":    "rdt",
@@ -290,47 +294,21 @@ func tailnetReachable(host, tailnetIP string) bool {
 	}
 }
 
-// fetchAllItems runs each named app's `--json` concurrently and returns the
-// merged, newest-first items plus the names of any that failed. The sweeper
-// feeds the cache instead; this is left for the live paths that deliberately
-// bypass the backlog, i.e. x's For You firehose.
-func fetchAllItems(ctx context.Context, root string, apps []string, xTab string, now time.Time) ([]core.Item, []string, string) {
-	var (
-		mu     sync.Mutex
-		all    []core.Item
-		failed []string
-		warn   string
-		wg     sync.WaitGroup
-	)
-	for _, app := range apps {
-		wg.Add(1)
-		go func(app string) {
-			defer wg.Done()
-			items, stale, err := fetchApp(ctx, root, app, xTab, 0, now)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				if stale {
-					warn = strings.TrimSpace(warn + " " + app + " session is stale — re-run `tui " + app + " --auth`.")
-				}
-				failed = append(failed, app)
-				return
-			}
-			all = append(all, items...)
-		}(app)
-	}
-	wg.Wait()
-	core.MergeSort(all)
-	return all, failed, warn
-}
-
 // authedFeedApps lists the logged-in apps the all view merges, freshly computed
 // so a login picked up while the server runs is reflected on the next load.
+//
+// x counts twice: its For You timeline is a source of its own here (see
+// xForYouApp), swept and served like any other, and it is logged in exactly when
+// x is because it is x.
 func authedFeedApps(root string) []string {
 	var out []string
 	for _, a := range appsIn(root) {
-		if a.feed && a.authed() {
-			out = append(out, a.name)
+		if !a.feed || !a.authed() {
+			continue
+		}
+		out = append(out, a.name)
+		if a.name == "x" {
+			out = append(out, xForYouApp)
 		}
 	}
 	return out
@@ -356,10 +334,9 @@ func clientWindow(deck bool) int {
 //
 // A chip in the header narrows the page to one source (?app=reddit) or one kind
 // of thing (?type=video) — one at a time, which is why it is a page load and not
-// a matter of hiding cards. ?x=foryou is the odd one out: x's For You is fetched
-// live and deliberately left out of the backlog, being an endless firehose
-// rather than a list to get to the end of, so that chip serves only what the
-// fetch brings back.
+// a matter of hiding cards. Nothing here fetches: x's For You used to be served
+// live from inside this request and is now a swept source like the rest
+// (xForYouApp), which is what makes it summarizable and clearable.
 func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, tags *tagStore, block *blocker, rendered *renderedItems) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
@@ -432,32 +409,8 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	backlog := cache.unread(now, "")
 	tally := tallyItems(backlog)
 
-	var items []core.Item
-	var failed []string
-	var warn string
-	var capped bool
-	if sel.Kind == "x" {
-		// For You, and only For You: a live look at it, cached nowhere, so it
-		// never turns into a backlog you owe yourself.
-		fetchCtx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
-		defer cancel()
-		items, failed, warn = fetchAllItems(fetchCtx, root, []string{"x"}, "foryou", now)
-		// Every other chip still stands for the backlog, so its status light is
-		// the cache's; x's here belongs to the fetch that just ran, which is also
-		// the only one that can speak for x's session.
-		others := make([]string, 0, len(apps))
-		for _, a := range apps {
-			if a != "x" {
-				others = append(others, a)
-			}
-		}
-		cached, cwarn, _ := cache.trouble(others)
-		failed = append(failed, cached...)
-		warn = strings.TrimSpace(warn + " " + cwarn)
-	} else {
-		items = selectItems(backlog, sel)
-		failed, warn, capped = cache.trouble(apps)
-	}
+	items := selectItems(backlog, sel)
+	failed, warn, capped := cache.trouble(apps)
 	sortItems(items, asc)
 
 	if q.Get("json") == "1" {
@@ -479,7 +432,8 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		items = items[:window]
 	}
 	// Remember what this page showed so a save button can post back just an
-	// app+id and still persist the whole item, even for the uncached For You.
+	// app+id and still persist the whole item, even one the cache has since
+	// pruned out from under the page it is on.
 	rendered.put(items)
 
 	writePage(w, tmpl, pageInput{
@@ -567,8 +521,8 @@ func writePage(w http.ResponseWriter, tmpl *template.Template, in pageInput) {
 
 // handleSave stars or unstars one item. Saving needs the whole item, which the
 // button doesn't carry, so it comes from the backlog cache, or from what this
-// process last rendered when the item was never cached (For You). A miss in
-// both means the page predates a restart, and the client is told to reload.
+// process last rendered when the cache no longer holds it. A miss in both means
+// the page predates a restart, and the client is told to reload.
 func handleSave(w http.ResponseWriter, r *http.Request, saved *savedStore, cache *feedCache, rendered *renderedItems) {
 	app, id := r.FormValue("app"), r.FormValue("id")
 	if app == "" || id == "" {
@@ -780,10 +734,6 @@ func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flu
 		return
 	}
 	sel := parseSel(r.Form)
-	if sel.Kind == "x" {
-		http.Error(w, "live timelines have no cached backlog", http.StatusBadRequest)
-		return
-	}
 	items := selectItems(cache.unread(time.Now(), ""), sel)
 	byApp := map[string][]string{}
 	for _, it := range items {

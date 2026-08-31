@@ -65,13 +65,13 @@ func logf(format string, a ...any) {
 // been read. Both are fields rather than direct calls because both are
 // subprocesses, and the order they happen in is the load-bearing part of a
 // drain — worth being able to test without shelling out.
-type fetchFunc func(ctx context.Context, app, xTab string, max int, now time.Time) ([]core.Item, bool, error)
+type fetchFunc func(ctx context.Context, app string, max int, now time.Time) ([]core.Item, bool, error)
 
 type markFunc func(ctx context.Context, app string, ids []string) error
 
 func subprocessFetch(root string) fetchFunc {
-	return func(ctx context.Context, app, xTab string, max int, now time.Time) ([]core.Item, bool, error) {
-		return fetchApp(ctx, root, app, xTab, max, now)
+	return func(ctx context.Context, app string, max int, now time.Time) ([]core.Item, bool, error) {
+		return fetchApp(ctx, root, app, max, now)
 	}
 }
 
@@ -157,17 +157,20 @@ func jitter(d time.Duration) time.Duration {
 
 // sweep refreshes every logged-in feed app concurrently. first skips the
 // per-app stagger, so a cold start has a page as soon as it can.
+//
+// Concurrently by plugin, not by source: x's two timelines are one login and one
+// rate limit, so they are swept one after the other rather than racing each
+// other for it.
 func (s *sweeper) sweep(ctx context.Context, first bool) {
 	if !s.busy.CompareAndSwap(false, true) {
 		return // one already in flight; it is the answer
 	}
 	defer s.busy.Store(false)
 
-	apps := authedFeedApps(s.root)
 	var wg sync.WaitGroup
-	for _, app := range apps {
+	for _, group := range byPlugin(authedFeedApps(s.root)) {
 		wg.Add(1)
-		go func(app string) {
+		go func(group []string) {
 			defer wg.Done()
 			if !first {
 				select {
@@ -176,8 +179,10 @@ func (s *sweeper) sweep(ctx context.Context, first bool) {
 				case <-time.After(time.Duration(rand.Int64N(int64(appStagger)))):
 				}
 			}
-			s.sweepApp(ctx, app)
-		}(app)
+			for _, app := range group {
+				s.sweepApp(ctx, app)
+			}
+		}(group)
 	}
 	wg.Wait()
 	s.cache.setSwept(time.Now())
@@ -208,14 +213,14 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 	defer cancel()
 
 	now := time.Now()
-	items, stale, err := s.fetch(ctx, app, "following", sweepMax, now)
+	items, stale, err := s.fetch(ctx, app, sweepMax, now)
 	if err != nil {
 		s.cache.setStatus(app, appStatus{At: s.cache.statusOf(app).At, Err: err.Error(), Stale: stale})
 		logf("%s: %v", app, err)
 		return
 	}
 	kept, _ := s.screen(items, now)
-	s.cache.upsert(kept, now)
+	s.cache.upsert(s.dropTwins(app, kept), now)
 	if err := s.cache.save(); err != nil {
 		logf("%s: save cache: %v", app, err)
 		s.cache.setStatus(app, appStatus{At: s.cache.statusOf(app).At, Err: "cache write failed"})
@@ -252,13 +257,13 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 			logf("%s: drain stopped after %d of %d: %v", app, len(done), len(ids), err)
 			break
 		}
-		items, _, err = s.fetch(ctx, app, "following", sweepMax, now)
+		items, _, err = s.fetch(ctx, app, sweepMax, now)
 		if err != nil {
 			logf("%s: drain refetch: %v", app, err)
 			break
 		}
 		kept, blocked := s.screen(items, now)
-		fresh := s.cache.upsert(kept, now) + blocked
+		fresh := s.cache.upsert(s.dropTwins(app, kept), now) + blocked
 		if err := s.cache.save(); err != nil {
 			logf("%s: save cache: %v", app, err)
 			break
@@ -292,6 +297,28 @@ func (s *sweeper) screen(items []core.Item, now time.Time) ([]core.Item, int) {
 	return keep, fresh
 }
 
+// dropTwins keeps a post that both of x's timelines carry out of the backlog
+// twice. A tweet is one tweet whichever window surfaced it, so the tab that
+// cached it first keeps it and the other tab's sighting is dropped — including
+// when the first copy has already been read, which is the whole point: being
+// shown a post again under the other name is being asked to read it twice.
+//
+// Everything else has no twin and passes straight through.
+func (s *sweeper) dropTwins(app string, items []core.Item) []core.Item {
+	twin := twinApp(app)
+	if twin == "" || len(items) == 0 {
+		return items
+	}
+	out := make([]core.Item, 0, len(items))
+	for _, it := range items {
+		if s.cache.has(twin, it.ID) {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
 func itemIDs(items []core.Item) []string {
 	out := make([]string, 0, len(items))
 	for _, it := range items {
@@ -305,18 +332,23 @@ func itemIDs(items []core.Item) []string {
 // fetchApp runs one app's --json and parses it, the same subprocess contract
 // the terminal views use. max lifts the app's own fetch cap for a sweep, which
 // wants the backlog rather than the screenful a TUI shows.
-func fetchApp(ctx context.Context, root, app, xTab string, max int, now time.Time) ([]core.Item, bool, error) {
+//
+// Which plugin and which timeline that is comes from the source's name: x's two
+// are one plugin asked for two tabs, and what comes back is filed under the
+// source that asked, since the plugin only ever says "x".
+func fetchApp(ctx context.Context, root, app string, max int, now time.Time) ([]core.Item, bool, error) {
 	appCtx, cancel := context.WithTimeout(ctx, sweepAppTimeout)
 	defer cancel()
-	args := []string{app, "--json"}
-	if app == "x" {
-		args = append(args, "--tab", xTab) // For You / Following
+	plugin, tab := pluginOf(app)
+	args := []string{plugin, "--json"}
+	if plugin == "x" {
+		args = append(args, "--tab", tab) // For You / Following
 	}
 	if max > 0 {
 		args = append(args, "--max", fmt.Sprint(max))
 	}
 	cmd := exec.CommandContext(appCtx, self(), args...)
-	cmd.Env = appEnv(filepath.Join(root, "plugins", app))
+	cmd.Env = appEnv(filepath.Join(root, "plugins", plugin))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -333,6 +365,7 @@ func fetchApp(ctx context.Context, root, app, xTab string, max int, now time.Tim
 	if perr != nil {
 		return nil, false, fmt.Errorf("unreadable --json: %w", perr)
 	}
+	stampApp(items, app)
 	return items, false, nil
 }
 
@@ -373,9 +406,9 @@ type markFlusher struct {
 	wake  chan struct{}
 
 	mu sync.Mutex
-	// extra holds marks for items the cache never saw — x's For You is fetched
-	// live and deliberately not cached, so its read marks have nothing to hang
-	// on and are flushed straight through.
+	// extra holds marks for items the cache never saw: a card read off a page
+	// the sweep has since pruned out from under has nothing here to hang its
+	// mark on, so it is flushed straight through.
 	extra map[string][]string
 }
 

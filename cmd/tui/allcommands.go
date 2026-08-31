@@ -61,9 +61,9 @@ type feedAPIResponse struct {
 var feedServerHTTP = &http.Client{Timeout: 110 * time.Second}
 var feedMutationHTTP = &http.Client{Timeout: 15 * time.Second}
 
-func fetchAll(server, xTab string) tea.Cmd {
+func fetchAll(server string) tea.Cmd {
 	return func() tea.Msg {
-		feed, err := fetchServerFeed(server, xTab)
+		feed, err := fetchServerFeed(server)
 		if err != nil {
 			return errMsg{err: err}
 		}
@@ -85,7 +85,7 @@ func fetchAll(server, xTab string) tea.Cmd {
 	}
 }
 
-func fetchServerFeed(server, xTab string) (feedAPIResponse, error) {
+func fetchServerFeed(server string) (feedAPIResponse, error) {
 	u, err := serverEndpoint(server, "/")
 	if err != nil {
 		return feedAPIResponse{}, err
@@ -93,9 +93,6 @@ func fetchServerFeed(server, xTab string) (feedAPIResponse, error) {
 	q := u.Query()
 	q.Set("json", "1")
 	q.Set("order", "desc")
-	if xTab == "foryou" {
-		q.Set("x", "foryou")
-	}
 	u.RawQuery = q.Encode()
 	res, err := feedServerHTTP.Get(u.String())
 	if err != nil {
@@ -192,8 +189,11 @@ func runMarkRead(root, app string, ids []string, timeout time.Duration) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, self(), app, "--mark-read")
-	cmd.Env = appEnv(filepath.Join(root, "plugins", app))
+	// x's two timelines are one plugin and one read state, so a For You id is
+	// marked read by x — the tab it was read from is not something x records.
+	plugin, _ := pluginOf(app)
+	cmd := exec.CommandContext(ctx, self(), plugin, "--mark-read")
+	cmd.Env = appEnv(filepath.Join(root, "plugins", plugin))
 	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
 	return cmd.Run()
 }

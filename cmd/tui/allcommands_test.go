@@ -34,7 +34,7 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	feed, err := fetchServerFeed(server.URL, "following")
+	feed, err := fetchServerFeed(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	if err := markServerRead(server.URL, "bilibili", []string{"7"}); err != nil {
 		t.Fatal(err)
 	}
-	feed, err = fetchServerFeed(server.URL, "following")
+	feed, err = fetchServerFeed(server.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,26 +70,12 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	}
 }
 
-func TestTerminalForYouUsesLiveServerQuery(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("x"); got != "foryou" {
-			t.Fatalf("x query = %q, want foryou", got)
-		}
-		writeJSONItems(w, nil, nil, feedAPIResponse{Apps: []string{"x"}})
-	}))
-	defer server.Close()
-	if _, err := fetchServerFeed(server.URL, "foryou"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-
 func TestFeedServerErrorsAreActionable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	_, err := fetchServerFeed(server.URL, "following")
+	_, err := fetchServerFeed(server.URL)
 	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
 		t.Fatalf("server error = %v", err)
 	}
@@ -100,7 +86,7 @@ func TestTerminalFeedCarriesServerWarning(t *testing.T) {
 		writeJSONItems(w, nil, []string{"x"}, feedAPIResponse{Warn: "x session is stale; run `tui x --auth`."})
 	}))
 	defer server.Close()
-	msg := fetchAll(server.URL, "following")().(allItemsMsg)
+	msg := fetchAll(server.URL)().(allItemsMsg)
 	for _, want := range []string{"couldn't load: x", "tui x --auth"} {
 		if !strings.Contains(msg.note, want) {
 			t.Fatalf("terminal warning %q does not contain %q", msg.note, want)

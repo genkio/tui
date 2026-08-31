@@ -61,8 +61,7 @@ func (l *pageLoader) load() (*template.Template, error) {
 }
 
 // feedSel is the chip that is on. At most one is, because a pick is a page load
-// of that chip's items and nothing else: Kind is "app", "type", "x" (x's For
-// You, which is fetched live rather than read from the backlog), or "" for the
+// of that chip's items and nothing else: Kind is "app", "type", or "" for the
 // whole list.
 //
 // Sub is the one thing that stacks on top of a pick rather than replacing it:
@@ -256,7 +255,7 @@ type filterGroup struct {
 }
 
 type filterChip struct {
-	Kind   string // "app", "type" or "x", the axis this chip picks along
+	Kind   string // "app" or "type", the axis this chip picks along
 	Key    string
 	Label  string
 	Color  string // the source's own chip color; blank for the content types
@@ -264,10 +263,9 @@ type filterChip struct {
 	Href   string // the page this chip loads; the one already on links back to the whole list
 	On     bool
 	Hidden bool
-	// x's For You is scraped on the spot and never cached, so from anywhere else
-	// there is no backlog of it to count: the chip is the icon alone until a
-	// round of it has actually been fetched.
-	Uncounted bool
+	// The source's name in words, for the briefing icon beside it: the chip's
+	// own label is a glyph, and x's two timelines share it (see appSaying).
+	Says string
 	// This chip carries the icon that asks for a briefing over the source's
 	// backlog, which is only a thing a source with a backlog has. It makes the
 	// chip a pair rather than a link: the label picks, the icon summarizes.
@@ -352,14 +350,6 @@ type quoteData struct {
 // buildPageData shapes the items into what page.tmpl renders: header counts,
 // per-service health dots, and one card per item.
 func buildPageData(in pageInput) pageData {
-	xAuth := false
-	for _, a := range in.apps {
-		if a == "x" {
-			xAuth = true
-			break
-		}
-	}
-
 	bad := map[string]bool{}
 	for _, f := range in.failed {
 		bad[f] = true
@@ -417,7 +407,7 @@ func buildPageData(in pageInput) pageData {
 	if in.tally != nil {
 		tally = *in.tally
 	}
-	filters := chipRow(tally, in.apps, bad, xAuth, in.sel, in.query, in.total)
+	filters := chipRow(tally, in.apps, bad, in.sel, in.query)
 	subs := subChips(tally, in.sel, in.query)
 	clear := ""
 	if in.sel.on() {
@@ -497,7 +487,7 @@ func buildPageData(in pageInput) pageData {
 		Asc:           in.asc,
 		SortHref:      flip,
 		Swipe:         swipe,
-		BulkMark:      !in.savedView && !in.blockedView && !in.itemView && in.sel.Kind != "x",
+		BulkMark:      !in.savedView && !in.blockedView && !in.itemView,
 		DeckHref:      deck,
 		Warn:          in.warn,
 		HasApps:       len(in.apps) > 0,
@@ -785,11 +775,6 @@ func itemType(it core.Item) string {
 	}
 }
 
-// xForYouColor is the black the For You chip wears, so the two x chips are told
-// apart at a glance: the blue one is the cached Following backlog, the black one
-// is the timeline that is fetched on the spot.
-const xForYouColor = "#000000"
-
 // chipRow builds the chip row over a list: one group per axis (which service it
 // came from, what it carries), each chip counting the unread items it stands
 // for, so reading takes the counts down alongside the header's. Only one chip
@@ -803,11 +788,7 @@ const xForYouColor = "#000000"
 // seeing. Without them (the saved list, read off disk, no service to be up or
 // down) a group that would light up the whole list narrows nothing and is left
 // out, and with both left out there is no row to draw.
-//
-// round is how many items the For You fetch just handed over, which is the one
-// count that cannot be taken from a list on disk. It means nothing unless that
-// chip is the one on.
-func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel feedSel, q url.Values, round int) []filterGroup {
+func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url.Values) []filterGroup {
 	var out []filterGroup
 	var appChips []filterChip
 	if len(apps) > 0 {
@@ -818,13 +799,13 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel fe
 			live[a] = true
 			chip := filterChip{
 				Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: t.apps[a],
-				State: "ok", Title: a + ": live",
+				State: "ok", Title: appSaying(a) + ": live", Says: appSaying(a),
 				// Nothing unread is nothing to brief anybody on, and the chip is
 				// still drawn at zero as that service's status light.
 				Summarize: t.apps[a] > 0,
 			}
 			if bad[a] {
-				chip.State, chip.Title = "bad", a+": failed to load"
+				chip.State, chip.Title = "bad", appSaying(a)+": failed to load"
 			}
 			appChips = append(appChips, chip)
 		}
@@ -834,22 +815,19 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel fe
 			if !live[a] {
 				appChips = append(appChips, filterChip{
 					Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: n,
-					Summarize: n > 0,
+					Says: appSaying(a), Summarize: n > 0,
 				})
 			}
 		}
 		sortChips(appChips)
 	} else if len(t.apps) > 1 {
 		for a, n := range t.apps {
-			appChips = append(appChips, filterChip{Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: n})
+			appChips = append(appChips, filterChip{
+				Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: n,
+				Says: appSaying(a),
+			})
 		}
 		sortChips(appChips)
-	}
-	// x's other timeline is a chip of its own, next to the one for its backlog.
-	// It is the one pick that fetches rather than reads, so there is always
-	// another round of it to ask for.
-	if xAuth {
-		appChips = withForYou(appChips, sel, bad["x"], round)
 	}
 	if len(appChips) > 0 {
 		out = append(out, filterGroup{Chips: appChips})
@@ -870,10 +848,8 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel fe
 			c := &out[i].Chips[j]
 			c.On = sel.Kind == c.Kind && sel.Key == c.Key
 			c.Href = chipHref(q, feedSel{Kind: c.Kind, Key: c.Key})
-			// Tapping the chip that is on puts the whole list back — except For
-			// You, which is refetched on every visit, so tapping it again is
-			// another round of it. The clear chip is the way off that one.
-			if c.On && c.Kind != "x" {
+			// Tapping the chip that is on puts the whole list back.
+			if c.On {
 				c.Href = chipHref(q, feedSel{})
 			}
 		}
@@ -950,34 +926,6 @@ func subChips(t feedTally, sel feedSel, q url.Values) []filterChip {
 	return out
 }
 
-// withForYou slots x's For You chip in after x's own, or leaves the row alone
-// when x has no chip there to sit beside.
-//
-// The chip is the icon on its own until a round has been fetched: from anywhere
-// else there is nothing to count, since none of that timeline is kept. On the
-// page the fetch served it states the round it brought, the way every other chip
-// states its own number — and it is a status light there too, red when the fetch
-// came back empty-handed rather than empty.
-func withForYou(chips []filterChip, sel feedSel, failed bool, round int) []filterChip {
-	foryou := filterChip{
-		Kind: "x", Key: "foryou", Label: appLabel("x"), Color: xForYouColor,
-		Uncounted: true, Title: "x's For You, fetched on the spot and not kept",
-	}
-	if sel.Kind == "x" {
-		foryou.Uncounted, foryou.Count = false, round
-		foryou.State, foryou.Title = "ok", "x: For You, this round"
-		if failed {
-			foryou.State, foryou.Title = "bad", "x: For You failed to load"
-		}
-	}
-	for i, c := range chips {
-		if c.Kind == "app" && c.Key == "x" {
-			return append(chips[:i+1:i+1], append([]filterChip{foryou}, chips[i+1:]...)...)
-		}
-	}
-	return chips
-}
-
 // chipHref is where a chip goes: this page's query with whichever filter param
 // was on swapped for the chip's own, so the sort order (and the saved view)
 // survives a pick. An empty sel is the link back to the whole list.
@@ -994,7 +942,7 @@ func chipHref(q url.Values, sel feedSel) string {
 		}
 	}
 	switch sel.Kind {
-	case "app", "type", "x":
+	case "app", "type":
 		out.Set(sel.Kind, sel.Key)
 	}
 	if sel.Kind == "app" && sel.Sub != "" {
@@ -1079,11 +1027,12 @@ func deckWanted(q url.Values) bool {
 	return q.Get("deck") == "1"
 }
 
-// parseSel reads the chip a request is asking for. x's For You wins over the
-// rest: it is the one pick that is not a slice of the backlog.
+// parseSel reads the chip a request is asking for. ?x=foryou is how For You was
+// picked while it was a live fetch rather than a source of its own; it still
+// lands on it, so a link kept from then still opens what it named.
 func parseSel(q url.Values) feedSel {
 	if q.Get("x") == "foryou" {
-		return feedSel{Kind: "x", Key: "foryou"}
+		return feedSel{Kind: "app", Key: xForYouApp}
 	}
 	if a := q.Get("app"); a != "" {
 		sel := feedSel{Kind: "app", Key: a}
@@ -1099,8 +1048,7 @@ func parseSel(q url.Values) feedSel {
 	return feedSel{}
 }
 
-// selectItems narrows a list to the picked chip. The For You pick is not a
-// slice of anything here — it is fetched instead — so it takes no items.
+// selectItems narrows a list to the picked chip.
 func selectItems(items []core.Item, sel feedSel) []core.Item {
 	if !sel.on() {
 		return items

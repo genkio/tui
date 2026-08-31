@@ -220,6 +220,16 @@ func (c *feedCache) drop(keys []string) int {
 	return len(gone)
 }
 
+// has reports whether the cache holds this item at all, read or not. The sweep
+// asks it about x's other timeline: a tweet already filed under one of the two
+// is not backlog for the other (see dropTwins).
+func (c *feedCache) has(app, id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.byKey[core.Key(app, id)]
+	return ok
+}
+
 // item returns one cached item, for a save button that posts back only app+id.
 func (c *feedCache) item(app, id string, now time.Time) (core.Item, bool) {
 	c.mu.Lock()
@@ -338,7 +348,10 @@ func (c *feedCache) trouble(apps []string) (failed []string, warn string, capped
 		}
 		failed = append(failed, a)
 		if st.Stale {
-			warn = trimJoin(warn, a+" session is stale — re-run `tui "+a+" --auth`.")
+			// The login to redo is the plugin's, not the source's: For You has no
+			// session of its own to re-run anything for.
+			plugin, _ := pluginOf(a)
+			warn = trimJoin(warn, appSaying(a)+" session is stale — re-run `tui "+plugin+" --auth`.")
 		}
 	}
 	return failed, warn, capped

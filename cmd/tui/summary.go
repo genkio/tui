@@ -307,7 +307,7 @@ Write Markdown:
 - No preamble, no sign-off, no closing summary of the summary, no code fence
   around the whole thing, and no heading above level two.
 
-`, appLabel(app), len(items), summaryLangs[summaryLang(lang)])
+`, appSaying(app), len(items), summaryLangs[summaryLang(lang)])
 
 	for i, it := range items {
 		fmt.Fprintf(&b, "--- item %d\n", i+1)
