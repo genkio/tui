@@ -1925,7 +1925,7 @@ func TestDeckChipsAreLinksToo(t *testing.T) {
 
 func TestMarkAllClearsTheServerSelection(t *testing.T) {
 	page := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
-	if !strings.Contains(page, `if(SWIPE && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + ' in this feed read?')) return;`) {
+	if !strings.Contains(page, `if((SWIPE || SUMMARY_ON) && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + markAllScope() + ' read?')) return;`) {
 		t.Error("deck mark-all should ask before changing any card")
 	}
 	if !strings.Contains(page, `fetch('/mark-all', {method:'POST', body:fd})`) {

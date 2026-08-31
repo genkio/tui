@@ -212,6 +212,11 @@ repeating the picked one there would leave nothing stating the whole. Tapping th
 chip that is on, or **clear**, brings the whole list back. Any marks that haven't
 reached the server yet are flushed before the page goes.
 
+A source chip with anything unread behind it is drawn as a **pair**: the label
+picks that source, and the ✦ beside it asks for a briefing of everything the
+chip counts (see **Summarizing a backlog**). A chip at zero is only a chip —
+there is nothing there to brief anybody on.
+
 Next to x's own blue chip sits a second, **black** one: the same `𝕏`, no label.
 That is x's other timeline, and it is the one pick that fetches rather than
 reads. From anywhere else it is the icon alone — none of that timeline is kept,
@@ -383,6 +388,73 @@ Nothing on the page is marked read by being looked at: arriving by URL is not
 working through the feed, and a link that quietly emptied a slot of your backlog
 would be a poor thing to hand around. Saving from it works as it does anywhere
 else, and the header's **unread** link goes back to the feed.
+
+### Summarizing a backlog
+
+Every source chip with a backlog carries a ✦ beside it. Tapping it hands that
+source's unread items to [Codex](https://github.com/openai/codex) —
+`gpt-5.6-luna` at its default reasoning level — and nothing else happens to your
+page: the icon starts spinning and you carry on reading. That is the point of it.
+A run takes a minute or two, so waiting on a blank screen for one would be the
+worst way to spend it, and several sources can be spinning at once.
+
+The icon is the whole state of the thing. Outline is idle, a turning ring means
+it is being written, and **filled in, in the accent colour**, means there is one
+waiting. Only the icon changes: an accent border on the chip means that source is
+the pick the page is narrowed to, and nothing else gets to say that. A toast tells
+you when one lands while you are elsewhere. Tapping a filled icon opens what it
+wrote: what the batch is mostly about, then themes as sections, and a list of at
+most five worth opening. Every item the briefing names is a link to that item's
+own page (see **One item, one URL**), so the summary is a way into the feed
+rather than a substitute for it.
+
+Each cited item gets a **row of its own** — a bullet carrying four links is a
+row nobody can tell apart — and wears a short label rather than its own URL,
+which matters most on x, where a post has no title to borrow.
+
+**summarize in**, in settings, picks the language: English or 中文. It applies to
+the next run, not the ones already written — a briefing is in the language it was
+written in — so switching hands the sparkles back to offering a run, and
+switching back finds the earlier briefings still where they were kept. Titles,
+names and `@handles` are left as they are in either language, since a cited item
+renamed in translation is one you cannot find again.
+
+A briefing goes in place of the cards it is of, so opening one from another page
+takes you to that source's own page first (`?app=reddit&summary=1`, which is a
+URL you can keep). Tapping the icon again puts the cards back exactly as they
+were — hidden, not reloaded, so the scroll position, the players and anything
+part-expanded all survive the round trip. **again**, in the briefing's header,
+spends a fresh run over the backlog as it stands now.
+
+The runs are the server's, not the request's: closing the tab, following a link
+or picking another chip does not abandon one, and reopening the feed finds the
+icons as it left them. Only one runs at a time however many were asked for —
+codex is a subprocess costing minutes and tokens, and a handful racing finishes
+no sooner — so a chip may spin for a while waiting its turn. Needs the `codex`
+CLI on the host's PATH and logged in; without it the icon says so and goes back
+to idle.
+
+Each briefing reads the source's **whole** backlog, oldest first — a summary of
+the newest slice would have a hole in it that nothing on the page could tell you
+about. There is no item limit; the only bound is a 700-character clip per item,
+which keeps one long article from spending the whole prompt, so a prompt grows
+with the count and nothing else. A few hundred posts is tens of thousands of
+tokens (x at 303 items ≈ 36k, reddit at 380 ≈ 59k). A backlog deep enough to
+outrun the model's context fails as a job, carrying whatever codex said about
+it, rather than being quietly trimmed to fit.
+
+Finished briefings are kept in the tab's `sessionStorage`, so toggling the two
+views costs nothing and a reload still finds them — session rather than local
+storage because a briefing is about a backlog as it stood, and a backlog is what
+changes while a tab is closed. Nothing is marked read by being summarized: being
+told what is in a batch is not having read it, and a briefing that emptied the
+backlog behind itself would leave you unable to act on what it just told you.
+
+Deciding it read enough is your move, and **mark all read** stays on screen for
+it — the one control the briefing does not hide, still under the thumb in the
+deck. A briefing only ever covers one source, so that is all the button clears:
+it asks first, and names the source it is about to empty rather than saying "this
+feed", because the other sources' backlogs are none of this briefing's business.
 
 ### Swipe mode
 

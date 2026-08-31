@@ -180,11 +180,14 @@ type pageInput struct {
 	blockedView bool
 	// One item on a page of its own, reached by its own URL (see itemHref).
 	itemView bool
-	swipe    bool // this request's layout: one card at a time instead of the scrolling feed
-	asc      bool // oldest first, which the header's toggle flips
-	updated  time.Time
-	fetching bool // a sweep is in flight, so the count is about to move
-	capped   bool // a service's backlog runs deeper than the sweep reached
+	// ?summary=1: open this source's briefing rather than its cards, which is
+	// where a finished icon on another page sends you.
+	summaryOpen bool
+	swipe       bool // this request's layout: one card at a time instead of the scrolling feed
+	asc         bool // oldest first, which the header's toggle flips
+	updated     time.Time
+	fetching    bool // a sweep is in flight, so the count is about to move
+	capped      bool // a service's backlog runs deeper than the sweep reached
 }
 
 type pageData struct {
@@ -229,7 +232,13 @@ type pageData struct {
 	HasApps   bool
 	Sel       string // the chip that is on ("app:x"), blank for the whole list
 	ClearHref string // ...and where to go to put it back, blank when none is on
-	Filters   []filterGroup
+	// Which source's briefing this page has room for, and whether to open it on
+	// arrival (?summary=1, which is where a done icon on another page sends you).
+	// A briefing goes in place of the cards it is of, so the page that can hold
+	// one is the page showing that source's cards and no others.
+	SummaryApp  string
+	SummaryOpen bool
+	Filters     []filterGroup
 	// The second row: this source's subcategories, busiest first. Only ever
 	// filled when a source chip that has them is the one on.
 	Subs       []filterChip
@@ -259,6 +268,10 @@ type filterChip struct {
 	// there is no backlog of it to count: the chip is the icon alone until a
 	// round of it has actually been fetched.
 	Uncounted bool
+	// This chip carries the icon that asks for a briefing over the source's
+	// backlog, which is only a thing a source with a backlog has. It makes the
+	// chip a pair rather than a link: the label picks, the icon summarizes.
+	Summarize bool
 	// A source chip is also that service's status light: its count is drawn
 	// green when the last sweep worked and red when it didn't, which is the job
 	// the header's separate row of dots used to do. Empty for a chip that isn't
@@ -411,6 +424,15 @@ func buildPageData(in pageInput) pageData {
 		clear = chipHref(in.query, feedSel{})
 	}
 
+	// Only on the feed, and only under a source pick: the briefing goes in place
+	// of that source's cards, which is the one thing the saved and blocked lists
+	// and a single item's page do not have. in.apps is what tells them apart —
+	// only the feed is given the logged-in services.
+	summaryApp := ""
+	if len(in.apps) > 0 && in.sel.Kind == "app" {
+		summaryApp = in.sel.Key
+	}
+
 	updated := ""
 	if !in.updated.IsZero() {
 		updated = humanAgo(in.updated)
@@ -470,6 +492,8 @@ func buildPageData(in pageInput) pageData {
 		Subs:          subs,
 		Sel:           in.sel.String(),
 		ClearHref:     clear,
+		SummaryApp:    summaryApp,
+		SummaryOpen:   summaryApp != "" && in.summaryOpen,
 		Asc:           in.asc,
 		SortHref:      flip,
 		Swipe:         swipe,
@@ -795,15 +819,23 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, xAuth bool, sel fe
 			chip := filterChip{
 				Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: t.apps[a],
 				State: "ok", Title: a + ": live",
+				// Nothing unread is nothing to brief anybody on, and the chip is
+				// still drawn at zero as that service's status light.
+				Summarize: t.apps[a] > 0,
 			}
 			if bad[a] {
 				chip.State, chip.Title = "bad", a+": failed to load"
 			}
 			appChips = append(appChips, chip)
 		}
+		// A service logged out of still has whatever was cached before that, and a
+		// backlog is a backlog whoever is still logged in.
 		for a, n := range t.apps {
 			if !live[a] {
-				appChips = append(appChips, filterChip{Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: n})
+				appChips = append(appChips, filterChip{
+					Kind: "app", Key: a, Label: appLabel(a), Color: appColor(a), Count: n,
+					Summarize: n > 0,
+				})
 			}
 		}
 		sortChips(appChips)
@@ -953,7 +985,10 @@ func chipHref(q url.Values, sel feedSel) string {
 	out := url.Values{}
 	for k, v := range q {
 		switch k {
-		case "app", "type", "x", "sub", "json": // the filter params this replaces, and one no page carries
+		// The filter params this replaces, one no page carries, and the briefing
+		// flag: a pick is a page of cards, whatever the page it was tapped from
+		// happened to be showing.
+		case "app", "type", "x", "sub", "json", "summary":
 		default:
 			out[k] = v
 		}
@@ -980,7 +1015,8 @@ func orderHref(q url.Values, asc bool) string {
 	out := url.Values{}
 	for k, v := range q {
 		switch k {
-		case "order", "json":
+		// Reordering is something you ask of the cards, so it lands on them.
+		case "order", "json", "summary":
 		default:
 			out[k] = v
 		}
@@ -1001,7 +1037,8 @@ func deckHref(q url.Values, deck bool) string {
 	out := url.Values{}
 	for k, v := range q {
 		switch k {
-		case "deck", "json":
+		// Likewise the layout: it is the cards' layout being changed.
+		case "deck", "json", "summary":
 		default:
 			out[k] = v
 		}

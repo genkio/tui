@@ -168,6 +168,34 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .fchip .fn.ok{color:var(--ok);opacity:1}
 .fchip .fn.bad{color:var(--bad);opacity:1}
 .fclear{margin-left:auto;color:var(--accent)}
+/* A source with a backlog carries a second half: the chip picks, the icon beside
+   it asks for a briefing of what the chip counts. The two are drawn as one pill
+   with a divider rather than as two controls, because they are one thing — that
+   source — offering the two things you can do with it. The pair is a single flex
+   item of the row (the groups are display:contents) so it cannot wrap apart. */
+.fpair{display:inline-flex;align-items:stretch}
+.fpair>.fchip{border-top-right-radius:0;border-bottom-right-radius:0;border-right:0}
+.fsum{
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+  width:34px;min-height:32px;padding:0;
+  background:var(--card);border:1px solid var(--line);
+  border-top-right-radius:999px;border-bottom-right-radius:999px;
+  border-left:1px solid var(--line);color:var(--muted);
+  -webkit-tap-highlight-color:transparent;
+}
+.fsum svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
+/* Asked for and not yet answered: the sparkle gives way to a ring, because a
+   briefing takes minutes and a chip that looked idle would be asked for twice. */
+.fsum .fspin{display:none;width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:fspin .7s linear infinite}
+.fsum[data-state="running"] .fsumi{display:none}
+.fsum[data-state="running"] .fspin{display:block}
+/* Written and waiting: the sparkle fills in. Only the sparkle — an accent
+   border on the chip means that source is the pick this page is narrowed to, and
+   nothing else gets to say that. */
+.fsum[data-state="done"]{color:var(--accent)}
+.fsum[data-state="done"] svg{fill:currentColor;stroke:currentColor}
+.fpair>.fchip[data-on="1"]+.fsum{border-color:var(--accent)}
+@keyframes fspin{to{transform:rotate(360deg)}}
 /* the second layer, under the source row: which subreddit, which rss feed. Only
    the busiest of them fit — a source can have dozens, and a wall of them would
    push the first card off the screen — so the script keeps one row and the rest
@@ -294,11 +322,41 @@ button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);pa
 .kwdlg menu button#kwsave{color:var(--accent);border-color:var(--accent)}
 .settingrow{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:44px;font-size:14px;font-weight:600}
 .settingrow input{width:20px;height:20px;margin:0;accent-color:var(--accent)}
+/* a setting with more than two states is a row of radios rather than a switch;
+   the label sits beside its own dot so a tap anywhere on either picks it */
+.radios{display:flex;align-items:center;gap:16px;font-weight:600}
+.radios label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.radios span{color:var(--muted)}
+.radios input:checked+span{color:var(--fg)}
 .hid{display:none}
 .empty{color:var(--muted);font-style:italic}
 .note{padding:16px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:15px}
 .note a{color:var(--accent);font-weight:600;text-decoration:none}
 .note.offer{margin-top:10px}
+/* The briefing over a source's backlog, in place of the cards it is a briefing
+   of: one card-shaped block, since it is one piece of prose about the whole
+   pick rather than a row per item. Hiding the feed rather than replacing it
+   keeps every card where it was — the scroll position, the players, whatever is
+   part-expanded — so coming back is coming back and not a reload. */
+.summary{display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+body.sumon .summary{display:block}
+.smeta{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.summary .body{font-size:15px}
+.summary .body h2{margin:18px 0 6px;font-size:16px;font-weight:700}
+.summary .body ul,.summary .body ol{margin:8px 0;padding-left:22px}
+.summary .body li{margin:4px 0}
+/* a cited item wears a label, not a URL: nothing here wants breaking mid-word
+   the way a bare link in a post's body does */
+.summary .body .link{word-break:normal;text-underline-offset:2px}
+/* What the briefing stands in for is hidden while it is open. #markAll is not on
+   this list: having read a briefing and decided the items behind it are not worth
+   opening, clearing them is the next thing you do, so the button stays where the
+   thumb left it. A briefing is only ever of one source, so that is all it clears. */
+body.sumon article.card,
+body.sumon .deckwrap,
+body.sumon #deckNav,
+body.sumon #deckEnd,
+body.sumon .wrap>.note{display:none}
 /* a feed page is fetched before it is sent, so a tap that refetches leaves the
    old page on screen with nothing happening; cover it while the wait runs */
 .loading{
@@ -405,8 +463,9 @@ video.ffs{object-fit:cover !important}
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
+{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}{{if not .Uncounted}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span>{{end}}</a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-state="idle" title="summarize {{.Key}}'s unread backlog" aria-label="summarize {{.Key}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
+{{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if .ItemView}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
@@ -417,7 +476,7 @@ video.ffs{object-fit:cover !important}
 {{else}}{{range .Cards}}{{template "card" .}}
 {{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button></div>
 {{end}}{{if and .Cards .BulkMark}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-total="{{.Total}}"{{if .Swipe}} title="mark all {{.Total}} items in this feed read"{{end}}>{{if .Swipe}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg>{{else}}✓ mark all {{.Total}} read{{end}}</button>
-{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on left</span><input id="controlsLeft" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
+{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on left</span><input id="controlsLeft" type="checkbox"></label><div class="settingrow"><span>summarize in</span><span class="radios" id="sumLang"><label><input type="radio" name="sumlang" value="en"><span>English</span></label><label><input type="radio" name="sumlang" value="zh"><span>中文</span></label></span></div><menu><button value="done">done</button></menu></form></dialog>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -430,6 +489,11 @@ var MORE = document.getElementById('state').getAttribute('data-more') === 'true'
 // Set means the deck's arrows take the left edge instead of the right.
 var CONTROLS_LEFT = false;
 try { CONTROLS_LEFT = localStorage.getItem('tui:deck-controls-left') === '1'; } catch(e){}
+// Which language a briefing is asked for in. This browser's choice, kept where
+// its other choices are: one server serves whoever opens it, and the language a
+// summary comes back in belongs to whoever is reading it.
+var SUM_LANG = 'en';
+try { if (localStorage.getItem('tui:summary-lang') === 'zh') SUM_LANG = 'zh'; } catch(e){}
 var SAVED_TAGS = {{.SavedTags}};
 var TAG_OPTIONS = {{.TagOptions}};
 var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview') === 'true';
@@ -440,6 +504,9 @@ var BLOCKED_VIEW = document.getElementById('state').getAttribute('data-blockedvi
 // the link rather than by working through the feed, so nothing on it is read by
 // having been looked at.
 var ITEM_VIEW = document.getElementById('state').getAttribute('data-itemview') === 'true';
+// Set while the briefing is up in place of the cards. The cards are still on the
+// page, hidden, and a hidden card must not count as one you scrolled past.
+var SUMMARY_ON = false;
 // Which chip is on ("app:x"), blank for the whole list. The page carries that
 // chip's items and nothing else, which is what stops the recount below from
 // speaking for the chips it cannot see.
@@ -536,13 +603,26 @@ function decCount(n){
   var c = (parseInt(s.textContent, 10) || 0) - n; if(c < 0) c = 0;
   s.textContent = c;
 }
+// What mark-all is about to clear, in words. A briefing is of one source's
+// backlog, so while one is open the button and its confirm name that source
+// rather than the vaguer "this feed" — clearing it must not read as clearing
+// everything unread.
+function markAllScope(){
+  var app = new URLSearchParams(location.search).get('app') || '';
+  return SUMMARY_ON && app ? ' in ' + app : ' in this feed';
+}
+function labelMarkAll(){
+  var b = document.getElementById('markAll');
+  if(!b) return;
+  var total = parseInt(b.dataset.total, 10) || 0;
+  if(SWIPE) b.title = 'mark all ' + total + ' items' + markAllScope() + ' read';
+  else b.textContent = '✓ mark all ' + total + ' read';
+}
 function decBulkCount(n){
   var b = document.getElementById('markAll');
   if(!b) return;
-  var total = Math.max(0, (parseInt(b.dataset.total, 10) || 0) - n);
-  b.dataset.total = total;
-  if(SWIPE) b.title = 'mark all ' + total + ' items in this feed read';
-  else b.textContent = '✓ mark all ' + total + ' read';
+  b.dataset.total = Math.max(0, (parseInt(b.dataset.total, 10) || 0) - n);
+  labelMarkAll();
 }
 // A chip's number is what picking it would bring, so reading takes it down with
 // the header's. Debounced: a fast scroll marks cards faster than there is any
@@ -616,6 +696,7 @@ function queueUnread(el){
 var obs = new IntersectionObserver(function(entries){
   if (ffs) return; // fake fullscreen scrolls the feed behind the video (hiding
                    // Safari's bars); that motion must not mark cards read
+  if (SUMMARY_ON) return; // nor does the feed collapsing behind the briefing
   entries.forEach(function(en){
     var el = en.target;
     // On screen: whatever it was before, it has now been in front of you, so
@@ -1273,7 +1354,7 @@ document.addEventListener('click', function(e){
 var markAllBtn = document.getElementById('markAll');
 if(markAllBtn) markAllBtn.addEventListener('click', function(){
   var total = parseInt(markAllBtn.dataset.total, 10) || 0;
-  if(SWIPE && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + ' in this feed read?')) return;
+  if((SWIPE || SUMMARY_ON) && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + markAllScope() + ' read?')) return;
   markAllBtn.disabled = true;
   if(flushTimer) clearTimeout(flushTimer);
   pending = {};
@@ -1301,6 +1382,23 @@ if(settingsDlg && settingsOpen && controlsLeft){
     positionDeckControls();
   });
 }
+// Changing the language does not rewrite the briefings already in hand: a
+// summary is in the language it was written in. The sparkles re-read themselves
+// instead, so one written in the language you have just left goes back to
+// offering a run, and switching back finds it again where it was kept.
+(function(){
+  var box = document.getElementById('sumLang');
+  if (!box) return;
+  box.querySelectorAll('input[name="sumlang"]').forEach(function(r){
+    r.checked = r.value === SUM_LANG;
+    r.addEventListener('change', function(){
+      if (!r.checked) return;
+      SUM_LANG = r.value;
+      try { localStorage.setItem('tui:summary-lang', SUM_LANG); } catch(e){}
+      document.dispatchEvent(new CustomEvent('tui:sumlang'));
+    });
+  });
+})();
 
 // The deck (?deck=1): one card on screen, walked through from an edge column.
 if (SWIPE) (function(){
@@ -1374,7 +1472,9 @@ if (SWIPE) (function(){
 
   // The arrow keys walk the deck: left goes back, right marks read and moves on.
   document.addEventListener('keydown', function(e){
-    if (ffs || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Not while the briefing is up: the deck is behind it, and a card dealt out
+    // of sight is one marked read without having been seen.
+    if (ffs || SUMMARY_ON || e.metaKey || e.ctrlKey || e.altKey) return;
     var k = e.key;
     if (k === 'ArrowLeft'){ e.preventDefault(); back(); }
     else if (k === 'ArrowRight'){ e.preventDefault(); read(); }
@@ -1408,6 +1508,279 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     .then(function(d){ if(!d.ok) throw 0; location.reload(); })
     .catch(function(){ clearBlockedBtn.disabled = false; toast('could not clear blocked items'); });
 });
+
+// Summarize: a briefing over one source's whole unread backlog, asked for from
+// that source's own chip. A run costs minutes, so nothing here waits on one —
+// the icon spins, the server keeps working after the tap that started it, and
+// you carry on reading. Several sources can be spinning at once; the server runs
+// them one at a time, which is the honest thing to do with a subprocess that
+// costs tokens, and the icons say which are still going.
+//
+// A finished briefing is filled in, and tapping it then opens what it wrote: on
+// this source's own page, in place of the cards it is a briefing of. The cards
+// are hidden rather than thrown away, so scroll position, players and whatever
+// is part-expanded are all still there when you come back — coming back to where
+// you were is the point of a summary that names items to open.
+//
+// Results live in sessionStorage, so toggling the two views costs nothing and
+// "again" is how you spend another run. Session rather than local storage
+// because a briefing is about a backlog as it stood, and a backlog is exactly
+// what changes while a tab is closed.
+(function(){
+  var icons = {};
+  document.querySelectorAll('button.fsum[data-app]').forEach(function(b){ icons[b.dataset.app] = b; });
+  var panel = document.getElementById('summary');
+  var mine = panel ? (panel.dataset.app || '') : ''; // the source this page can show
+  if (!panel && !Object.keys(icons).length) return;
+
+  var poll = null, open = false, atFeed = 0, getting = {};
+
+  // Kept per language as well as per source: a briefing is in the language it
+  // was written in, so the two are separate things to have and switching back
+  // finds the earlier one still there.
+  function slot(app){ return 'tui:summary:' + app + ':' + SUM_LANG; }
+  function held(app){
+    try { var raw = sessionStorage.getItem(slot(app)); return raw ? JSON.parse(raw) : null; }
+    catch(e){ return null; }
+  }
+  function hold(app, d){
+    try { sessionStorage.setItem(slot(app), JSON.stringify(d)); } catch(e){}
+  }
+
+  function state(app){ return icons[app] ? icons[app].dataset.state : ''; }
+  function setState(app, s){
+    var b = icons[app];
+    if (!b) return;
+    b.dataset.state = s;
+    var says = s === 'running' ? 'summarizing ' + app + '…'
+      : s === 'done' ? 'read the summary of ' + app + "'s backlog"
+      : 'summarize ' + app + "'s unread backlog";
+    b.title = says;
+    b.setAttribute('aria-label', says);
+  }
+
+  // The URL says which of the two views you are on, so a reload stays put and
+  // the link a finished icon sends you to opens on the briefing.
+  function stamp(on){
+    try {
+      var u = new URL(location.href);
+      if (on) u.searchParams.set('summary', '1'); else u.searchParams.delete('summary');
+      history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+    } catch(e){}
+  }
+
+  // Swapping the views is also swapping where you are on the page: the briefing
+  // starts at its top, and leaving it puts the feed back where it was. Cards
+  // that ended up above the viewport by that restore are exempted, since nobody
+  // scrolled past them — the same care the page takes over a restored offset.
+  // mark-all comes along into the briefing, relabelled: having read one and
+  // decided the items behind it are not worth opening, clearing that source's
+  // backlog is the next thing you do.
+  function show(on){
+    if (!panel) return;
+    if (on && !open) atFeed = window.scrollY || 0;
+    open = on;
+    SUMMARY_ON = on;
+    document.body.classList.toggle('sumon', on);
+    labelMarkAll();
+    stamp(on);
+    if (on){ window.scrollTo(0, 0); return; }
+    window.scrollTo(0, atFeed);
+    exemptBehind();
+  }
+
+  function waiting(){
+    if (!panel) return;
+    panel.textContent = '';
+    var note = document.createElement('div');
+    note.className = 'note';
+    note.textContent = 'Reading the backlog — this takes a minute or two.';
+    panel.appendChild(note);
+  }
+
+  function render(d){
+    if (!panel) return;
+    panel.textContent = '';
+    var meta = document.createElement('div');
+    meta.className = 'smeta';
+    var when = '';
+    try { when = new Date(d.generated).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(e){}
+    var n = d.count || 0;
+    meta.textContent = n + (n === 1 ? ' unread item' : ' unread items')
+      + (when ? ', summarized ' + when : '');
+    var again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'rest';
+    again.textContent = 'again';
+    again.title = 'summarize the backlog as it stands now';
+    again.addEventListener('click', function(){ start(mine); waiting(); });
+    meta.appendChild(again);
+    var body = document.createElement('div');
+    body.className = 'body';
+    // Server-rendered from Markdown by the same renderer the cards use, which
+    // escapes whatever HTML the model may have written.
+    body.innerHTML = d.html;
+    panel.appendChild(meta);
+    panel.appendChild(body);
+  }
+
+  function start(app){
+    if (state(app) === 'running') return;
+    setState(app, 'running');
+    var fd = new FormData();
+    fd.append('app', app);
+    fd.append('lang', SUM_LANG);
+    fetch('/summarize', {method:'POST', body:fd})
+      .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
+      .then(function(){ watch(); })
+      .catch(function(err){
+        setState(app, held(app) ? 'done' : 'idle');
+        if (app === mine && open) show(false);
+        toast((err && err.message || '').trim() || 'could not summarize ' + app);
+      });
+  }
+
+  // The whole briefing, once its job says there is one. reveal is for the run
+  // you are sitting in front of waiting for; anything else finishing says so in
+  // a toast and leaves you where you are.
+  function collect(app, reveal){
+    if (getting[app]) return; // a poll every three seconds must not stack fetches
+    getting[app] = 1;
+    var was = state(app);
+    fetch('/summarize?app=' + encodeURIComponent(app))
+      .then(function(res){ if(!res.ok) throw 0; return res.json(); })
+      .then(function(d){
+        if (!d || !d.html) throw 0;
+        if (d.lang && d.lang !== SUM_LANG) throw 0; // written in the other one
+        hold(app, d);
+        setState(app, 'done');
+        if (reveal && app === mine){ render(d); show(true); return; }
+        if (was === 'running') toast(app + "'s summary is ready");
+      })
+      .catch(function(){
+        setState(app, held(app) ? 'done' : 'idle');
+        if (reveal && app === mine) show(false);
+      })
+      .then(function(){ delete getting[app]; });
+  }
+
+  // What the server says about every source it has been asked about, folded into
+  // the icons. Returns whether anything is still going, which is what decides
+  // whether to keep asking.
+  function sync(jobs){
+    var going = false;
+    Object.keys(icons).forEach(function(app){
+      var j = jobs[app], was = state(app);
+      if (!j){
+        // The server has no job for it: whatever this tab already holds stands.
+        if (was === 'running') setState(app, held(app) ? 'done' : 'idle');
+        return;
+      }
+      // A job in the other language is not the one this browser is asking for,
+      // so it counts for nothing here: no spinner to wait on, nothing to adopt.
+      // Whatever is cached for the language in hand is what the icon says.
+      if (j.lang && j.lang !== SUM_LANG){
+        if (was === 'running') setState(app, held(app) ? 'done' : 'idle');
+        return;
+      }
+      if (j.state === 'running'){ going = true; setState(app, 'running'); return; }
+      if (j.state === 'done'){
+        if (was !== 'done') collect(app, was === 'running' && app === mine && open);
+        return;
+      }
+      if (was === 'running'){
+        setState(app, held(app) ? 'done' : 'idle');
+        if (app === mine && open) show(false);
+        toast(j.error || ('could not summarize ' + app));
+      }
+    });
+    return going;
+  }
+
+  function watch(){
+    if (poll) return;
+    poll = setInterval(function(){
+      fetch('/summarize')
+        .then(function(res){ return res.json(); })
+        .then(function(d){
+          if (sync((d && d.jobs) || {})) return;
+          clearInterval(poll); poll = null;
+        })
+        .catch(function(){});
+    }, 3000);
+  }
+
+  // A finished briefing belongs on its own source's page: closing it should
+  // leave you in that source's cards, not in whatever list you tapped from.
+  function opens(app){
+    if (app === mine){
+      // The icon is the switch between the two views, so the briefing it opened
+      // is what it closes.
+      if (open){ show(false); return; }
+      var d = held(app);
+      if (d && d.html){ render(d); show(true); return; }
+      if (state(app) === 'running'){ waiting(); show(true); return; }
+      collect(app, true);
+      return;
+    }
+    var link = icons[app] ? icons[app].previousElementSibling : null;
+    var href = (link && link.getAttribute('href')) || ('/?app=' + encodeURIComponent(app));
+    try {
+      var u = new URL(href, location.href);
+      u.searchParams.set('summary', '1');
+      href = u.pathname + u.search;
+    } catch(e){}
+    leaveFor(href);
+  }
+
+  document.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button.fsum') : null;
+    if (!b) return;
+    // Tapping an idle icon fires and nothing else: firing is what you do so you
+    // can keep reading, and taking the page away from you would be the opposite.
+    if (b.dataset.state === 'idle'){ start(b.dataset.app); return; }
+    opens(b.dataset.app);
+  });
+
+  // What this tab already holds settles the icons before the server is asked.
+  Object.keys(icons).forEach(function(app){ if (held(app)) setState(app, 'done'); });
+
+  // ...and the server settles the rest: what is still running, and what was run
+  // from another tab or before this page was loaded.
+  function arrive(jobs){
+    if (sync(jobs)) watch();
+    if (!panel || panel.dataset.open !== '1' || !mine) return;
+    var d = held(mine);
+    if (d && d.html){ render(d); show(true); return; }
+    var j = jobs[mine];
+    if (j && j.state === 'running'){ waiting(); show(true); return; }
+    if (j && j.state === 'done'){ collect(mine, true); return; }
+    stamp(false); // the link outlived the briefing it opened
+  }
+  fetch('/summarize')
+    .then(function(res){ return res.json(); })
+    .then(function(d){ arrive((d && d.jobs) || {}); })
+    .catch(function(){ arrive({}); });
+
+  // The language setting changed. Nothing already written is rewritten — a
+  // briefing is in the language it was written in — so the icons re-read
+  // themselves against what is held for the language now in hand, and the server
+  // is asked again in case a run is going in it. A briefing on screen in the
+  // language you have just left gives way to the cards it was standing in for.
+  document.addEventListener('tui:sumlang', function(){
+    Object.keys(icons).forEach(function(app){
+      if (state(app) !== 'running') setState(app, held(app) ? 'done' : 'idle');
+    });
+    if (open && mine){
+      var d = held(mine);
+      if (d && d.html) render(d); else show(false);
+    }
+    fetch('/summarize')
+      .then(function(res){ return res.json(); })
+      .then(function(d){ if (sync((d && d.jobs) || {})) watch(); })
+      .catch(function(){});
+  });
+})();
 
 // The block list, edited in the browser's own <dialog>: a textarea of one
 // keyword per line, which is the shape the list already has, so there is

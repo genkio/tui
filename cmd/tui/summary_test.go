@@ -1,0 +1,544 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/genkio/tui/core"
+)
+
+// testSummarizer is the real thing with the codex call replaced: a test has no
+// business spending minutes on a model to find out whether a handler picks the
+// right items. Its worker runs for the length of the test.
+func testSummarizer(t *testing.T, cache *feedCache, codex func(context.Context, string) (string, error)) *summarizer {
+	t.Helper()
+	sum := newSummarizer(cache)
+	sum.codex = codex
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); sum.serve(ctx) }()
+	t.Cleanup(func() {
+		stop()
+		// Bounded: a test that failed mid-run may have left the stub blocked on a
+		// channel nobody will close, and a hung cleanup hides the real failure.
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	})
+	return sum
+}
+
+func post(t *testing.T, sum *summarizer, form string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/summarize", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	startSummary(rec, req, sum)
+	return rec
+}
+
+func get(t *testing.T, sum *summarizer, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	showSummary(rec, httptest.NewRequest(http.MethodGet, "/summarize?"+query, nil), sum)
+	return rec
+}
+
+// settled waits for a source's job to stop running, which is what the page's own
+// polling does.
+func settled(t *testing.T, sum *summarizer, app string) summaryJob {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if j, ok := sum.job(app); ok && j.State != "running" {
+			return j
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("%s never settled", app)
+	return summaryJob{}
+}
+
+func TestSummarizeBriefsOneSourcesBacklog(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "go 1.30 is out", Source: "r/golang", At: now.Add(-2 * time.Hour)},
+		{App: "reddit", ID: "2", Title: "another release post", Source: "r/golang", At: now.Add(-1 * time.Hour)},
+		{App: "folo", ID: "9", Title: "nothing to do with reddit"},
+	}, now)
+
+	prompts := make(chan string, 1)
+	sum := testSummarizer(t, cache, func(_ context.Context, p string) (string, error) {
+		prompts <- p
+		return "## releases\n\n- [go 1.30](/item?app=reddit&id=1) landed", nil
+	})
+
+	// Starting one answers at once with the job, not the summary: the wait is
+	// minutes, and the chip that asked has a spinner to get on with.
+	rec := post(t, sum, "app=reddit")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var started summaryJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.State != "running" {
+		t.Errorf("state = %q, want running", started.State)
+	}
+
+	if j := settled(t, sum, "reddit"); j.State != "done" {
+		t.Fatalf("job = %+v, want done", j)
+	}
+	rec = get(t, sum, "app=reddit")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("fetch = %d %s", rec.Code, rec.Body.String())
+	}
+	var got summaryJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Count != 2 || got.Generated == "" {
+		t.Errorf("job = %+v, want the two reddit items and a time", got)
+	}
+	// The Markdown is rendered here, so the browser has nothing to parse and the
+	// model's output cannot bring HTML of its own with it.
+	if !strings.Contains(got.HTML, "<h2") || !strings.Contains(got.HTML, `href="/item?app=reddit&amp;id=1"`) {
+		t.Errorf("html = %q: want rendered Markdown with the item link intact", got.HTML)
+	}
+
+	// Every item the source holds, and none another one does, each with the URL
+	// of its own page for the model to cite rather than build.
+	prompt := <-prompts
+	if !strings.Contains(prompt, "go 1.30 is out") || !strings.Contains(prompt, "another release post") {
+		t.Errorf("prompt should carry the source's items:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "nothing to do with reddit") {
+		t.Error("another source's backlog is no part of this briefing")
+	}
+	if !strings.Contains(prompt, "page: "+itemHref("reddit", "1")) {
+		t.Errorf("prompt should hand over each item's own page:\n%s", prompt)
+	}
+
+	// Being told what is in a batch is not having read it.
+	if n := cache.unreadCount(); n != 3 {
+		t.Errorf("unread = %d, want 3: summarizing must not mark anything read", n)
+	}
+}
+
+// The states listing is what the chips poll, so it carries their whole state
+// machine and none of the prose that would make polling expensive.
+func TestSummaryStatesListing(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "one"},
+		{App: "folo", ID: "2", Title: "two"},
+	}, time.Now())
+
+	release := make(chan struct{})
+	sum := testSummarizer(t, cache, func(_ context.Context, p string) (string, error) {
+		// By the item's own page, not by a word: the instructions are prose and
+		// carry plenty of ordinary words with them.
+		if strings.Contains(p, itemHref("folo", "2")) {
+			<-release
+		}
+		return "a briefing", nil
+	})
+
+	if rec := post(t, sum, "app=reddit"); rec.Code != http.StatusAccepted {
+		t.Fatalf("reddit = %d %s", rec.Code, rec.Body.String())
+	}
+	settled(t, sum, "reddit")
+	if rec := post(t, sum, "app=folo"); rec.Code != http.StatusAccepted {
+		t.Fatalf("folo = %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := get(t, sum, "")
+	var listing struct {
+		Jobs map[string]summaryJob `json:"jobs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if listing.Jobs["reddit"].State != "done" {
+		t.Errorf("reddit = %+v, want done", listing.Jobs["reddit"])
+	}
+	if listing.Jobs["reddit"].HTML != "" {
+		t.Error("a client polling for what is ready has no use for every briefing's prose")
+	}
+	if listing.Jobs["folo"].State != "running" {
+		t.Errorf("folo = %+v, want running", listing.Jobs["folo"])
+	}
+	close(release)
+
+	// ...and the full one is still there to be fetched by name.
+	if rec := get(t, sum, "app=reddit"); !strings.Contains(rec.Body.String(), "a briefing") {
+		t.Errorf("full fetch = %s", rec.Body.String())
+	}
+	if rec := get(t, sum, "app=douban"); rec.Code != http.StatusNotFound {
+		t.Errorf("unasked source = %d, want 404", rec.Code)
+	}
+}
+
+// Several sources can be asked for at once — that is the whole point of firing
+// one and carrying on reading — but only one may actually be running: codex is a
+// subprocess costing minutes and tokens, and a handful racing finishes no sooner.
+func TestSummarizeRunsOneAtATime(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "one"},
+		{App: "folo", ID: "2", Title: "two"},
+		{App: "x", ID: "3", Title: "three"},
+	}, time.Now())
+
+	var live atomic.Int32
+	peak := make(chan int32, 8)
+	release := make(chan struct{})
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
+		peak <- live.Add(1)
+		<-release
+		live.Add(-1)
+		return "a briefing", nil
+	})
+
+	for _, app := range []string{"reddit", "folo", "x"} {
+		if rec := post(t, sum, "app="+app); rec.Code != http.StatusAccepted {
+			t.Fatalf("%s = %d %s", app, rec.Code, rec.Body.String())
+		}
+	}
+	// All three are asked for, and all three chips spin.
+	states := sum.states()
+	for _, app := range []string{"reddit", "folo", "x"} {
+		if states[app].State != "running" {
+			t.Errorf("%s = %+v, want running", app, states[app])
+		}
+	}
+	if n := <-peak; n != 1 {
+		t.Errorf("%d runs at once, want 1", n)
+	}
+	close(release)
+	for _, app := range []string{"reddit", "folo", "x"} {
+		if j := settled(t, sum, app); j.State != "done" {
+			t.Errorf("%s settled as %+v, want done", app, j)
+		}
+	}
+
+	// Asking again for one already going changes nothing: the tap that started it
+	// said the same thing. Queued without a worker, so what the queue holds is
+	// the whole of what was asked for.
+	idle := newSummarizer(cache)
+	for i := 0; i < 3; i++ {
+		if err := idle.start("reddit", "en"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(idle.queue); n != 1 {
+		t.Errorf("queue holds %d, want asking again not to have doubled it", n)
+	}
+
+	// The bound is against a stuck queue, not something anyone should meet.
+	for i := 0; i < summaryQueue; i++ {
+		_ = idle.start("app"+strconv.Itoa(i), "en")
+	}
+	if err := idle.start("one too many", "en"); err == nil {
+		t.Error("a full queue should say so rather than growing forever")
+	}
+}
+
+func TestSummarizeRefusals(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{{App: "x", ID: "1", Title: "one"}}, time.Now())
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
+		return "", errors.New("codex failed: stream error: unknown model")
+	})
+
+	if rec := post(t, sum, ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("no app status = %d, want 400", rec.Code)
+	}
+	// A chip should not spin for a minute to be told there was nothing behind it.
+	if rec := post(t, sum, "app=douban"); rec.Code != http.StatusNotFound {
+		t.Errorf("empty backlog status = %d, want 404", rec.Code)
+	}
+
+	// What went wrong is kept on the job, so the page that polls it can say so
+	// rather than leaving a chip spinning forever.
+	if rec := post(t, sum, "app=x"); rec.Code != http.StatusAccepted {
+		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
+	}
+	j := settled(t, sum, "x")
+	if j.State != "failed" || !strings.Contains(j.Err, "unknown model") {
+		t.Errorf("job = %+v, want the failure and its reason", j)
+	}
+}
+
+// The whole backlog, however deep: a briefing covering only the newest slice
+// would have a hole in it that nothing on the page could tell you about.
+func TestSummaryItemsTakesTheWholeBacklog(t *testing.T) {
+	now := time.Now()
+	var backlog []core.Item
+	for i := 0; i < 640; i++ {
+		backlog = append(backlog, core.Item{
+			App: "inoreader", ID: strconv.Itoa(i), Title: "post " + strconv.Itoa(i),
+			At: now.Add(-time.Duration(i) * time.Minute), // 0 is the newest
+		})
+	}
+	backlog = append(backlog, core.Item{App: "folo", ID: "elsewhere", Title: "another source"})
+
+	got := summaryItems(backlog, "inoreader")
+	if len(got) != 640 {
+		t.Fatalf("items = %d, want all 640", len(got))
+	}
+	// Publication order, so the briefing reads as a sequence.
+	if got[0].ID != "639" || got[len(got)-1].ID != "0" {
+		t.Errorf("runs %s..%s, want oldest (639) to newest (0)", got[0].ID, got[len(got)-1].ID)
+	}
+	for _, it := range got {
+		if it.App != "inoreader" {
+			t.Fatalf("%s leaked into another source's briefing", it.App)
+		}
+	}
+}
+
+func TestSummaryPromptShapesEachItem(t *testing.T) {
+	items := []core.Item{{
+		App: "x", ID: "42", Source: "@someone", Author: "Some One", Age: "3h",
+		Title: "the whole post as its own title", Body: "the whole post as its own title",
+		Quote: &core.Quote{Source: "@else", Text: "quoted bit"},
+	}, {
+		App: "x", ID: "43", Title: "a title", Body: strings.Repeat("x", summaryBodyRunes+40),
+		Video: "https://x/v.mp4",
+	}}
+	p := summaryPrompt("x", "en", items)
+
+	if !strings.Contains(p, "2 unread items follow, oldest first") {
+		t.Errorf("prompt should say how much it covers:\n%s", p)
+	}
+	// An x post is its own title; printing it twice would waste the budget.
+	if strings.Count(p, "the whole post as its own title") != 1 {
+		t.Errorf("a post that is all body should appear once:\n%s", p)
+	}
+	if !strings.Contains(p, "quoted bit") {
+		t.Error("the post a card embeds is part of what it says")
+	}
+	if !strings.Contains(p, "carries: video") {
+		t.Error("what an item carries is worth knowing before opening it")
+	}
+	if !strings.Contains(p, " […]") {
+		t.Errorf("a long body should be clipped:\n%s", p)
+	}
+	if strings.Contains(p, strings.Repeat("x", summaryBodyRunes+1)) {
+		t.Error("the clip should hold")
+	}
+}
+
+// Which language a briefing comes back in is the browser's setting, sent with
+// the ask, and recorded on the job so the page can tell a briefing in the
+// language it is set to now from one in the language it has left.
+func TestSummarizeLanguage(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{{App: "x", ID: "1", Title: "一条中文推文"}}, time.Now())
+
+	prompts := make(chan string, 1)
+	sum := testSummarizer(t, cache, func(_ context.Context, p string) (string, error) {
+		prompts <- p
+		return "## 概要", nil
+	})
+
+	rec := post(t, sum, "app=x&lang=zh")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
+	}
+	// The answer to the ask says which language it is being written in, so a chip
+	// is never spinning on a run it cannot account for.
+	var started summaryJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.Lang != "zh" {
+		t.Errorf("started = %+v, want lang zh", started)
+	}
+	if j := settled(t, sum, "x"); j.Lang != "zh" || j.State != "done" {
+		t.Errorf("job = %+v, want a finished Chinese briefing", j)
+	}
+	if p := <-prompts; !strings.Contains(p, "Simplified Chinese") {
+		t.Errorf("prompt should ask for the language picked:\n%s", p)
+	}
+
+	// English is what a request naming no language gets, and what an unknown one
+	// falls back to: a briefing in the wrong language beats an error where a
+	// briefing was asked for.
+	for _, form := range []string{"app=x", "app=x&lang=", "app=x&lang=klingon"} {
+		sum := testSummarizer(t, cache, func(_ context.Context, p string) (string, error) {
+			prompts <- p
+			return "## summary", nil
+		})
+		if rec := post(t, sum, form); rec.Code != http.StatusAccepted {
+			t.Fatalf("%s = %d", form, rec.Code)
+		}
+		if j := settled(t, sum, "x"); j.Lang != summaryLangDefault {
+			t.Errorf("%s: lang = %q, want %q", form, j.Lang, summaryLangDefault)
+		}
+		if p := <-prompts; !strings.Contains(p, "Write in English") {
+			t.Errorf("%s: prompt should ask for English:\n%s", form, p)
+		}
+	}
+}
+
+// Whichever language it is written in, the citations have to stay findable and
+// readable: one to a row, wearing a label rather than its own URL. A row that
+// carries four links is a row nobody can tell apart, and a label that is the
+// page path is a link that says nothing about where it goes — both of which the
+// model does by default unless told not to.
+func TestSummaryPromptShapesTheCitations(t *testing.T) {
+	items := []core.Item{{App: "x", ID: "1", Source: "@someone", Title: "a headline"}}
+	for _, lang := range []string{"en", "zh"} {
+		p := summaryPrompt("x", lang, items)
+		for _, want := range []string{
+			"Leave titles, names and @handles as they are written",
+			"Never put more than one item in a\n  bullet",
+			"One link to a\n  bullet",
+			"never the page value, never an id,\n  never a bare URL",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s: prompt is missing %q:\n%s", lang, want, p)
+			}
+		}
+		if !strings.Contains(p, summaryLangs[lang]) {
+			t.Errorf("%s: prompt should carry that language's instruction", lang)
+		}
+	}
+}
+
+// What went wrong has to survive the trip to a toast: the CLI's own words about
+// it, not the exit status it dressed them in.
+func TestCodexTrouble(t *testing.T) {
+	fail := errors.New("exit status 1")
+	for _, tc := range []struct {
+		name, log, want string
+	}{
+		{"the line that names it", "workdir: /tmp\nERROR: stream disconnected\ntokens used 400", "ERROR: stream disconnected"},
+		{"its last words otherwise", "workdir: /tmp\nnot logged in: run codex login\n", "not logged in: run codex login"},
+		{"the exit status when it said nothing", "  \n", "exit status 1"},
+	} {
+		if got := codexTrouble(tc.log, fail); got != tc.want {
+			t.Errorf("%s: codexTrouble = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if got := codexTrouble(strings.Repeat("z", 400), fail); len([]rune(got)) != 204 {
+		t.Errorf("a toast cannot hold a whole log: %d runes", len([]rune(got)))
+	}
+}
+
+// Every source with a backlog carries the icon that asks for a briefing of it,
+// and the source picked also carries the panel the briefing goes in.
+func TestSummarizeIconOnEverySourceWithABacklog(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Title: "one", Source: "r/golang"},
+		{App: "folo", ID: "2", Title: "two"},
+	}
+	apps := []string{"reddit", "folo", "douban"}
+
+	whole := renderInput(t, pageInput{items: items, total: 2, apps: apps, now: time.Now()})
+	for _, app := range []string{"reddit", "folo"} {
+		if !strings.Contains(whole, `data-app="`+app+`"`) {
+			t.Errorf("%s has a backlog and should offer a briefing of it:\n%s", app, whole)
+		}
+	}
+	// A chip at zero is still drawn as that service's status light, but there is
+	// nothing behind it to brief anybody on.
+	if strings.Contains(whole, `id="fsum-douban"`) {
+		t.Error("nothing unread is nothing to summarize")
+	}
+	// The whole merged feed has no cards of one source to put a briefing in place
+	// of, so the panel waits for a pick.
+	if strings.Contains(whole, `id="summary"`) {
+		t.Error("no panel without a source pick")
+	}
+
+	picked := renderInput(t, pageInput{
+		items: items[:1], total: 1, apps: apps, now: time.Now(),
+		tally: ptr(tallyItems(items)), sel: feedSel{Kind: "app", Key: "reddit"},
+	})
+	if !strings.Contains(picked, `<div class="summary" id="summary" data-app="reddit" data-open="0">`) {
+		t.Errorf("the picked source's page should hold the panel, shut:\n%s", picked)
+	}
+	// Every source's icon is still on the row, so a second briefing can be asked
+	// for from here without going back to the whole list first.
+	if !strings.Contains(picked, `id="fsum-folo"`) {
+		t.Error("the chips still offer every source's briefing under a pick")
+	}
+
+	// ...and ?summary=1 is the link a finished icon sends you to.
+	opened := renderInput(t, pageInput{
+		items: items[:1], total: 1, apps: apps, now: time.Now(),
+		tally: ptr(tallyItems(items)), sel: feedSel{Kind: "app", Key: "reddit"}, summaryOpen: true,
+	})
+	if !strings.Contains(opened, `data-open="1"`) {
+		t.Error("?summary=1 should open the briefing on arrival")
+	}
+
+	// The saved list is read off disk and holds nothing unread, so nothing there
+	// is a backlog to summarize.
+	saved := renderInput(t, pageInput{
+		items: items, total: 2, now: time.Now(), savedView: true,
+	})
+	if strings.Contains(saved, "button class=\"fsum\"") || strings.Contains(saved, `id="summary"`) {
+		t.Error("the saved list holds nothing unread to summarize")
+	}
+}
+
+// Having read a briefing is a reason to be done with the backlog behind it, so
+// mark-all is the one control the briefing does not hide — and while it is open
+// the button is about that source, not about everything unread.
+func TestSummaryKeepsMarkAllScopedToTheSource(t *testing.T) {
+	page := renderInput(t, pageInput{
+		items: []core.Item{{App: "reddit", ID: "1", Title: "one"}}, total: 12,
+		apps: []string{"reddit", "folo"}, now: time.Now(),
+		sel: feedSel{Kind: "app", Key: "reddit"}, summaryOpen: true,
+	})
+	if strings.Contains(page, "body.sumon #markAll") {
+		t.Error("the briefing must not hide mark-all")
+	}
+	if !strings.Contains(page, `return SUMMARY_ON && app ? ' in ' + app : ' in this feed';`) {
+		t.Error("mark-all should name the source whose briefing is open")
+	}
+	if !strings.Contains(page, "document.body.classList.toggle('sumon', on);\n    labelMarkAll();") {
+		t.Error("opening or closing the briefing should relabel mark-all")
+	}
+	// The request itself is unchanged: it carries the app filter already in the
+	// URL, which is the only reason this is one source's backlog and not all of
+	// them. A briefing only ever exists under a source pick.
+	if !strings.Contains(page, `['app', 'type', 'x', 'sub'].forEach`) {
+		t.Error("mark-all should still clear the picked source's backlog only")
+	}
+}
+
+// A pick is a page of cards, so the briefing flag does not ride along on the
+// chips, the sort toggle or the layout toggle.
+func TestSummaryFlagDoesNotRideAlong(t *testing.T) {
+	q := map[string][]string{"app": {"reddit"}, "summary": {"1"}, "order": {"desc"}}
+	for _, tc := range []struct {
+		name, got string
+	}{
+		{"chip", chipHref(q, feedSel{Kind: "app", Key: "folo"})},
+		{"clear", chipHref(q, feedSel{})},
+		{"order", orderHref(q, false)},
+		{"deck", deckHref(q, false)},
+	} {
+		if strings.Contains(tc.got, "summary") {
+			t.Errorf("%s href = %q, should land on the cards", tc.name, tc.got)
+		}
+	}
+}
+
+func ptr(t feedTally) *feedTally { return &t }

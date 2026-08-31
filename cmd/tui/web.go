@@ -91,6 +91,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	if err != nil {
 		return err
 	}
+	sum := newSummarizer(cache)
 	flusher := newMarkFlusher(root, cache)
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
 	if syncPath != "" {
@@ -99,7 +100,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	var workers sync.WaitGroup
-	workers.Add(2)
+	workers.Add(3)
 	defer func() {
 		stop()
 		workers.Wait()
@@ -111,6 +112,12 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	go func() {
 		defer workers.Done()
 		sweep.run(ctx)
+	}()
+	// A briefing outlives the tap that asked for it, so it runs here rather than
+	// inside the request: one at a time, on the server's own clock.
+	go func() {
+		defer workers.Done()
+		sum.serve(ctx)
 	}()
 
 	mux := http.NewServeMux()
@@ -178,6 +185,20 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			return
 		}
 		handleKeywords(w, r, block, cache)
+	})
+	// POST asks for a source's briefing and GET reports on the ones asked for.
+	// Starting one is a POST because it spends a subprocess and tokens, and
+	// nothing should be able to prefetch or replay that.
+	mux.HandleFunc("/summarize", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			startSummary(w, r, sum)
+		case http.MethodGet:
+			showSummary(w, r, sum)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 	mux.HandleFunc("/blocked/clear", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -465,6 +486,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		items: items, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
 		swipe: deck, asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
+		summaryOpen: q.Get("summary") == "1",
 	})
 }
 
