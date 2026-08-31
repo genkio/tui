@@ -121,6 +121,9 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		}
 		handleAll(w, r, root, loader, cache, sweep, saved, tags, block, rendered)
 	})
+	mux.HandleFunc("/item", func(w http.ResponseWriter, r *http.Request) {
+		handleItem(w, r, loader, cache, saved, block, rendered)
+	})
 	mux.HandleFunc("/mark", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
@@ -463,6 +466,69 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
 		swipe: deck, asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 	})
+}
+
+// handleItem serves one item on a page of its own (/item?app=x&id=123), so a
+// post has an address that outlives the page it was found on: one to send
+// somebody, or to keep for something you want to come back to without hunting
+// through the list it was in. The card is the same card, actions and all — save,
+// share, the player — minus the list around it.
+//
+// Nothing here is marked read by being looked at: arriving by URL is not
+// reading the feed, and a link that quietly emptied a slot of the backlog would
+// be a poor thing to hand around.
+func handleItem(w http.ResponseWriter, r *http.Request, loader *pageLoader, cache *feedCache, saved *savedStore, block *blocker, rendered *renderedItems) {
+	q := r.URL.Query()
+	app, id := q.Get("app"), q.Get("id")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	now := time.Now()
+	it, ok := findItem(app, id, now, cache, saved, rendered)
+	if !ok {
+		http.Error(w, "no such item: it is neither in the backlog nor saved", http.StatusNotFound)
+		return
+	}
+	if q.Get("json") == "1" {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSONItems(w, []core.Item{it}, nil, feedAPIResponse{})
+		return
+	}
+	tmpl, err := loader.load()
+	if err != nil {
+		http.Error(w, "page template: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Same reason the feed does it: the save button posts back app+id alone, and
+	// an item that reached this page from the render cache is not in the backlog
+	// for the save to find again.
+	rendered.put([]core.Item{it})
+	writePage(w, tmpl, pageInput{
+		items: []core.Item{it}, total: 1, now: now, saved: saved, block: block,
+		itemView: true, query: q,
+	})
+}
+
+// findItem looks one item up by app+id, wherever it still exists: the backlog
+// cache first (read or unread, since a read item's URL should not go dead the
+// moment you scroll past it), then the saved list, which is what an item falls
+// back to once the cache has pruned it, and last what this process rendered,
+// which is the only record of an item that was never cached at all (x's For
+// You).
+func findItem(app, id string, now time.Time, cache *feedCache, saved *savedStore, rendered *renderedItems) (core.Item, bool) {
+	if it, ok := cache.item(app, id, now); ok {
+		if !it.At.IsZero() {
+			it.Age = humanAgo(it.At)
+		}
+		return it, true
+	}
+	if saved != nil {
+		if it, ok := saved.item(app, id, now); ok {
+			return it, true
+		}
+	}
+	return rendered.get(app, id)
 }
 
 // writePage renders to a buffer first, so a template error mid-page becomes a

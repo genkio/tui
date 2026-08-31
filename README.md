@@ -155,7 +155,8 @@ what you've read. Long posts are clipped, and the ellipsis is followed by a
 the footer collapses it again). Each card's footer has a **link icon** that
 opens the original post in a new tab (the only way to leave the page) and a
 **share** button that hands the post to your phone's share sheet (falling back
-to copying it where the browser has no share API). Attached media plays on the
+to copying it where the browser has no share API), and a **link** that opens
+that one item on a page of its own (see **One item, one URL**). Attached media plays on the
 page: a video (or a linked YouTube clip) as a click-to-play player, a podcast
 episode from a reader as an audio bar. A reddit post whose video lives on
 **redgifs** is only a link, so its footer gets a **video** button instead: tap
@@ -362,6 +363,27 @@ because none of it was ever unread. **clear** in the header asks for
 confirmation, then deletes the stored blocked history without changing the
 keywords that continue screening later sweeps.
 
+### One item, one URL
+
+Every card's footer carries a **link** to that item on a page of its own,
+`/item?app=<app>&id=<id>`. It is the same card with the same actions (save,
+share, the player, the image toggle, the video **keep**) and no list around it,
+which makes it something you can send to somebody, keep in a note, or open in a
+tab and come back to after the feed has moved on.
+
+The item is looked for in the backlog cache first, read or unread, so a URL does
+not go dead the moment you scroll past the card. Failing that it comes from the
+saved list, which is where an item lives on after the cache has pruned it, and
+last from what the running server rendered, which is the only record of a post
+that was never cached at all (x's For You). An item none of them has answers
+**404** rather than a blank card. `&json=1` returns that one item in the same
+shape as the feed's JSON.
+
+Nothing on the page is marked read by being looked at: arriving by URL is not
+working through the feed, and a link that quietly emptied a slot of your backlog
+would be a poor thing to hand around. Saving from it works as it does anywhere
+else, and the header's **unread** link goes back to the feed.
+
 ### Swipe mode
 
 The same feed can be dealt as a deck instead of scrolled: one card at a time,
@@ -392,7 +414,7 @@ deck is dealt out the controls go away and a note says so; where to go next is
 the chip row, which the deck carries above it like the feed does.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
-to roughly a screenful, so the footer actions — open, save, share, image
+to roughly a screenful, so the footer actions — open, save, share, link, image
 toggle, video controls, the video **keep** download — are always in reach
 (scroll the row itself sideways when they outrun the screen).
 Anything past the clip sits behind the same "+N words" toggle.

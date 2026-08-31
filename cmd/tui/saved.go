@@ -147,6 +147,23 @@ func (s *savedStore) pos(app, id string) (float64, string) {
 	return 0, ""
 }
 
+// item returns one saved item, for a page that names an item by app+id alone:
+// the saved list is where an item lives on after the backlog has let go of it,
+// so it is the last place worth asking.
+func (s *savedStore) item(app, id string, now time.Time) (core.Item, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.index(app, id)
+	if i < 0 {
+		return core.Item{}, false
+	}
+	it := s.items[i].Wire.Item(now)
+	if !it.At.IsZero() {
+		it.Age = humanAgo(it.At)
+	}
+	return it, true
+}
+
 // list returns the saved items as feed items, most recently saved first —
 // the order you starred them in, not the order they were published, because
 // that is the order you come back looking for them. Each one's relative age is

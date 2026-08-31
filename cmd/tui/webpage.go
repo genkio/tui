@@ -178,14 +178,20 @@ type pageInput struct {
 	// saved list, and the blocked view renders it.
 	block       *blocker
 	blockedView bool
-	swipe       bool // this request's layout: one card at a time instead of the scrolling feed
-	asc         bool // oldest first, which the header's toggle flips
-	updated     time.Time
-	fetching    bool // a sweep is in flight, so the count is about to move
-	capped      bool // a service's backlog runs deeper than the sweep reached
+	// One item on a page of its own, reached by its own URL (see itemHref).
+	itemView bool
+	swipe    bool // this request's layout: one card at a time instead of the scrolling feed
+	asc      bool // oldest first, which the header's toggle flips
+	updated  time.Time
+	fetching bool // a sweep is in flight, so the count is about to move
+	capped   bool // a service's backlog runs deeper than the sweep reached
 }
 
 type pageData struct {
+	// What the tab (and a link preview elsewhere) says this page is. The feed
+	// and its two side lists are all "all"; an item on its own page says which
+	// item it is, since that URL is the one that gets sent to somebody.
+	HeadTitle string
 	// Every source's unread, whichever chip is on: the chips already say what
 	// each of them holds, so the header saying the same thing over again would
 	// leave nothing stating the whole. JS decrements it in place.
@@ -205,6 +211,7 @@ type pageData struct {
 	// as the modal's textarea shows them — one per line, blocked view only.
 	Blocked      int
 	BlockedView  bool
+	ItemView     bool // one item, on its own URL
 	ClearBlocked bool
 	Keywords     int
 	KeywordText  string
@@ -271,6 +278,7 @@ type cardData struct {
 	PreviewBody template.HTML
 	FullBody    template.HTML
 	URL         string
+	Link        string // this item's own page here, blank when that page is what you are on
 	Video       string // mp4 for the inline player: the app's own, or this server's bilibili route
 	Keep        string // where the footer's keep link saves that mp4 from
 	Poster      string
@@ -346,7 +354,7 @@ func buildPageData(in pageInput) pageData {
 
 	// The saved and blocked lists are for looking back over, not triage: no deck
 	// on either, whatever the server was started with.
-	swipe := in.swipe && !in.savedView && !in.blockedView
+	swipe := in.swipe && !in.savedView && !in.blockedView && !in.itemView
 	cl := listClips
 	if swipe {
 		cl = swipeClips
@@ -365,6 +373,11 @@ func buildPageData(in pageInput) pageData {
 		// the store.
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
 		card := buildCard(it, starred, cl)
+		// A card in a list carries the way to its own page; the item view is that
+		// page, so there it would only link back to itself.
+		if !in.itemView {
+			card.Link = itemHref(it.App, it.ID)
+		}
 		// Where the item was left off, kept with the item itself. The feed shows
 		// it too: a card starred earlier resumes wherever you got to in it.
 		if in.saved != nil {
@@ -429,7 +442,13 @@ func buildPageData(in pageInput) pageData {
 		}
 	}
 
+	head := "all — tui"
+	if in.itemView && len(in.items) > 0 {
+		head = headTitle(in.items[0])
+	}
+
 	return pageData{
+		HeadTitle:     head,
 		Unread:        tally.unread(),
 		Total:         in.total,
 		More:          in.total > len(in.items),
@@ -443,6 +462,7 @@ func buildPageData(in pageInput) pageData {
 		TagSelected:   tagSelected,
 		Blocked:       in.block.count(),
 		BlockedView:   in.blockedView,
+		ItemView:      in.itemView,
 		ClearBlocked:  in.blockedView && in.block.count() > 0,
 		Keywords:      in.block.keywordCount(),
 		KeywordText:   keywordText,
@@ -453,7 +473,7 @@ func buildPageData(in pageInput) pageData {
 		Asc:           in.asc,
 		SortHref:      flip,
 		Swipe:         swipe,
-		BulkMark:      !in.savedView && !in.blockedView && in.sel.Kind != "x",
+		BulkMark:      !in.savedView && !in.blockedView && !in.itemView && in.sel.Kind != "x",
 		DeckHref:      deck,
 		Warn:          in.warn,
 		HasApps:       len(in.apps) > 0,
@@ -462,6 +482,42 @@ func buildPageData(in pageInput) pageData {
 		SavedTags:     tags,
 		TagOptions:    savedTagOptions,
 	}
+}
+
+// headTitle names one item for the tab and for whatever renders a link to it:
+// its own title, or the first line of a post that has none (x), clipped. An
+// item with neither falls back to the source it came from, so the URL still
+// says something about where it goes.
+func headTitle(it core.Item) string {
+	s := strings.TrimSpace(itemTitle(it))
+	if s == "" {
+		s = strings.TrimSpace(it.Body)
+	}
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if s == "" {
+		s = strings.TrimSpace(it.Source)
+	}
+	if r := []rune(s); len(r) > 70 {
+		s = strings.TrimSpace(string(r[:70])) + "…"
+	}
+	if s == "" {
+		return "item — tui"
+	}
+	return s + " — tui"
+}
+
+// itemHref is one item's own page: the URL to send somebody, or to keep for an
+// item worth coming back to on its own rather than through the list it happened
+// to be in. app+id names an item everywhere else here (the save, tag and mark
+// endpoints all take exactly that pair), so the link is that pair in a query
+// rather than a path — an id is the service's own string and may carry slashes.
+func itemHref(app, id string) string {
+	if app == "" || id == "" {
+		return ""
+	}
+	return "/item?" + url.Values{"app": {app}, "id": {id}}.Encode()
 }
 
 func filterSavedByTag(items []core.Item, tags map[string][]string, tag string) []core.Item {
