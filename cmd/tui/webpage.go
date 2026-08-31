@@ -170,7 +170,6 @@ type pageInput struct {
 	query        url.Values // this page's query, which the chip links are built from
 	warn         string
 	saved        *savedStore
-	feedback     map[string]string
 	tags         map[string][]string
 	tagFilters   []filterChip
 	savedView    bool
@@ -228,7 +227,6 @@ type pageData struct {
 	// filled when a source chip that has them is the one on.
 	Subs       []filterChip
 	Cards      []cardData
-	Feedback   map[string]string
 	TagFilters []filterChip
 	SavedTags  map[string][]string
 	TagOptions []string
@@ -419,10 +417,6 @@ func buildPageData(in pageInput) pageData {
 	} else if in.savedView && len(in.items) > 0 {
 		savedMode = savedModeHref(in.query, in.savedCompact)
 	}
-	feedback := in.feedback
-	if feedback == nil {
-		feedback = map[string]string{}
-	}
 	tags := in.tags
 	if tags == nil {
 		tags = map[string][]string{}
@@ -464,7 +458,6 @@ func buildPageData(in pageInput) pageData {
 		Warn:          in.warn,
 		HasApps:       len(in.apps) > 0,
 		Cards:         cards,
-		Feedback:      feedback,
 		TagFilters:    in.tagFilters,
 		SavedTags:     tags,
 		TagOptions:    savedTagOptions,

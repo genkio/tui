@@ -93,14 +93,6 @@ CREATE TABLE IF NOT EXISTS saved_items (
   PRIMARY KEY (app, id),
   FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS item_feedback (
-  app TEXT NOT NULL,
-  id TEXT NOT NULL,
-  feedback TEXT NOT NULL CHECK (feedback IN ('up', 'down')),
-  feedback_at TEXT NOT NULL,
-  PRIMARY KEY (app, id),
-  FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
-);
 CREATE TABLE IF NOT EXISTS item_tags (
   app TEXT NOT NULL,
   id TEXT NOT NULL,
@@ -140,4 +132,5 @@ CREATE TABLE IF NOT EXISTS metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+DROP TABLE IF EXISTS item_feedback;
 PRAGMA user_version = 1;`

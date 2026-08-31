@@ -247,14 +247,6 @@ cards and title-only rows. The mode rides in the URL, so source and type chips
 keep it while narrowing the saved list; compact rows still link to the original
 item but leave bodies, media, controls, and tags out.
 
-Tapping **saved** on a saved card lets it go, and only then does the card offer
-**good** and **bad** in front of that button. Saving something is often a way of
-saying *not now* rather than *this was worth it*, and the verdict only arrives
-once you have come back to it and watched or read the thing — which is what
-unsaving means. Either button files the same reaction the deck's **+** and **-**
-do, so the judgement lands in one place however late it comes. Saving the item
-back takes the pair away again.
-
 The chips are also what **mark all read** applies to: with one on, the page is
 that chip's items alone, so it clears those and leaves the rest unread — you can
 sweep reddit away and keep the articles for later. The server applies that pick
@@ -389,18 +381,15 @@ The layout stays server-rendered — a deck card gets a longer text budget than
 a listed one, and the clipping is done in Go — so switching is a page load, and
 a browser that wants the deck spends one redirect on arriving at a bare URL.
 
-Four controls sit halfway down the screen, two to an edge. On the right, **&gt;**
-marks the card read and deals the next one and **&lt;** restores the previous
-card to tui's unread backlog and walks back to it, as far as the first card,
-where it goes dead — moving through the deck and nothing else. On the left, **+**
-files the card as interested and **-** as not, both then marking it read and
-dealing on, and a card walked back to shows the reaction it already carries. The
-setting behind the unread count, *swap deck card controls*, trades the two
-edges, and is remembered by that browser. This unread state is local to tui; it
-does not ask the source service to reverse a read already sent there. On a
-keyboard **→**/**←** are the moving pair and **↑**/**↓** the reacting one. Once
-the deck is dealt out the controls go away and a note says so; where to go next
-is the chip row, which the deck carries above it like the feed does.
+Two controls sit halfway down the screen, at one edge. **&gt;** marks the card
+read and deals the next one, and **&lt;** restores the previous card to tui's
+unread backlog and walks back to it, as far as the first card, where it goes
+dead. The setting behind the unread count, *place deck card controls on left*,
+moves the pair to the other edge, and is remembered by that browser. This unread
+state is local to tui; it does not ask the source service to reverse a read
+already sent there. On a keyboard **→**/**←** do the same two things. Once the
+deck is dealt out the controls go away and a note says so; where to go next is
+the chip row, which the deck carries above it like the feed does.
 
 Cards get a longer text budget here (one card owns the screen) but stay clipped
 to roughly a screenful, so the footer actions — open, save, share, image

@@ -83,20 +83,6 @@ func TestTerminalForYouUsesLiveServerQuery(t *testing.T) {
 	}
 }
 
-func TestTerminalFeedCarriesFeedback(t *testing.T) {
-	it := core.Item{App: "x", ID: "reacted", Title: "post", Age: "2m"}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSONItems(w, []core.Item{it}, nil, feedAPIResponse{
-			Feedback: map[string]string{it.Key(): "up"},
-		})
-	}))
-	defer server.Close()
-
-	msg := fetchAll(server.URL, "following")().(allItemsMsg)
-	if len(msg.items) != 1 || msg.items[0].Feedback != "up" {
-		t.Fatalf("terminal feedback = %+v, want up", msg.items)
-	}
-}
 
 func TestFeedServerErrorsAreActionable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

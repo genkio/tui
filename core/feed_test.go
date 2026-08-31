@@ -102,28 +102,6 @@ func TestMediaTypePrefixesTitle(t *testing.T) {
 	}
 }
 
-func TestFeedbackMarkerFollowsAge(t *testing.T) {
-	f := NewFeed(NewTheme(true), false)
-	f.SetSize(48, 8)
-	f.SetItems([]Item{
-		{App: "x", ID: "1", Title: "positive", Age: "2m", Feedback: "up"},
-		{App: "x", ID: "2", Title: "negative", Age: "3m", Feedback: "down"},
-		{App: "x", ID: "3", Title: "neutral", Age: "4m"},
-	}, true)
-	view := ansiStyleRE.ReplaceAllString(f.View(), "")
-	for _, want := range []string{"2m +", "3m -"} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("feed missing feedback suffix %q:\n%s", want, view)
-		}
-	}
-	f.SetFeedback(Key("x", "3"), "up")
-	if got := f.Items()[2].Feedback; got != "up" {
-		t.Fatalf("SetFeedback stored %q, want up", got)
-	}
-	if !strings.Contains(ansiStyleRE.ReplaceAllString(f.View(), ""), "4m +") {
-		t.Fatalf("updated marker missing:\n%s", f.View())
-	}
-}
 
 // The terminal draws one body string, so an embedded post has to be flattened
 // back into it when the row expands.

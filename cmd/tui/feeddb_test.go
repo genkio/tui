@@ -261,45 +261,6 @@ func TestFeedDBKeepsItemReferencedBySavedList(t *testing.T) {
 	}
 }
 
-func TestFeedDBKeepsFeedbackAndItsItem(t *testing.T) {
-	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.close()
-	cache, err := loadFeedCacheDB(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	feedback := loadFeedbackDB(db)
-	now := time.Now()
-	it := core.Item{App: "reddit", ID: "1", Title: "teach the filter"}
-	cache.upsert([]core.Item{it}, now)
-	if err := cache.save(); err != nil {
-		t.Fatal(err)
-	}
-	if err := feedback.set(it, "up", now); err != nil {
-		t.Fatal(err)
-	}
-	cache.drop([]string{it.Key()})
-	if err := cache.save(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := feedback.all()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got[it.Key()] != "up" {
-		t.Fatalf("feedback after feed removal = %q, want up", got[it.Key()])
-	}
-	var title string
-	if err := db.db.QueryRow(`SELECT title FROM items WHERE app=? AND id=?`, it.App, it.ID).Scan(&title); err != nil {
-		t.Fatal(err)
-	}
-	if title != it.Title {
-		t.Fatalf("labeled item title = %q, want %q", title, it.Title)
-	}
-}
 
 func TestSavedItemTagsPersistUntilUnsave(t *testing.T) {
 	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))

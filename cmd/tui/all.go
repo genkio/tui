@@ -128,27 +128,6 @@ func (m allModel) Update(msg tea.Msg) (allModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case feedbackMsg:
-		if msg.err != nil {
-			m.setStatus("could not record feedback: "+friendlyAllError(msg.err), true)
-			return m, nil
-		}
-		m.feed.SetFeedback(msg.item.Key(), msg.feedback)
-		wasRead := m.feed.IsRead(msg.item.Key())
-		var cmd tea.Cmd
-		if !wasRead {
-			cmd = m.markItem(msg.item)
-		}
-		if current, ok := m.feed.Selected(); ok && current.Key() == msg.item.Key() {
-			m.feed.MoveCursor(1)
-		}
-		if msg.feedback == "up" {
-			m.setStatus("High (+).", false)
-		} else {
-			m.setStatus("Low (-).", false)
-		}
-		return m, cmd
-
 	case openedMsg:
 		m.setStatus("Opened in browser.", false)
 		return m, nil
@@ -242,22 +221,6 @@ func (m allModel) handleKey(msg tea.KeyPressMsg) (allModel, tea.Cmd) {
 		}
 		m.clearStatus()
 		return m, saveServer(m.server, it)
-
-	case key.Matches(msg, m.keys.High):
-		it, ok := m.feed.Selected()
-		if !ok {
-			return m, nil
-		}
-		m.clearStatus()
-		return m, sendServerFeedback(m.server, it, "up")
-
-	case key.Matches(msg, m.keys.Low):
-		it, ok := m.feed.Selected()
-		if !ok {
-			return m, nil
-		}
-		m.clearStatus()
-		return m, sendServerFeedback(m.server, it, "down")
 
 	case key.Matches(msg, m.keys.OpenURL):
 		if it, ok := m.feed.Selected(); ok {

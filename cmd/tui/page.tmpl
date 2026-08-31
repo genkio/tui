@@ -216,9 +216,8 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .markall.fab#markAll{right:14px}
 .markall.fab svg{display:block;height:22px;width:auto}
 .markall.hid{display:none} /* .hid alone loses to .markall.fab */
-/* The deck's controls, an edge to a thumb: -+ reacts and moves on, <> only
-   walks the deck. What the arrow keys are on a desktop, for a phone that has
-   none, and split the same way the keys are - one axis each, not one pile. */
+/* The deck's controls, an edge to a thumb: < and > walk the deck. What the
+   arrow keys are on a desktop, for a phone that has none. */
 .deckctl{
   position:fixed;z-index:20;top:50%;
   display:flex;flex-direction:column;transform:translateY(-50%);
@@ -230,8 +229,6 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   border:0;background:transparent;color:var(--muted);cursor:pointer;opacity:.5;
   font-size:28px;font-weight:400;line-height:1;transition:opacity .12s,color .12s,transform .12s;
 }
-.deckbtn.chosen{color:var(--accent);opacity:.9;transform:scale(1.08)}
-.deckbtn#thumbUp{font-size:23px}
 .deckbtn#deckPrev,.deckbtn#deckNext{font-size:20px;font-weight:600}
 .deckbtn:disabled{opacity:.18;cursor:default}
 .deckctl.hid{display:none}
@@ -242,9 +239,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 @media (pointer: fine){.deckctl{display:none}}
 .open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.react{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
-.react.chosen{color:var(--accent)}
-.react:disabled{opacity:.5;cursor:default}
+.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 .rgv:disabled{opacity:.6;cursor:default}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
@@ -420,9 +415,9 @@ video.ffs{object-fit:cover !important}
 {{end}}</div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckReact" class="deckctl"><button id="thumbDown" class="deckbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="thumbUp" class="deckbtn" type="button" title="interested and show the next item" aria-label="interested">+</button></div><div id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button></div>
+{{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button></div>
 {{end}}{{if and .Cards .BulkMark}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-total="{{.Total}}"{{if .Swipe}} title="mark all {{.Total}} items in this feed read"{{end}}>{{if .Swipe}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg>{{else}}✓ mark all {{.Total}} read{{end}}</button>
-{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>swap deck card controls</span><input id="controlsSwap" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
+{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on left</span><input id="controlsLeft" type="checkbox"></label><menu><button value="done">done</button></menu></form></dialog>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -432,12 +427,9 @@ video.ffs{object-fit:cover !important}
 // between the two modes; only the layout and what marks a card read differ.
 var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
 var MORE = document.getElementById('state').getAttribute('data-more') === 'true';
-// Set means the thumbs took the right edge and the arrows the left. The stored
-// key still says feedback, from when the thumbs were the only thing that moved
-// with it, and it meant the same then: keeping it carries the setting over.
-var CONTROLS_SWAP = false;
-try { CONTROLS_SWAP = localStorage.getItem('tui:deck-feedback-right') === '1'; } catch(e){}
-var FEEDBACK = {{.Feedback}};
+// Set means the deck's arrows take the left edge instead of the right.
+var CONTROLS_LEFT = false;
+try { CONTROLS_LEFT = localStorage.getItem('tui:deck-controls-left') === '1'; } catch(e){}
 var SAVED_TAGS = {{.SavedTags}};
 var TAG_OPTIONS = {{.TagOptions}};
 var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview') === 'true';
@@ -682,7 +674,6 @@ function setSaved(card, on){
       if (b){ b.dataset.saved = on ? '1' : '0'; b.textContent = on ? 'saved' : 'save'; }
       var n = document.getElementById('savedn');
       if (n) n.textContent = d.saved;
-      if (SAVED_VIEW) offerReaction(card, on);
     })
     .catch(function(err){ toast(err.message || 'could not save'); })
     .then(function(){ if (b) b.disabled = false; });
@@ -691,42 +682,6 @@ document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.save') : null;
   if (!b) return;
   setSaved(b.closest('article.card'), b.dataset.saved !== '1');
-});
-
-// Letting a saved item go is a verdict in itself: it was kept to come back to,
-// and coming back is what just happened. That is the one moment worth asking
-// how it went, so the two reactions appear only on the unsave, in front of the
-// button that did it, and leave again if the item is saved back.
-function offerReaction(card, saved){
-  var b = card.querySelector('button.save');
-  if(!b) return;
-  card.querySelectorAll('button.react').forEach(function(old){ old.remove(); });
-  if(saved) return;
-  [['up', 'good'], ['down', 'bad']].forEach(function(pair){
-    var button = document.createElement('button');
-    button.className = 'react';
-    button.type = 'button';
-    button.dataset.choice = pair[0];
-    button.title = pair[0] === 'up' ? 'this was worth keeping' : 'this was not worth keeping';
-    button.textContent = pair[1];
-    b.parentNode.insertBefore(button, b);
-  });
-}
-document.addEventListener('click', function(e){
-  var button = e.target.closest ? e.target.closest('button.react') : null;
-  if(!button) return;
-  var card = button.closest('article.card');
-  var both = card.querySelectorAll('button.react');
-  var fd = new FormData();
-  fd.append('app', card.dataset.app);
-  fd.append('id', card.dataset.id);
-  fd.append('feedback', button.dataset.choice);
-  both.forEach(function(x){ x.disabled = true; });
-  fetch('/feedback', {method:'POST', body:fd})
-    .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'reload the page and try again' : 'could not save feedback'); return res.json(); })
-    .then(function(d){ both.forEach(function(x){ x.classList.toggle('chosen', x.dataset.choice === d.feedback); }); })
-    .catch(function(err){ toast(err.message || 'could not save feedback'); })
-    .then(function(){ both.forEach(function(x){ x.disabled = false; }); });
 });
 
 if(SAVED_VIEW) document.querySelectorAll('article.card').forEach(function(card){
@@ -1326,46 +1281,36 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
 });
 var settingsDlg = document.getElementById('settingsdlg');
 var settingsOpen = document.getElementById('settingsOpen');
-var controlsSwap = document.getElementById('controlsSwap');
+var controlsLeft = document.getElementById('controlsLeft');
 function positionDeckControls(){
-  var react = document.getElementById('deckReact'), nav = document.getElementById('deckNav');
-  if(react){ react.classList.toggle('atleft', !CONTROLS_SWAP); react.classList.toggle('atright', CONTROLS_SWAP); }
-  if(nav){ nav.classList.toggle('atleft', CONTROLS_SWAP); nav.classList.toggle('atright', !CONTROLS_SWAP); }
+  var nav = document.getElementById('deckNav');
+  if(nav){ nav.classList.toggle('atleft', CONTROLS_LEFT); nav.classList.toggle('atright', !CONTROLS_LEFT); }
 }
 positionDeckControls();
-if(settingsDlg && settingsOpen && controlsSwap){
-  controlsSwap.checked = CONTROLS_SWAP;
+if(settingsDlg && settingsOpen && controlsLeft){
+  controlsLeft.checked = CONTROLS_LEFT;
   settingsOpen.addEventListener('click', function(){ settingsDlg.showModal(); });
-  controlsSwap.addEventListener('change', function(){
-    CONTROLS_SWAP = controlsSwap.checked;
-    try { localStorage.setItem('tui:deck-feedback-right', CONTROLS_SWAP ? '1' : '0'); } catch(e){}
+  controlsLeft.addEventListener('change', function(){
+    CONTROLS_LEFT = controlsLeft.checked;
+    try { localStorage.setItem('tui:deck-controls-left', CONTROLS_LEFT ? '1' : '0'); } catch(e){}
     positionDeckControls();
   });
 }
 
-// The deck (?deck=1): one card on screen, and the four ways off it split across
-// the two edges. Walking back does not clear the choice already made.
+// The deck (?deck=1): one card on screen, walked through from an edge column.
 if (SWIPE) (function(){
   var deck = document.getElementById('deck');
   if (!deck) return;
   var cards = [].slice.call(deck.querySelectorAll('article.card'));
   var endEl = document.getElementById('deckEnd');
-  var downBtn = document.getElementById('thumbDown');
-  var upBtn = document.getElementById('thumbUp');
   var prevBtn = document.getElementById('deckPrev');
   var nextBtn = document.getElementById('deckNext');
   var at = 0;
 
   function current(){ return at < cards.length ? cards[at] : null; }
   function updateControls(done){
-    ['deckReact', 'deckNav'].forEach(function(id){
-      var controls = document.getElementById(id);
-      if(controls) controls.classList.toggle('hid', done);
-    });
-    var card = current(), key = card ? card.dataset.app + '\u0000' + card.dataset.id : '';
-    var choice = card ? (card.dataset.feedback || FEEDBACK[key] || '') : '';
-    if(downBtn) downBtn.classList.toggle('chosen', choice === 'down');
-    if(upBtn) upBtn.classList.toggle('chosen', choice === 'up');
+    var controls = document.getElementById('deckNav');
+    if(controls) controls.classList.toggle('hid', done);
     if(prevBtn) prevBtn.disabled = at === 0;
   }
   function show(){
@@ -1415,45 +1360,19 @@ if (SWIPE) (function(){
     queueUnread(card);
     return true;
   }
-  function sendFeedback(choice){
-    var card = current();
-    if (!card || (downBtn && downBtn.disabled) || (upBtn && upBtn.disabled)) return;
-    if(downBtn) downBtn.disabled = true;
-    if(upBtn) upBtn.disabled = true;
-    var fd = new FormData();
-    fd.append('app', card.dataset.app);
-    fd.append('id', card.dataset.id);
-    fd.append('feedback', choice);
-    fetch('/feedback', {method:'POST', body:fd})
-      .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'reload the page and try again' : 'could not save feedback'); return res.json(); })
-      .then(function(d){
-        card.dataset.feedback = d.feedback;
-        updateControls(false);
-        mark(card);
-      })
-      .catch(function(err){ toast(err.message || 'could not save feedback'); })
-      .then(function(){
-        if(downBtn) downBtn.disabled = false;
-        if(upBtn) upBtn.disabled = false;
-      });
-  }
   function read(){
     var card = current();
     if(card) mark(card);
   }
-  if (downBtn) downBtn.addEventListener('click', function(){ sendFeedback('down'); });
-  if (upBtn) upBtn.addEventListener('click', function(){ sendFeedback('up'); });
   if (prevBtn) prevBtn.addEventListener('click', function(){ back(); });
   if (nextBtn) nextBtn.addEventListener('click', function(){ read(); });
 
-  // Horizontal arrows navigate without preference; vertical arrows react.
+  // The arrow keys walk the deck: left goes back, right marks read and moves on.
   document.addEventListener('keydown', function(e){
     if (ffs || e.metaKey || e.ctrlKey || e.altKey) return;
     var k = e.key;
     if (k === 'ArrowLeft'){ e.preventDefault(); back(); }
     else if (k === 'ArrowRight'){ e.preventDefault(); read(); }
-    else if (k === 'ArrowUp'){ e.preventDefault(); sendFeedback('up'); }
-    else if (k === 'ArrowDown'){ e.preventDefault(); sendFeedback('down'); }
   });
   show();
 })();

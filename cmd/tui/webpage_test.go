@@ -283,47 +283,33 @@ func TestRenderPageSwipeDeck(t *testing.T) {
 	}
 }
 
-func TestDeckFeedbackNavigation(t *testing.T) {
+func TestDeckNavigation(t *testing.T) {
 	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}
 	deck := renderInput(t, pageInput{
 		items: items, total: len(items), apps: []string{"x", "reddit"}, now: time.Now(), swipe: true,
-		feedback: map[string]string{items[0].Key(): "down"},
 	})
-	// One edge reacts (-+), the other walks (<>), a column to a thumb.
-	if !strings.Contains(deck, `id="deckReact" class="deckctl"><button id="thumbDown" class="deckbtn" type="button" title="not interested and show the next item" aria-label="not interested">-</button><button id="thumbUp" class="deckbtn" type="button" title="interested and show the next item" aria-label="interested">+</button></div>`) {
-		t.Fatalf("expected the -+ column: %s", deck)
-	}
+	// The deck walks from one edge column (<>), a column to a thumb.
 	if !strings.Contains(deck, `id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button></div>`) {
 		t.Fatalf("expected the <> column: %s", deck)
 	}
 	if !strings.Contains(deck, `.deckctl.atleft{left:max(-8px,calc(50% - 328px))}`) ||
 		!strings.Contains(deck, `.deckctl.atright{right:max(-8px,calc(50% - 328px))}`) {
-		t.Errorf("either column should sit at either edge: %s", deck)
-	}
-	if !strings.Contains(deck, `"x\u00001":"down"`) ||
-		!strings.Contains(deck, `downBtn.classList.toggle('chosen', choice === 'down')`) ||
-		!strings.Contains(deck, `upBtn.classList.toggle('chosen', choice === 'up')`) {
-		t.Error("a revisited card should show its persisted feedback")
+		t.Errorf("the column should sit at either edge: %s", deck)
 	}
 	if !strings.Contains(deck, `if(prevBtn) prevBtn.disabled = at === 0`) ||
 		!strings.Contains(deck, `if (prevBtn) prevBtn.addEventListener('click', function(){ back(); })`) ||
 		!strings.Contains(deck, `if (nextBtn) nextBtn.addEventListener('click', function(){ read(); })`) {
-		t.Error("the inner pair should walk the deck, with previous dead on the first card")
+		t.Error("the pair should walk the deck, with previous dead on the first card")
 	}
 	// The footer's back button moved to the edge column, where its forward twin is.
 	if strings.Contains(deck, `deckback`) {
 		t.Error("the deck footer should no longer carry its own back button")
 	}
-	if !strings.Contains(deck, `fetch('/feedback', {method:'POST', body:fd})`) ||
-		!strings.Contains(deck, `fd.append('feedback', choice)`) ||
-		!strings.Contains(deck, `mark(card)`) {
-		t.Error("both feedback choices should persist, mark read, and advance")
-	}
 	if strings.Contains(deck, `deck.addEventListener('pointerdown'`) {
 		t.Error("the old card drag handler should stay gone")
 	}
 	if strings.Contains(deck, "classList.add('fly')") || strings.Contains(deck, ".deck .card.fly") {
-		t.Error("feedback navigation should switch cards without the old swipe animation")
+		t.Error("the buttons should switch cards without the old swipe animation")
 	}
 	if !strings.Contains(deck, `return markFlights.then(function(){`) ||
 		!strings.Contains(deck, `return fetch('/unmark', {method:'POST', body:fd})`) {
@@ -620,19 +606,13 @@ func TestChipGroupsShareOneRow(t *testing.T) {
 	}
 }
 
-func TestDeckSeparatesKeyboardNavigationFromFeedback(t *testing.T) {
+func TestDeckKeyboardNavigation(t *testing.T) {
 	p := renderSwipePage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, "x")
 	if !strings.Contains(p, `if (k === 'ArrowLeft'){ e.preventDefault(); back(); }`) {
 		t.Error("left should restore the previous item to unread")
 	}
 	if !strings.Contains(p, `else if (k === 'ArrowRight'){ e.preventDefault(); read(); }`) {
-		t.Error("right should mark read and advance without feedback")
-	}
-	if !strings.Contains(p, `else if (k === 'ArrowUp'){ e.preventDefault(); sendFeedback('up'); }`) {
-		t.Error("up should give positive feedback")
-	}
-	if !strings.Contains(p, `else if (k === 'ArrowDown'){ e.preventDefault(); sendFeedback('down'); }`) {
-		t.Error("down should give negative feedback")
+		t.Error("right should mark read and advance")
 	}
 	if strings.Contains(p, `k === 'ArrowLeft' || k === 'h'`) || strings.Contains(p, `k === 'ArrowRight' || k === 'l'`) {
 		t.Error("web h/l bindings should stay out of the arrow-only mapping")
@@ -719,12 +699,11 @@ func TestRenderPageFreshness(t *testing.T) {
 	if strings.Contains(p, `fetch('/refresh'`) || strings.Contains(p, `id="refresh"`) {
 		t.Fatal("the count should no longer trigger a fetch: " + p)
 	}
-	if !strings.Contains(p, `<span>swap deck card controls</span><input id="controlsSwap" type="checkbox">`) ||
-		!strings.Contains(p, `localStorage.setItem('tui:deck-feedback-right', CONTROLS_SWAP ? '1' : '0')`) ||
-		!strings.Contains(p, `react.classList.toggle('atleft', !CONTROLS_SWAP); react.classList.toggle('atright', CONTROLS_SWAP);`) ||
-		!strings.Contains(p, `nav.classList.toggle('atleft', CONTROLS_SWAP); nav.classList.toggle('atright', !CONTROLS_SWAP);`) ||
+	if !strings.Contains(p, `<span>place deck card controls on left</span><input id="controlsLeft" type="checkbox">`) ||
+		!strings.Contains(p, `localStorage.setItem('tui:deck-controls-left', CONTROLS_LEFT ? '1' : '0')`) ||
+		!strings.Contains(p, `nav.classList.toggle('atleft', CONTROLS_LEFT); nav.classList.toggle('atright', !CONTROLS_LEFT);`) ||
 		!strings.Contains(p, `settingsDlg.showModal()`) {
-		t.Fatal("the native settings dialog should persist the swapped edges: " + p)
+		t.Fatal("the native settings dialog should persist the chosen edge: " + p)
 	}
 	if !strings.Contains(p, `id="upd">just now`) {
 		t.Fatal("expected the freshness label: " + p)
@@ -1453,25 +1432,6 @@ func TestSavedPageAndButton(t *testing.T) {
 		t.Fatalf("compact x post needs its compact text treatment: %s", xCompact)
 	}
 
-	// Letting a saved item go is the moment it has been judged, so the two
-	// reactions are built then and there, in front of the button that did it.
-	for _, wiring := range []string{
-		`if (SAVED_VIEW) offerReaction(card, on);`,
-		`if(saved) return;`,
-		`[['up', 'good'], ['down', 'bad']].forEach(`,
-		`b.parentNode.insertBefore(button, b);`,
-		`card.querySelectorAll('button.react').forEach(function(old){ old.remove(); });`,
-		`fd.append('feedback', button.dataset.choice);`,
-	} {
-		if !strings.Contains(page, wiring) {
-			t.Fatalf("the unsave reaction should be wired through %q: %s", wiring, page)
-		}
-	}
-	// They belong to the unsave, not to the page: nothing renders them up front.
-	if strings.Contains(page, `class="react"`) {
-		t.Fatalf("a still-saved card should carry no reaction buttons: %s", page)
-	}
-
 	// The feed view links to the saved list and shows its count.
 	feed := renderPage(t, nil, []string{"x"}, nil, "following", "")
 	if !strings.Contains(feed, `href="/?saved=1"`) {
@@ -2146,123 +2106,7 @@ func TestUnmarkHandler(t *testing.T) {
 	}
 }
 
-func TestFeedbackHandlerStoresAndRevisesChoice(t *testing.T) {
-	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.close()
-	cache, err := loadFeedCacheDB(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := loadFeedbackDB(db)
-	rendered := newRenderedItems()
-	it := core.Item{App: "x", ID: "50", Title: "post"}
-	cache.upsert([]core.Item{it}, time.Now())
 
-	post := func(app, id, choice string) *httptest.ResponseRecorder {
-		t.Helper()
-		form := url.Values{"app": {app}, "id": {id}, "feedback": {choice}}
-		r := httptest.NewRequest(http.MethodPost, "/feedback", strings.NewReader(form.Encode()))
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rec := httptest.NewRecorder()
-		handleFeedback(rec, r, store, cache, rendered)
-		return rec
-	}
-
-	for _, choice := range []string{"down", "up"} {
-		rec := post(it.App, it.ID, choice)
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"feedback":"`+choice+`"`) {
-			t.Fatalf("%s response = %d %s", choice, rec.Code, rec.Body.String())
-		}
-		got, err := store.all()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got[it.Key()] != choice {
-			t.Fatalf("stored feedback = %q, want %q", got[it.Key()], choice)
-		}
-	}
-	if rec := post(it.App, it.ID, "maybe"); rec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid feedback status = %d, want 400", rec.Code)
-	}
-
-	live := core.Item{App: "x", ID: "live", Title: "for you"}
-	rendered.put([]core.Item{live})
-	if rec := post(live.App, live.ID, "up"); rec.Code != http.StatusOK {
-		t.Fatalf("rendered-only feedback = %d %s", rec.Code, rec.Body.String())
-	}
-	var title string
-	if err := db.db.QueryRow(`SELECT title FROM items WHERE app=? AND id=?`, live.App, live.ID).Scan(&title); err != nil {
-		t.Fatal(err)
-	}
-	if title != live.Title {
-		t.Fatalf("rendered-only item title = %q, want %q", title, live.Title)
-	}
-}
-
-// Unsaving on the saved page asks how the item went, and the reaction that
-// follows can name only an app+id. The item is out of the store by then and was
-// never in the unread cache, so the page has to be what remembers it.
-func TestSavedViewRemembersItemsForFeedbackAfterUnsave(t *testing.T) {
-	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.close()
-	saved, err := loadSavedDB(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cache, err := loadFeedCacheDB(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block, err := loadBlockerDB(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loader, err := newPageLoader("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	it := core.Item{App: "reddit", ID: "watch-later", Title: "a long video"}
-	if err := saved.add(it, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	feedback, tags, rendered := loadFeedbackDB(db), loadTagsDB(db), newRenderedItems()
-	root := t.TempDir()
-	sweep := newSweeper(root, cache, newMarkFlusher(root, cache), block, false, 0)
-
-	rec := httptest.NewRecorder()
-	handleAll(rec, httptest.NewRequest(http.MethodGet, "/?saved=1", nil), root, loader, cache, sweep, saved, feedback, tags, block, rendered)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("saved page = %d %s", rec.Code, rec.Body.String())
-	}
-	if _, ok := rendered.get(it.App, it.ID); !ok {
-		t.Fatal("the saved view should remember what it rendered")
-	}
-
-	if err := saved.remove(it.App, it.ID); err != nil {
-		t.Fatal(err)
-	}
-	form := url.Values{"app": {it.App}, "id": {it.ID}, "feedback": {"down"}}
-	r := httptest.NewRequest(http.MethodPost, "/feedback", strings.NewReader(form.Encode()))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec = httptest.NewRecorder()
-	handleFeedback(rec, r, feedback, cache, rendered)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("reaction after unsave = %d %s", rec.Code, rec.Body.String())
-	}
-	got, err := feedback.all()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got[it.Key()] != "down" {
-		t.Fatalf("stored feedback = %q, want %q", got[it.Key()], "down")
-	}
-}
 
 func TestTagHandlerTogglesMultipleSavedTags(t *testing.T) {
 	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))

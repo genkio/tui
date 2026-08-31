@@ -36,11 +36,6 @@ type (
 		item core.Item
 		err  error
 	}
-	feedbackMsg struct {
-		item     core.Item
-		feedback string
-		err      error
-	}
 	flushTickMsg      struct{}
 	openedMsg         struct{}
 	copiedMsg         struct{}
@@ -54,14 +49,13 @@ type (
 const flushDebounce = 1500 * time.Millisecond
 
 type feedAPIResponse struct {
-	Items    []core.Wire       `json:"items"`
-	Feedback map[string]string `json:"feedback,omitempty"`
-	Apps     []string          `json:"apps,omitempty"`
-	Failed   []string          `json:"failed,omitempty"`
-	Warn     string            `json:"warn,omitempty"`
-	Updated  string            `json:"updated,omitempty"`
-	Fetching bool              `json:"fetching,omitempty"`
-	Capped   bool              `json:"capped,omitempty"`
+	Items    []core.Wire `json:"items"`
+	Apps     []string    `json:"apps,omitempty"`
+	Failed   []string    `json:"failed,omitempty"`
+	Warn     string      `json:"warn,omitempty"`
+	Updated  string      `json:"updated,omitempty"`
+	Fetching bool        `json:"fetching,omitempty"`
+	Capped   bool        `json:"capped,omitempty"`
 }
 
 var feedServerHTTP = &http.Client{Timeout: 110 * time.Second}
@@ -76,9 +70,7 @@ func fetchAll(server, xTab string) tea.Cmd {
 		items := make([]core.Item, 0, len(feed.Items))
 		now := time.Now()
 		for _, wire := range feed.Items {
-			item := wire.Item(now)
-			item.Feedback = feed.Feedback[item.Key()]
-			items = append(items, item)
+			items = append(items, wire.Item(now))
 		}
 		note := ""
 		if len(feed.Failed) > 0 {
@@ -170,30 +162,6 @@ func saveServerItem(server string, item core.Item) error {
 func saveServer(server string, item core.Item) tea.Cmd {
 	return func() tea.Msg {
 		return savedMsg{item: item, err: saveServerItem(server, item)}
-	}
-}
-
-func feedbackServerItem(server string, item core.Item, feedback string) error {
-	u, err := serverEndpoint(server, "/feedback")
-	if err != nil {
-		return err
-	}
-	res, err := feedMutationHTTP.PostForm(u.String(), url.Values{
-		"app": {item.App}, "id": {item.ID}, "feedback": {feedback},
-	})
-	if err != nil {
-		return fmt.Errorf("cannot send feedback to feed server %s: %w", server, err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return serverResponseError(server, res)
-	}
-	return nil
-}
-
-func sendServerFeedback(server string, item core.Item, feedback string) tea.Cmd {
-	return func() tea.Msg {
-		return feedbackMsg{item: item, feedback: feedback, err: feedbackServerItem(server, item, feedback)}
 	}
 }
 
