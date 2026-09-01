@@ -1509,6 +1509,24 @@ func TestCardType(t *testing.T) {
 		{"youtube link", core.Item{App: "folo", Body: "clip: https://youtu.be/aqz-KE-bpKQ"}, "video"},
 		{"podcast", core.Item{App: "inoreader", Audio: "https://ex.com/ep.mp3"}, "audio"},
 		{"both", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4", Audio: "https://ex.com/ep.mp3"}, "video"},
+		// A clip shorter than videoFloor is a post with a clip in it, not
+		// something to sit down and watch, so it files as what it reads as.
+		{"twenty-second loop", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 20}, "text"},
+		{"short clip over an episode", core.Item{
+			App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 20, Audio: "https://ex.com/ep.mp3",
+		}, "audio"},
+		{"just over the floor", core.Item{App: "bilibili", Video: "https://ex.com/v.mp4", VidSecs: videoFloor + 1}, "video"},
+		{"short quoted clip", core.Item{App: "x", Quote: &core.Quote{Video: "https://video.twimg.com/a.mp4", VidSecs: 30}}, "text"},
+		// The longest clip on the card decides: a talk with a reaction gif quoted
+		// under it is still a talk.
+		{"long over short", core.Item{
+			App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 900,
+			Quote: &core.Quote{Video: "https://video.twimg.com/b.mp4", VidSecs: 5},
+		}, "video"},
+		// Nobody said how long these run, and not knowing is not knowing it is
+		// short: a YouTube link's length is looked up from the browser, and a
+		// redgifs clip is not resolved until you ask for it.
+		{"length unreported", core.Item{App: "reddit", Video: "https://ex.com/v.mp4"}, "video"},
 	}
 	for _, c := range cases {
 		if got := buildCard(c.it, false, listClips).Type; got != c.want {

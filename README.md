@@ -196,7 +196,13 @@ sends them with a beacon rather than losing them.
 Above the first card is one wrapping row of **chips**: a group for the
 **source** (`𝕏`, `rdt`, `ino`, …) followed by one for what the item carries
 (**text**, **video**, **audio**), each chip counting the unread items it would
-bring — so reading takes the chip numbers down alongside the header's. One is on
+bring — **video** meaning something to sit down and watch, so a clip the source
+says runs under **five minutes** files as what its post reads as instead: a
+timeline is full of twenty-second loops attached to a sentence, and counting
+those makes the chip promise a screenful of watching and deliver scrolling. The
+clip still plays on its card either way, and a clip whose length nobody reported
+(a linked YouTube video, a redgifs one) stays a video, since not knowing how long
+something runs is not knowing that it is short — so reading takes the chip numbers down alongside the header's. One is on
 at a time, and tapping it loads a page of that chip's items and nothing else
 (`?app=reddit`, `?type=video`), so the counts always say what a pick would bring
 rather than what is left of it. The header's own count stays every source's
@@ -210,15 +216,11 @@ picks that source, and the ✦ beside it asks for a briefing of everything the
 chip counts (see **Summarizing a backlog**). A chip at zero is only a chip —
 there is nothing there to brief anybody on.
 
-Next to x's own blue chip sits a second, **black** one: the same `𝕏`, no label.
-That is x's other timeline, and it is the one pick that fetches rather than
-reads. From anywhere else it is the icon alone — none of that timeline is kept,
-so there is nothing to count; on the page the fetch serves, it states the round
-it just brought, next to the icon like every other chip's number, and takes it
-down as you read (the header's backlog count stays put there: a round is no part
-of it). Green when the fetch landed, red when it didn't. Tapping it
-again is another round: it's an endless firehose, not a list you get to the end
-of, which is why nothing from it enters the backlog.
+x has two chips: its own in blue and a **black** one wearing the same `𝕏`. The
+black one is For You, and it is a source like the blue one in every way — its own
+count, status light, briefing and mark-all — because it is swept into the backlog
+like everything else (see **x has two of them**). The color is what tells them
+apart; the black chip's tooltip says which it is.
 
 Two sources arrive already sorted into streams, and picking one of them opens a
 **second row** underneath: reddit's subreddits, Inoreader's feeds, each with its

@@ -755,24 +755,54 @@ func keepURL(app, id, video string) string {
 // though nothing was attached to the item.
 var ytLinkRe = regexp.MustCompile(`(?:youtube\.com/watch\?[^#]*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)[\w-]{11}`)
 
+// videoFloor is how long a clip has to run to be a video rather than a post with
+// a clip in it. Picking the video chip is sitting down to watch things, and a
+// timeline is full of twenty-second loops attached to a sentence — count those
+// and the chip promises a screenful of watching and delivers scrolling.
+//
+// The clip still plays on its card either way. This is only what the item is
+// filed as.
+const videoFloor = 5 * 60
+
 // itemType sorts an item by what it carries, so a list can be sliced into
 // things to watch, things to listen to, and things to read. Read off the item
 // rather than the built card, because the feed picks a type before it has built
 // anything. An item with both a player and an episode is a video: that is what
 // the eye lands on.
 func itemType(it core.Item) string {
+	if carriesVideo(it) && !shortClip(it) {
+		return "video"
+	}
+	if it.Audio != "" {
+		return "audio"
+	}
+	return "text"
+}
+
+func carriesVideo(it core.Item) bool {
 	quoteVid := it.Quote != nil && it.Quote.Video != ""
 	switch {
 	case it.Video != "", quoteVid,
 		biliVideoID(it.App, it.URL) != "",
 		redgifID(it.URL, it.Title, it.Body) != "",
 		ytLinkRe.MatchString(it.URL + " " + it.Title + " " + it.Body):
-		return "video"
-	case it.Audio != "":
-		return "audio"
-	default:
-		return "text"
+		return true
 	}
+	return false
+}
+
+// shortClip reports whether the longest clip an item is known to carry runs
+// under videoFloor. A length of zero is the app reporting none, not a clip of no
+// length: an unknown length stays a video, since not knowing how long something
+// runs is not knowing that it is short. That is where a linked YouTube clip
+// lands — its length is looked up from the browser, over /ytlen, long after this
+// — and a redgifs clip, which is not resolved until you ask for it.
+func shortClip(it core.Item) bool {
+	secs := it.VidSecs
+	if it.Quote != nil && it.Quote.VidSecs > secs {
+		secs = it.Quote.VidSecs
+	}
+	return secs > 0 && secs < videoFloor
 }
 
 // chipRow builds the chip row over a list: one group per axis (which service it
