@@ -31,7 +31,7 @@ func runCommand(args []string) error {
 func runServeCommand(args []string) error {
 	flags := flag.NewFlagSet("tui serve", flag.ContinueOnError)
 	addr := flags.String("addr", "0.0.0.0:8080", "address for the API and web UI")
-	every := flags.Duration("fetch-every", 10*time.Minute, "feed fetch interval; 0 disables scheduled fetches")
+	every := flags.Duration("fetch-every", 15*time.Minute, "feed fetch interval; 0 disables scheduled fetches")
 	drain := flags.Bool("drain-inoreader", true, "page through Inoreader by marking fetched entries upstream")
 	dev := flags.Bool("dev", false, "reload cmd/tui/page.tmpl on every web request")
 	syncDir := flags.String("sync-dir", os.Getenv("TUI_SYNC_DIR"), "directory for snapshots, credentials, read state, and configs")

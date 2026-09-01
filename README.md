@@ -277,7 +277,7 @@ A page load used to scrape all six services before it sent a byte, which is why
 refreshing took the best part of a minute, and why the unread count was never
 the real one: each app hands over its newest page (40-50 items) and no more.
 
-Now a background sweeper does the fetching, every **10 minutes** by default and
+Now a background sweeper does the fetching, every **15 minutes** by default and
 jittered ±15% so the requests don't arrive on a machine-perfect cadence (the
 services within one sweep are spread out too). What it finds accumulates in
 the `feed_items` table in the local `feed.db`, keyed by app and id, and a page
