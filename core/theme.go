@@ -49,6 +49,7 @@ func NewTheme(isDark bool) Theme {
 		// app chips keep a fixed hue each so a service is recognizable at a glance
 		chips: map[string]lipgloss.Style{
 			"x":         chip("39"),  // blue
+			"xforyou":   chip("63"),  // indigo, so x's two timelines are told apart
 			"inoreader": chip("214"), // amber
 			"folo":      chip("170"), // magenta
 			"reddit":    chip("208"), // orange
@@ -79,4 +80,4 @@ func PlainChip(app string) string {
 	return app
 }
 
-var chipLabels = map[string]string{"x": "𝕏", "inoreader": "ino", "folo": "folo", "reddit": "rdt", "douban": "dou", "bilibili": "bili"}
+var chipLabels = map[string]string{"x": "𝕏", "xforyou": "xfy", "inoreader": "ino", "folo": "folo", "reddit": "rdt", "douban": "dou", "bilibili": "bili"}
