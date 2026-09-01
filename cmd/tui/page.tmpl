@@ -265,7 +265,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
    test the head script picks the deck by, so the controls show up exactly
    where the deck is what you land on. */
 @media (pointer: fine){.deckctl{display:none}}
-.open{color:var(--accent);text-decoration:none;font-weight:600;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
+.open{color:var(--muted);text-decoration:none;font-weight:700;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
 .speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 .rgv:disabled{opacity:.6;cursor:default}
@@ -1073,13 +1073,13 @@ document.addEventListener('click', function(e){
     });
 });
 
-// Playback settings are global: the speed (cycles 2× → 2.5× → 1×), mute (default muted)
+// Playback settings are global: the speed (cycles 2× → 2.5× → 3× → 1×), mute (default muted)
 // and loop (default off) buttons on any card apply to every player — native
 // <video>, YouTube embeds, and podcast <audio> alike — so the whole feed
 // behaves one way. The rate is re-applied on play because loading media resets
 // it. Clicks are delegated since YouTube cards get their buttons injected
 // after this runs.
-var SPEEDS = [2, 2.5, 1];
+var SPEEDS = [2, 2.5, 3, 1];
 var SPEED = SPEEDS[0];
 // the IFrame API caps at 2× and ignores anything higher
 function ytRate(){ return Math.min(SPEED, 2); }
