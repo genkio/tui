@@ -92,7 +92,7 @@ func fetchServerFeed(server string) (feedAPIResponse, error) {
 	}
 	q := u.Query()
 	q.Set("json", "1")
-	q.Set("order", "desc")
+	q.Set("order", "asc")
 	u.RawQuery = q.Encode()
 	res, err := feedServerHTTP.Get(u.String())
 	if err != nil {

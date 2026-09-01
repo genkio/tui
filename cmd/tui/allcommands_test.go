@@ -20,8 +20,8 @@ func TestTerminalFeedUsesServerState(t *testing.T) {
 	rendered := newRenderedItems()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("json") != "1" || r.URL.Query().Get("order") != "desc" {
-			t.Errorf("feed query = %q, want json and newest-first order", r.URL.RawQuery)
+		if r.URL.Query().Get("json") != "1" || r.URL.Query().Get("order") != "asc" {
+			t.Errorf("feed query = %q, want json and oldest-first order", r.URL.RawQuery)
 		}
 		writeJSONItems(w, cache.unread(now, ""), nil, feedAPIResponse{Apps: []string{"bilibili"}})
 	})
