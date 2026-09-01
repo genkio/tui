@@ -136,6 +136,68 @@ func TestSummarizeBriefsOneSourcesBacklog(t *testing.T) {
 	}
 }
 
+// A briefing is about a backlog as it stood, and a sweep lands every quarter of
+// an hour, so what it never read is counted for it: by id, since reading some
+// and fetching some leaves a total where it was.
+func TestSummaryCountsWhatArrivedSince(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "one"},
+		{App: "reddit", ID: "2", Title: "two"},
+		{App: "folo", ID: "9", Title: "another source"},
+	}, now)
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) { return "a briefing", nil })
+
+	if rec := post(t, sum, "app=reddit"); rec.Code != http.StatusAccepted {
+		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
+	}
+	settled(t, sum, "reddit")
+
+	fetched := func() summaryJob {
+		t.Helper()
+		var j summaryJob
+		if err := json.Unmarshal(get(t, sum, "app=reddit").Body.Bytes(), &j); err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	if j := fetched(); j.New != 0 {
+		t.Errorf("new = %d, want 0: the briefing has just read the whole backlog", j.New)
+	}
+
+	// A sweep lands two more, and one of the summarized items is read. The
+	// briefing is behind by the two, not by the arithmetic on the count.
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "3", Title: "three"},
+		{App: "reddit", ID: "4", Title: "four"},
+		{App: "folo", ID: "10", Title: "not this source's"},
+	}, now)
+	cache.markRead("reddit", []string{"1"}, now)
+	if j := fetched(); j.New != 2 {
+		t.Errorf("new = %d, want 2", j.New)
+	}
+	// The chips poll the listing, so it says the same thing.
+	var listing struct {
+		Jobs map[string]summaryJob `json:"jobs"`
+	}
+	if err := json.Unmarshal(get(t, sum, "").Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if listing.Jobs["reddit"].New != 2 {
+		t.Errorf("listing = %+v, want 2 new", listing.Jobs["reddit"])
+	}
+
+	// ...and running it again is what clears it: the new briefing read them.
+	if rec := post(t, sum, "app=reddit"); rec.Code != http.StatusAccepted {
+		t.Fatalf("again = %d %s", rec.Code, rec.Body.String())
+	}
+	settled(t, sum, "reddit")
+	if j := fetched(); j.New != 0 || j.Count != 3 {
+		t.Errorf("job = %+v, want 3 items and nothing since", j)
+	}
+}
+
 // The states listing is what the chips poll, so it carries their whole state
 // machine and none of the prose that would make polling expensive.
 func TestSummaryStatesListing(t *testing.T) {

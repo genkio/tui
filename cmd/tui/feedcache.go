@@ -191,6 +191,22 @@ func (c *feedCache) unreadApp(app string) (int, bool) {
 	return n, c.status[app].Capped
 }
 
+// unreadNew counts one service's unread items that seen does not know about,
+// which is how a briefing tells whether it has been overtaken: comparing totals
+// could not, since reading a few and fetching a few leaves the count where it
+// was. seen holds the ids the briefing was written from.
+func (c *feedCache) unreadNew(app string, seen map[string]bool) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, e := range c.entries {
+		if !e.Read && e.App == app && !seen[e.ID] {
+			n++
+		}
+	}
+	return n
+}
+
 // drop removes these entries outright and reports how many it found. It is for
 // items that should never have been backlog at all — a block keyword added
 // after the fact catches what is already cached — rather than for anything you

@@ -73,13 +73,21 @@ func summaryLang(want string) string {
 // Lang is which language it was written in, which the page checks against the
 // language it is set to now: a briefing in the other one is not the one you
 // asked for, so its chip goes back to offering a run.
+//
+// New is how much of the source's backlog the briefing never read, counted when
+// a client asks rather than stored: a fetch lands every quarter of an hour, and
+// a briefing that has been overtaken should say so instead of reading as the
+// last word on a backlog that has moved on. seen is the ids it was written
+// from, which is what makes that count honest — see feedCache.unreadNew.
 type summaryJob struct {
 	State     string `json:"state"` // "running", "done" or "failed"
 	Lang      string `json:"lang,omitempty"`
 	Count     int    `json:"count,omitempty"`
+	New       int    `json:"new,omitempty"`
 	HTML      string `json:"html,omitempty"`
 	Err       string `json:"error,omitempty"`
 	Generated string `json:"generated,omitempty"`
+	seen      map[string]bool
 }
 
 // summaryAsk is what goes in the queue: a source and the language to write about
@@ -169,8 +177,12 @@ func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
 		}
 		return summaryJob{State: "failed", Lang: ask.lang, Err: err.Error()}
 	}
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		seen[it.ID] = true
+	}
 	return summaryJob{
-		State: "done", Lang: ask.lang, Count: len(items),
+		State: "done", Lang: ask.lang, Count: len(items), seen: seen,
 		// The same Markdown renderer the cards use, so a briefing's links, lists
 		// and tables come out as the rest of the page's prose does and the model's
 		// output cannot bring HTML of its own with it.
@@ -187,19 +199,38 @@ func (s *summarizer) put(app string, job summaryJob) {
 
 func (s *summarizer) job(app string) (summaryJob, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	j, ok := s.jobs[app]
-	return j, ok
+	s.mu.Unlock()
+	if !ok {
+		return j, false
+	}
+	j.New = s.overtaken(app, j)
+	return j, true
+}
+
+// overtaken is how far behind a finished briefing has fallen: the source's
+// unread items it never read, which is a count of the backlog now against the
+// ids the run went through. Counted on the way out rather than kept on the job,
+// since it changes with every sweep and every mark while the job stands still.
+func (s *summarizer) overtaken(app string, j summaryJob) int {
+	if j.State != "done" || s.cache == nil || len(j.seen) == 0 {
+		return 0
+	}
+	return s.cache.unreadNew(app, j.seen)
 }
 
 // states is every source's job without the prose: what the chips need to draw
 // themselves, which is polled while anything is running.
 func (s *summarizer) states() map[string]summaryJob {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	out := make(map[string]summaryJob, len(s.jobs))
 	for app, j := range s.jobs {
 		j.HTML = ""
+		out[app] = j
+	}
+	s.mu.Unlock()
+	for app, j := range out {
+		j.New = s.overtaken(app, j)
 		out[app] = j
 	}
 	return out

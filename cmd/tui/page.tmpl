@@ -341,6 +341,11 @@ button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);pa
 .summary{display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 body.sumon .summary{display:block}
 .smeta{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+/* the briefing has been overtaken: items arrived that it never read. Loud
+   enough to catch the eye next to "again", which is what it is telling you to
+   do, and gone entirely when there is nothing to say. */
+.sold{padding:1px 8px;border:1px solid var(--accent);border-radius:999px;color:var(--accent);font-weight:600}
+.sold:empty{display:none}
 .summary .body{font-size:15px}
 .summary .body h2{margin:18px 0 6px;font-size:16px;font-weight:700}
 .summary .body ul,.summary .body ol{margin:8px 0;padding-left:22px}
@@ -1527,6 +1532,11 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   if (!panel && !Object.keys(icons).length) return;
 
   var poll = null, open = false, atFeed = 0, getting = {};
+  // How many items have arrived for each source since its briefing was written,
+  // as the server last said. Kept out of what sessionStorage holds: the prose is
+  // what a briefing is, and how overtaken it is has to be asked about again
+  // every time it is opened.
+  var behind = {}, behindNote = null;
 
   // Kept per language as well as per source: a briefing is in the language it
   // was written in, so the two are separate things to have and switching back
@@ -1597,6 +1607,27 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     panel.appendChild(note);
   }
 
+  // Whether the briefing on screen is still about the backlog behind it. A
+  // sweep lands every quarter of an hour, so a briefing read twenty minutes
+  // after it was written can be missing items nobody would guess were there —
+  // and the count is by id, not by totals, since reading some and fetching some
+  // leaves a total where it was.
+  function paintBehind(){
+    if (!behindNote) return;
+    var n = behind[mine] || 0;
+    behindNote.textContent = n ? (n === 1 ? '1 new item since' : n + ' new items since') : '';
+    behindNote.title = n ? 'this briefing was written before these arrived' : '';
+  }
+
+  // The server's word on how overtaken the briefings are, which is also what
+  // settles the icons, so this is the same ask the page makes on load.
+  function recount(){
+    fetch('/summarize')
+      .then(function(res){ return res.json(); })
+      .then(function(d){ if (sync((d && d.jobs) || {})) watch(); paintBehind(); })
+      .catch(function(){});
+  }
+
   function render(d){
     if (!panel) return;
     panel.textContent = '';
@@ -1607,6 +1638,10 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     var n = d.count || 0;
     meta.textContent = n + (n === 1 ? ' unread item' : ' unread items')
       + (when ? ', summarized ' + when : '');
+    behindNote = document.createElement('span');
+    behindNote.className = 'sold';
+    meta.appendChild(behindNote);
+    paintBehind();
     var again = document.createElement('button');
     again.type = 'button';
     again.className = 'rest';
@@ -1614,6 +1649,9 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     again.title = 'summarize the backlog as it stands now';
     again.addEventListener('click', function(){ start(mine); waiting(); });
     meta.appendChild(again);
+    // What the tab held may predate a sweep or two, and the note is the whole
+    // point of being told so: ask the server before believing the count.
+    recount();
     var body = document.createElement('div');
     body.className = 'body';
     // Server-rendered from Markdown by the same renderer the cards use, which
@@ -1652,8 +1690,10 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
         if (!d || !d.html) throw 0;
         if (d.lang && d.lang !== SUM_LANG) throw 0; // written in the other one
         hold(app, d);
+        behind[app] = d['new'] || 0;
         setState(app, 'done');
         if (reveal && app === mine){ render(d); show(true); return; }
+        paintBehind();
         if (was === 'running') toast(named(app) + "'s summary is ready");
       })
       .catch(function(){
@@ -1684,6 +1724,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
       }
       if (j.state === 'running'){ going = true; setState(app, 'running'); return; }
       if (j.state === 'done'){
+        behind[app] = j['new'] || 0;
         if (was !== 'done') collect(app, was === 'running' && app === mine && open);
         return;
       }
@@ -1760,6 +1801,13 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     .then(function(res){ return res.json(); })
     .then(function(d){ arrive((d && d.jobs) || {}); })
     .catch(function(){ arrive({}); });
+
+  // A briefing left open outlives sweeps. Coming back to the tab is the moment
+  // to ask again how far behind it has fallen, rather than putting a timer on a
+  // page that is otherwise quiet once it has loaded.
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden && open) recount();
+  });
 
   // The language setting changed. Nothing already written is rewritten — a
   // briefing is in the language it was written in — so the icons re-read
