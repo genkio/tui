@@ -10,7 +10,7 @@ user is watching:
 ```sh
 tmux send-keys -t tmp:1.0 C-c
 tmux send-keys -t tmp:1.0 'make' Enter          # waits for the build to finish
-tmux send-keys -t tmp:1.0 './tui serve --sync-dir /Users/wu/box/tui' Enter
+tmux send-keys -t tmp:1.0 './tui serve --sync-dir ~/box/tui' Enter
 ```
 
 `make` builds `./tui` plus every plugin binary. The `--sync-dir` flag is what
