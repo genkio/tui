@@ -60,6 +60,12 @@ func (l *pageLoader) load() (*template.Template, error) {
 	return template.New("page").Parse(string(src))
 }
 
+// allApp is the whole feed: the first chip in the row, which is the way back
+// from a pick, and the key its sparkle asks for a briefing under. It is not a
+// service and never will be — no plugin is called this — so it can stand for
+// every one of them without colliding with any.
+const allApp = "all"
+
 // feedSel is the chip that is on. At most one is, because a pick is a page load
 // of that chip's items and nothing else: Kind is "app", "type", or "" for the
 // whole list.
@@ -225,16 +231,16 @@ type pageData struct {
 	// Which way the feed runs, and the page that turns it around. SortHref is
 	// blank on the views the toggle has no say over (saved, blocked), which is
 	// how the template knows not to draw it.
-	Asc       bool
-	SortHref  string
-	Warn      string
-	HasApps   bool
-	Sel       string // the chip that is on ("app:x"), blank for the whole list
-	ClearHref string // ...and where to go to put it back, blank when none is on
-	// Which source's briefing this page has room for, and whether to open it on
-	// arrival (?summary=1, which is where a done icon on another page sends you).
-	// A briefing goes in place of the cards it is of, so the page that can hold
-	// one is the page showing that source's cards and no others.
+	Asc      bool
+	SortHref string
+	Warn     string
+	HasApps  bool
+	Sel      string // the chip that is on ("app:x"), blank for the whole list
+	// Whose briefing this page has room for — a source, or "all" for the whole
+	// feed — and whether to open it on arrival (?summary=1, which is where a done
+	// icon on another page sends you). A briefing goes in place of the cards it is
+	// of, so the page that can hold one is the page showing those cards and no
+	// others.
 	SummaryApp  string
 	SummaryOpen bool
 	Filters     []filterGroup
@@ -412,18 +418,19 @@ func buildPageData(in pageInput) pageData {
 	}
 	filters := chipRow(tally, in.apps, bad, in.sel, in.query)
 	subs := subChips(tally, in.sel, in.query)
-	clear := ""
-	if in.sel.on() {
-		clear = chipHref(in.query, feedSel{})
-	}
 
-	// Only on the feed, and only under a source pick: the briefing goes in place
-	// of that source's cards, which is the one thing the saved and blocked lists
-	// and a single item's page do not have. in.apps is what tells them apart —
-	// only the feed is given the logged-in services.
+	// Only on the feed, and only where the cards on the page are the ones a
+	// briefing would be of: a source pick, or no pick at all, which is the whole
+	// feed and the whole backlog. in.apps is what tells the feed from the saved
+	// and blocked lists and a single item's page — only the feed is given the
+	// logged-in services.
 	summaryApp := ""
-	if len(in.apps) > 0 && in.sel.Kind == "app" {
+	switch {
+	case len(in.apps) == 0:
+	case in.sel.Kind == "app":
 		summaryApp = in.sel.Key
+	case !in.sel.on():
+		summaryApp = allApp
 	}
 
 	updated := ""
@@ -484,7 +491,6 @@ func buildPageData(in pageInput) pageData {
 		Filters:       filters,
 		Subs:          subs,
 		Sel:           in.sel.String(),
-		ClearHref:     clear,
 		SummaryApp:    summaryApp,
 		SummaryOpen:   summaryApp != "" && in.summaryOpen,
 		Asc:           in.asc,
@@ -854,6 +860,13 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 			}
 		}
 		sortChips(appChips)
+		// The whole feed, first in the row: it is the way back from a pick, and its
+		// sparkle briefs every source at once — the one briefing that can say what
+		// the day was about rather than what one service's day was about.
+		appChips = append([]filterChip{{
+			Kind: allApp, Key: allApp, Label: allApp, Count: t.unread(),
+			Says: "the whole feed", Summarize: t.unread() > 0,
+		}}, appChips...)
 	} else if len(t.apps) > 1 {
 		for a, n := range t.apps {
 			appChips = append(appChips, filterChip{
@@ -862,6 +875,11 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 			})
 		}
 		sortChips(appChips)
+		// The saved and blocked lists narrow by source too, and the way back from
+		// one is the same chip. Nothing to brief there: neither list is a backlog.
+		appChips = append([]filterChip{{
+			Kind: allApp, Key: allApp, Label: allApp, Count: t.unread(),
+		}}, appChips...)
 	}
 	if len(appChips) > 0 {
 		out = append(out, filterGroup{Chips: appChips})
@@ -880,6 +898,13 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 	for i := range out {
 		for j := range out[i].Chips {
 			c := &out[i].Chips[j]
+			// The whole feed is not a pick but the absence of one, so it is on
+			// exactly when nothing else is, and it goes where a cleared pick went.
+			if c.Kind == allApp {
+				c.On = !sel.on()
+				c.Href = chipHref(q, feedSel{})
+				continue
+			}
 			c.On = sel.Kind == c.Kind && sel.Key == c.Key
 			c.Href = chipHref(q, feedSel{Kind: c.Kind, Key: c.Key})
 			// Tapping the chip that is on puts the whole list back.
@@ -1068,7 +1093,10 @@ func parseSel(q url.Values) feedSel {
 	if q.Get("x") == "foryou" {
 		return feedSel{Kind: "app", Key: xForYouApp}
 	}
-	if a := q.Get("app"); a != "" {
+	// ?app=all is the whole feed, which is the absence of a pick rather than a
+	// source called "all": the chip links to "/", but a URL typed or kept by hand
+	// should land on the same page rather than on a source nobody has.
+	if a := q.Get("app"); a != "" && a != allApp {
 		sel := feedSel{Kind: "app", Key: a}
 		if subApps[a] {
 			sel.Sub = q.Get("sub")

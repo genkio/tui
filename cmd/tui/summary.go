@@ -40,6 +40,14 @@ const (
 	// handful of apps, so this is a bound against a stuck queue rather than a
 	// limit anyone should meet.
 	summaryQueue = 12
+	// ...and the one exception to "the whole backlog": the whole feed's briefing
+	// reads at most this many items, taken from the end you are reading from. A
+	// source's backlog is one service's day and is left whole; every source's at
+	// once is the sum of all of them, which is the run most likely to outrun the
+	// model, cost the most and say the least per token. What it read is exactly
+	// what mark-all clears under it, so the cap never leaves you having cleared
+	// something you were not told about.
+	summaryAllCap = 200
 )
 
 // The languages a briefing can be asked for, and how each one is asked for.
@@ -79,10 +87,14 @@ func summaryLang(want string) string {
 // a briefing that has been overtaken should say so instead of reading as the
 // last word on a backlog that has moved on. seen is the ids it was written
 // from, which is what makes that count honest — see feedCache.unreadNew.
+// Backlog is how deep the pick was when the run started, set only when it was
+// deeper than the briefing read (see summaryAllCap): "200 of 356" is the honest
+// way to say that, and a briefing that read everything says nothing about it.
 type summaryJob struct {
 	State     string `json:"state"` // "running", "done" or "failed"
 	Lang      string `json:"lang,omitempty"`
 	Count     int    `json:"count,omitempty"`
+	Backlog   int    `json:"backlog,omitempty"`
 	New       int    `json:"new,omitempty"`
 	HTML      string `json:"html,omitempty"`
 	Err       string `json:"error,omitempty"`
@@ -94,10 +106,14 @@ type summaryJob struct {
 // write it in, since the language is chosen when the button is tapped and the
 // run may not start for minutes. An id makes it one item's discussion rather
 // than a source's backlog.
+// asc is which end of the backlog the page is reading from, which is the end a
+// capped briefing is taken from: told what the 200 you are about to read say,
+// not what 200 you will not reach for days say.
 type summaryAsk struct {
 	app  string
 	id   string
 	lang string
+	asc  bool
 }
 
 func (a summaryAsk) key() string { return summaryKey(a.app, a.id) }
@@ -165,7 +181,7 @@ func (s *summarizer) serve(ctx context.Context) {
 // start puts an ask in the queue, unless one is already going for it. The
 // running state is written before the queueing, so a control that has just been
 // tapped reads as busy however long the queue is.
-func (s *summarizer) start(app, id, lang string) error {
+func (s *summarizer) start(app, id, lang string, asc bool) error {
 	lang = summaryLang(lang)
 	key := summaryKey(app, id)
 	s.mu.Lock()
@@ -176,7 +192,7 @@ func (s *summarizer) start(app, id, lang string) error {
 	s.jobs[key] = summaryJob{State: "running", Lang: lang}
 	s.mu.Unlock()
 	select {
-	case s.queue <- summaryAsk{app: app, id: id, lang: lang}:
+	case s.queue <- summaryAsk{app: app, id: id, lang: lang, asc: asc}:
 		return nil
 	default:
 		s.mu.Lock()
@@ -198,7 +214,7 @@ func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
 // it stood when the chip was tapped, since a queue can hold a source for
 // minutes and the fresher list is the one worth reading.
 func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
-	items := summaryItems(s.cache.unread(time.Now(), ""), ask.app)
+	items, backlog := summaryItems(s.cache.unread(time.Now(), ""), ask.app, ask.asc)
 	if len(items) == 0 {
 		return summaryJob{State: "failed", Lang: ask.lang, Err: "nothing unread there any more"}
 	}
@@ -209,12 +225,19 @@ func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
 		}
 		return summaryJob{State: "failed", Lang: ask.lang, Err: err.Error()}
 	}
+	// By feed key rather than by id: ids collide between services (a numeric
+	// inoreader id and an x post id), and the whole feed's briefing reads them
+	// side by side.
 	seen := make(map[string]bool, len(items))
 	for _, it := range items {
-		seen[it.ID] = true
+		seen[core.Key(it.App, it.ID)] = true
+	}
+	capped := 0
+	if backlog > len(items) {
+		capped = backlog
 	}
 	return summaryJob{
-		State: "done", Lang: ask.lang, Count: len(items), seen: seen,
+		State: "done", Lang: ask.lang, Count: len(items), Backlog: capped, seen: seen,
 		// The same Markdown renderer the cards use, so a briefing's links, lists
 		// and tables come out as the rest of the page's prose does and the model's
 		// output cannot bring HTML of its own with it.
@@ -300,6 +323,9 @@ func (s *summarizer) overtaken(key string, j summaryJob) int {
 	if j.State != "done" || s.cache == nil || len(j.seen) == 0 {
 		return 0
 	}
+	if key == allApp {
+		return s.cache.unreadNew("", j.seen) // every source, the way the briefing read them
+	}
 	return s.cache.unreadNew(key, j.seen)
 }
 
@@ -352,18 +378,37 @@ func startSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
 		startAsk(w, r, sum, app, id)
 		return
 	}
-	if len(summaryItems(sum.cache.unread(time.Now(), ""), app)) == 0 {
+	if items, _ := summaryItems(sum.cache.unread(time.Now(), ""), app, false); len(items) == 0 {
 		http.Error(w, "nothing unread there to summarize", http.StatusNotFound)
 		return
 	}
 	startAsk(w, r, sum, app, "")
 }
 
+// covered is what a finished briefing read, as feed keys, which is what mark-all
+// clears under it. Nil for a job that never finished or was never asked for.
+func (s *summarizer) covered(key string) map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j, ok := s.jobs[key]
+	if !ok || j.State != "done" {
+		return nil
+	}
+	out := make(map[string]bool, len(j.seen))
+	for k := range j.seen {
+		out[k] = true
+	}
+	return out
+}
+
 // startAsk queues the run and answers with the job. Which language to write it
 // in is the browser's setting, sent with the ask rather than kept here: one
 // server serves whoever opens it, and the choice belongs to the person reading.
+// Which end of the feed the page is reading from rides along for the same
+// reason the language does: it is the browser's setting, and it decides which
+// slice a capped briefing takes.
 func startAsk(w http.ResponseWriter, r *http.Request, sum *summarizer, app, id string) {
-	if err := sum.start(app, id, r.FormValue("lang")); err != nil {
+	if err := sum.start(app, id, r.FormValue("lang"), r.FormValue("order") == "asc"); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -402,10 +447,26 @@ func writeSummaryJSON(w http.ResponseWriter, code int, j summaryJob) {
 // publication order, because "what happened" is a sequence, and it reads all of
 // it, because a briefing that covered the newest slice would be a briefing with
 // a hole in it that nothing on the page could tell you about.
-func summaryItems(backlog []core.Item, app string) []core.Item {
-	items := selectItems(backlog, feedSel{Kind: "app", Key: app})
+// The whole feed asks for no narrowing at all: every source's backlog, merged
+// into one reading rather than briefed a service at a time. That one is capped
+// (summaryAllCap) and takes its slice from the end the page is reading from, so
+// the briefing is of the items you are about to reach; it reads them oldest
+// first either way, because "what happened" is a sequence whichever end you
+// started at. The second return is how deep the pick was, which is what makes
+// "200 of 356" sayable.
+func summaryItems(backlog []core.Item, app string, asc bool) ([]core.Item, int) {
+	sel := feedSel{Kind: "app", Key: app}
+	if app == allApp {
+		sel = feedSel{}
+	}
+	items := selectItems(backlog, sel)
+	deep := len(items)
+	if app == allApp && deep > summaryAllCap {
+		sortItems(items, asc)
+		items = items[:summaryAllCap]
+	}
 	sortItems(items, true)
-	return items
+	return items, deep
 }
 
 // summaryPrompt writes the briefing request: the instructions, then the batch,
@@ -416,7 +477,7 @@ func summaryPrompt(app, lang string, items []core.Item) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `Summarize an unread feed backlog for the person who has to get through it.
 
-Source: %s. %d unread items follow, oldest first.
+%s. %d unread items follow, oldest first.
 
 Answer from the items below alone: run no commands, open no files, fetch
 nothing. Never invent an item, a link, a name or a fact that is not in them.
@@ -445,7 +506,16 @@ Write Markdown:
 - No preamble, no sign-off, no closing summary of the summary, no code fence
   around the whole thing, and no heading above level two.
 
-`, appSaying(app), len(items), summaryLangs[summaryLang(lang)])
+`, summarySaying(app), len(items), summaryLangs[summaryLang(lang)])
+
+	if app == allApp {
+		b.WriteString(`This batch is every source at once. Group it by what the items are about
+rather than by which service they came from — a section per service would be
+the chip row over again. Where the same story ran in more than one place, say so
+in the one theme instead of repeating it.
+
+`)
+	}
 
 	for i, it := range items {
 		fmt.Fprintf(&b, "--- item %d\n", i+1)
@@ -535,6 +605,14 @@ card, under the item it is about:
 	n := 0
 	hnWrite(&b, th.Replies, 1, &n)
 	return b.String()
+}
+
+// summarySaying names what the briefing is of, in the prompt's opening line.
+func summarySaying(app string) string {
+	if app == allApp {
+		return "Every source at once: the whole feed"
+	}
+	return "Source: " + appSaying(app)
 }
 
 // oneLine keeps a title on the line the block gives it, so a title carrying

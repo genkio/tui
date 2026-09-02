@@ -191,16 +191,17 @@ func (c *feedCache) unreadApp(app string) (int, bool) {
 	return n, c.status[app].Capped
 }
 
-// unreadNew counts one service's unread items that seen does not know about,
-// which is how a briefing tells whether it has been overtaken: comparing totals
-// could not, since reading a few and fetching a few leaves the count where it
-// was. seen holds the ids the briefing was written from.
+// unreadNew counts the unread items that seen does not know about, which is how
+// a briefing tells whether it has been overtaken: comparing totals could not,
+// since reading a few and fetching a few leaves the count where it was. seen
+// holds the feed keys the briefing was written from, and an empty app is every
+// source at once, for the briefing that read the whole feed.
 func (c *feedCache) unreadNew(app string, seen map[string]bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := 0
 	for _, e := range c.entries {
-		if !e.Read && e.App == app && !seen[e.ID] {
+		if !e.Read && (app == "" || e.App == app) && !seen[core.Key(e.App, e.ID)] {
 			n++
 		}
 	}

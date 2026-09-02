@@ -1592,9 +1592,9 @@ func TestCardFilters(t *testing.T) {
 			t.Errorf("feed page missing %s:\n%s", want, feed)
 		}
 	}
-	// Nothing is on, so there is nothing to clear.
-	if strings.Contains(feed, `id="fclear"`) {
-		t.Errorf("the clear chip belongs to a page that picked something: %s", feed)
+	// Nothing is picked, so the whole feed's own chip is the one that is on.
+	if !strings.Contains(feed, `href="/" data-kind="all" data-key="all" data-on="1"`) {
+		t.Errorf("the all chip should be on when nothing narrows the feed: %s", feed)
 	}
 }
 
@@ -1636,12 +1636,13 @@ func TestPickIsServedNotHidden(t *testing.T) {
 	if !strings.Contains(p, `<span id="unreadn">3</span>`) {
 		t.Errorf("the header should count all three, not the two picked: %s", p)
 	}
-	// The chip that is on links back to everything, as does the clear chip.
+	// The chip that is on links back to everything, as does the all chip, which
+	// is the way back now that "clear" is gone.
 	if !strings.Contains(p, `href="/" data-kind="app" data-key="reddit" data-on="1"`) {
 		t.Errorf("tapping the picked chip should put the whole list back: %s", p)
 	}
-	if !strings.Contains(p, `class="fchip fclear" href="/"`) {
-		t.Errorf("expected a clear chip: %s", p)
+	if !strings.Contains(p, `href="/" data-kind="all" data-key="all" data-on="0"`) {
+		t.Errorf("the all chip should be off and lead back to everything: %s", p)
 	}
 	// One at a time: picking another app replaces this pick rather than adding to it.
 	if !strings.Contains(p, `href="/?app=x" data-kind="app" data-key="x"`) {
@@ -1936,8 +1937,13 @@ func TestDeckChipsAreLinksToo(t *testing.T) {
 
 func TestMarkAllClearsTheServerSelection(t *testing.T) {
 	page := renderPage(t, []core.Item{{App: "x", ID: "1", Title: "a"}}, []string{"x"}, nil, "following", "")
-	if !strings.Contains(page, `if((SWIPE || SUMMARY_ON) && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + markAllScope() + ' read?')) return;`) {
+	if !strings.Contains(page, `if((SWIPE || SUMMARY_ON) && !window.confirm(asks)) return;`) {
 		t.Error("deck mark-all should ask before changing any card")
+	}
+	// Under a briefing it clears what that briefing read, which is not the pick
+	// behind it once the whole feed's cap has bitten.
+	if !strings.Contains(page, `if(BRIEF) fd.append('brief', BRIEF.key);`) {
+		t.Error("mark-all under a briefing should name the briefing")
 	}
 	if !strings.Contains(page, `fetch('/mark-all', {method:'POST', body:fd})`) {
 		t.Error("mark-all should ask the server to clear the full selection")
@@ -2180,7 +2186,7 @@ func TestMarkAllHandlerClearsFullFilteredBacklog(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	handleMarkAll(rec, req, cache, flusher)
+	handleMarkAll(rec, req, cache, flusher, newSummarizer(cache))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":2`) {
 		t.Fatalf("got %d %s, want both filtered items marked", rec.Code, rec.Body.String())
 	}
@@ -2215,7 +2221,7 @@ func TestMarkAllHandlerReadsBrowserFormData(t *testing.T) {
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	rec := httptest.NewRecorder()
 
-	handleMarkAll(rec, req, cache, flusher)
+	handleMarkAll(rec, req, cache, flusher, newSummarizer(cache))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":1`) {
 		t.Fatalf("got %d %s, want only bilibili marked", rec.Code, rec.Body.String())
 	}
@@ -2583,5 +2589,51 @@ func TestSourceChipFollowsReadingUnderASubcategory(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %s from the recount", want)
 		}
+	}
+}
+
+// Mark-all under a briefing clears what that briefing read and nothing else:
+// the whole feed's is capped, so the pick behind it holds items it never
+// mentioned, and items that landed since it ran were never in it either.
+func TestMarkAllUnderABriefingClearsOnlyWhatItRead(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "summarized", At: now.Add(-2 * time.Hour)},
+		{App: "x", ID: "2", Title: "summarized too", At: now.Add(-time.Hour)},
+	}, now)
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) { return "a briefing", nil })
+	post(t, sum, "app=all")
+	if j := settled(t, sum, allApp); j.Count != 2 {
+		t.Fatalf("job = %+v, want both items read", j)
+	}
+	// A sweep lands one after the run: nobody has been told about it.
+	cache.upsert([]core.Item{{App: "folo", ID: "3", Title: "arrived after", At: now}}, now.Add(time.Minute))
+
+	flusher := &markFlusher{cache: cache, wake: make(chan struct{}, 1)}
+	form := url.Values{"brief": {allApp}}
+	req := httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handleMarkAll(rec, req, cache, flusher, sum)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":2`) {
+		t.Fatalf("got %d %s, want the two it read marked", rec.Code, rec.Body.String())
+	}
+	left := cache.unread(now.Add(time.Minute), "")
+	if len(left) != 1 || left[0].ID != "3" {
+		t.Fatalf("unread after = %+v, want the item that arrived since", left)
+	}
+
+	// A briefing the server no longer has is a refusal, not a feed cleared by
+	// something nobody read.
+	req = httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader("brief=folo"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	handleMarkAll(rec, req, cache, flusher, sum)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("got %d %s, want 404", rec.Code, rec.Body.String())
+	}
+	if len(cache.unread(now.Add(time.Minute), "")) != 1 {
+		t.Error("a refused mark-all must clear nothing")
 	}
 }

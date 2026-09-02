@@ -151,7 +151,7 @@ func TestForYouBacklogSummarizesAndClearsOnItsOwn(t *testing.T) {
 		{App: xForYouApp, ID: "3", Title: "for you as well"},
 	}, now)
 
-	brief := summaryItems(cache.unread(now, ""), xForYouApp)
+	brief, _ := summaryItems(cache.unread(now, ""), xForYouApp, false)
 	if len(brief) != 2 {
 		t.Fatalf("briefing covers %d items, want For You's two: %+v", len(brief), brief)
 	}
@@ -170,7 +170,7 @@ func TestForYouBacklogSummarizesAndClearsOnItsOwn(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
-	handleMarkAll(rec, req, cache, flusher)
+	handleMarkAll(rec, req, cache, flusher, newSummarizer(cache))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":2`) {
 		t.Fatalf("mark-all over For You = %d %s", rec.Code, rec.Body.String())
 	}

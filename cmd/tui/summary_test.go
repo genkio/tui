@@ -300,7 +300,7 @@ func TestSummarizeRunsOneAtATime(t *testing.T) {
 	// the whole of what was asked for.
 	idle := newSummarizer(cache)
 	for i := 0; i < 3; i++ {
-		if err := idle.start("reddit", "", "en"); err != nil {
+		if err := idle.start("reddit", "", "en", false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -310,9 +310,9 @@ func TestSummarizeRunsOneAtATime(t *testing.T) {
 
 	// The bound is against a stuck queue, not something anyone should meet.
 	for i := 0; i < summaryQueue; i++ {
-		_ = idle.start("app"+strconv.Itoa(i), "", "en")
+		_ = idle.start("app"+strconv.Itoa(i), "", "en", false)
 	}
-	if err := idle.start("one too many", "", "en"); err == nil {
+	if err := idle.start("one too many", "", "en", false); err == nil {
 		t.Error("a full queue should say so rather than growing forever")
 	}
 }
@@ -356,7 +356,7 @@ func TestSummaryItemsTakesTheWholeBacklog(t *testing.T) {
 	}
 	backlog = append(backlog, core.Item{App: "folo", ID: "elsewhere", Title: "another source"})
 
-	got := summaryItems(backlog, "inoreader")
+	got, _ := summaryItems(backlog, "inoreader", false)
 	if len(got) != 640 {
 		t.Fatalf("items = %d, want all 640", len(got))
 	}
@@ -521,10 +521,13 @@ func TestSummarizeIconOnEverySourceWithABacklog(t *testing.T) {
 	if strings.Contains(whole, `id="fsum-douban"`) {
 		t.Error("nothing unread is nothing to summarize")
 	}
-	// The whole merged feed has no cards of one source to put a briefing in place
-	// of, so the panel waits for a pick.
-	if strings.Contains(whole, `id="summary"`) {
-		t.Error("no panel without a source pick")
+	// The whole feed is a chip of its own now, first in the row, and its cards
+	// are what its own briefing goes in place of.
+	if !strings.Contains(whole, `<div class="summary" id="summary" data-app="all" data-open="0">`) {
+		t.Errorf("the unpicked feed should hold the whole feed's panel, shut:\n%s", whole)
+	}
+	if !strings.Contains(whole, `id="fsum-all"`) {
+		t.Error("the all chip should offer a briefing of everything")
 	}
 
 	picked := renderInput(t, pageInput{
@@ -760,5 +763,128 @@ func TestSummarizeItemCarriesTheFetchFailure(t *testing.T) {
 	j := settledKey(t, sum, summaryKey("inoreader", "77"))
 	if j.State != "failed" || !strings.Contains(j.Err, "could not reach Hacker News") {
 		t.Errorf("job = %+v, want the fetch's own words", j)
+	}
+}
+
+// The whole feed is a briefing like any other source's, and the only one that
+// can say what the day was about rather than what one service's day was about.
+func TestSummarizeTheWholeFeed(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "go 1.30 is out", Source: "r/golang", At: now.Add(-2 * time.Hour)},
+		{App: "folo", ID: "2", Title: "a release post", At: now.Add(-time.Hour)},
+		{App: "x", ID: "3", Body: "shipping it", Source: "@someone", At: now.Add(-30 * time.Minute)},
+	}, now)
+
+	prompts := make(chan string, 1)
+	sum := testSummarizer(t, cache, func(_ context.Context, p string) (string, error) {
+		prompts <- p
+		return "## releases\n\n- [go 1.30](/item?app=reddit&id=1) landed", nil
+	})
+
+	if rec := post(t, sum, "app=all"); rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	j := settled(t, sum, "all")
+	if j.State != "done" || j.Count != 3 {
+		t.Fatalf("job = %+v, want a briefing over all three", j)
+	}
+	p := <-prompts
+	// Every source at once, oldest first, and told to read it as one feed rather
+	// than a section per service.
+	for _, want := range []string{
+		"Every source at once: the whole feed. 3 unread items follow",
+		"This batch is every source at once.",
+		"go 1.30 is out", "a release post", "shipping it",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, p)
+		}
+	}
+
+	// Overtaken by any source, not just one: a sweep that lands x's items leaves
+	// a whole-feed briefing as far behind as one that lands reddit's.
+	cache.upsert([]core.Item{{App: "douban", ID: "9", Title: "later", At: now}}, now.Add(time.Minute))
+	if got, _ := sum.job("all"); got.New != 1 {
+		t.Errorf("new = %d, want the item that arrived after it", got.New)
+	}
+}
+
+// Ids collide between services, so a whole-feed briefing has to remember which
+// service each one came from or an unread item is counted as one it read.
+func TestWholeFeedIsNotOvertakenByAnIdItAlreadyRead(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "reddit's one", At: now.Add(-time.Hour)},
+		{App: "folo", ID: "1", Title: "folo's one", At: now.Add(-time.Hour)},
+	}, now)
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
+		return "read", nil
+	})
+	post(t, sum, "app=all")
+	if j := settled(t, sum, "all"); j.State != "done" || j.Count != 2 || j.New != 0 {
+		t.Errorf("job = %+v, want both items read and nothing left behind", j)
+	}
+}
+
+// The whole feed's briefing is the one that is capped, and it takes its slice
+// from the end the page is reading from: told about the items you are about to
+// reach, not the ones you will not get to for days.
+func TestWholeFeedBriefingIsCappedFromTheEndYouRead(t *testing.T) {
+	now := time.Now()
+	var backlog []core.Item
+	for i := 0; i < summaryAllCap+40; i++ {
+		backlog = append(backlog, core.Item{
+			App: "reddit", ID: strconv.Itoa(i), Title: "item " + strconv.Itoa(i),
+			At: now.Add(-time.Duration(i) * time.Minute), // 0 is newest
+		})
+	}
+
+	// Newest first, which is what the feed reads as by default.
+	got, deep := summaryItems(backlog, allApp, false)
+	if len(got) != summaryAllCap || deep != summaryAllCap+40 {
+		t.Fatalf("read %d of %d, want %d of %d", len(got), deep, summaryAllCap, summaryAllCap+40)
+	}
+	// The slice is the newest ones, and it still reads oldest first inside.
+	if got[0].ID != strconv.Itoa(summaryAllCap-1) || got[len(got)-1].ID != "0" {
+		t.Errorf("runs %s..%s, want the newest %d oldest-first", got[0].ID, got[len(got)-1].ID, summaryAllCap)
+	}
+
+	// Oldest first, and the other end of the same backlog is the one it reads.
+	got, _ = summaryItems(backlog, allApp, true)
+	if got[0].ID != strconv.Itoa(summaryAllCap+39) || got[len(got)-1].ID != "40" {
+		t.Errorf("runs %s..%s, want the oldest %d oldest-first", got[0].ID, got[len(got)-1].ID, summaryAllCap)
+	}
+
+	// A source's own backlog is left whole: one service's day is not the sum of
+	// every service's, and it is the sum that needed a bound.
+	whole, _ := summaryItems(backlog, "reddit", false)
+	if len(whole) != summaryAllCap+40 {
+		t.Errorf("a source read %d items, want all %d", len(whole), summaryAllCap+40)
+	}
+}
+
+// ...and the job says so, so the panel can put "200 of 240" over the prose.
+func TestCappedBriefingSaysHowDeepTheBacklogWas(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	var items []core.Item
+	for i := 0; i < summaryAllCap+3; i++ {
+		items = append(items, core.Item{App: "reddit", ID: strconv.Itoa(i), Title: "t", At: now.Add(-time.Duration(i) * time.Minute)})
+	}
+	cache.upsert(items, now)
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) { return "a briefing", nil })
+
+	post(t, sum, "app=all")
+	j := settled(t, sum, allApp)
+	if j.Count != summaryAllCap || j.Backlog != summaryAllCap+3 {
+		t.Errorf("job = %+v, want %d of %d", j, summaryAllCap, summaryAllCap+3)
+	}
+	// A briefing that read everything has nothing to say about it.
+	post(t, sum, "app=reddit")
+	if r := settled(t, sum, "reddit"); r.Backlog != 0 {
+		t.Errorf("backlog = %d, want 0 when nothing was left out", r.Backlog)
 	}
 }

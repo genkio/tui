@@ -163,7 +163,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handleMarkAll(w, r, cache, flusher)
+		handleMarkAll(w, r, cache, flusher, sum)
 	})
 	// How the page knows when a fetch it asked for has finished: a sweep can
 	// take minutes, so the alternative is guessing at a delay and reloading into
@@ -734,13 +734,30 @@ func handleUnmark(w http.ResponseWriter, r *http.Request, cache *feedCache) {
 	fmt.Fprintf(w, `{"ok":true,"changed":%t}`, changed)
 }
 
-func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flusher *markFlusher) {
+func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flusher *markFlusher, sum *summarizer) {
 	if err := r.ParseMultipartForm(1 << 20); err != nil && !errors.Is(err, http.ErrNotMultipart) {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
-	sel := parseSel(r.Form)
-	items := selectItems(cache.unread(time.Now(), ""), sel)
+	var items []core.Item
+	// With a briefing open, "all" is what that briefing read and nothing else:
+	// the whole feed's is capped, so the pick behind it can hold items it never
+	// mentioned, and clearing those would be clearing what you were never told
+	// about. Items that arrived since are left unread for the same reason.
+	if brief := strings.TrimSpace(r.FormValue("brief")); brief != "" {
+		covered := sum.covered(brief)
+		if covered == nil {
+			http.Error(w, "that briefing is no longer here", http.StatusNotFound)
+			return
+		}
+		for _, it := range cache.unread(time.Now(), "") {
+			if covered[core.Key(it.App, it.ID)] {
+				items = append(items, it)
+			}
+		}
+	} else {
+		items = selectItems(cache.unread(time.Now(), ""), parseSel(r.Form))
+	}
 	byApp := map[string][]string{}
 	for _, it := range items {
 		byApp[it.App] = append(byApp[it.App], it.ID)

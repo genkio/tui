@@ -167,7 +167,6 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
    worked, red means it didn't and this number is stale */
 .fchip .fn.ok{color:var(--ok);opacity:1}
 .fchip .fn.bad{color:var(--bad);opacity:1}
-.fclear{margin-left:auto;color:var(--accent)}
 /* A source with a backlog carries a second half: the chip picks, the icon beside
    it asks for a briefing of what the chip counts. The two are drawn as one pill
    with a divider rather than as two controls, because they are one thing — that
@@ -485,7 +484,7 @@ video.ffs{object-fit:cover !important}
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}{{if .ClearHref}}<a class="fchip fclear" href="{{.ClearHref}}" id="fclear">clear</a>{{end}}</div>
+{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
@@ -529,6 +528,14 @@ var ITEM_VIEW = document.getElementById('state').getAttribute('data-itemview') =
 // Set while the briefing is up in place of the cards. The cards are still on the
 // page, hidden, and a hidden card must not count as one you scrolled past.
 var SUMMARY_ON = false;
+// ...and what it read, while it is up: the key its job is filed under and how
+// many items it covered. Mark-all follows it rather than the pick, since the
+// whole feed's briefing is capped and the pick behind it can hold items it never
+// mentioned. Null whenever no briefing is up.
+var BRIEF = null;
+// Which end of the feed this page is reading from. It rides with an ask for a
+// briefing, because a capped one is taken from the end you are reading.
+var FEED_ASC = {{if .Asc}}true{{else}}false{{end}};
 // Reading = scrolling: the moment a card is fully off-screen (its bottom edge
 // clears the top of the viewport) it is marked read and muted in place — it
 // stays in the list, greyed, so scrolling back up shows what you've read.
@@ -626,12 +633,27 @@ function markAllScope(){
   var app = new URLSearchParams(location.search).get('app') || '';
   return SUMMARY_ON && app ? ' in ' + app : ' in this feed';
 }
+// How many the button is about to clear: under a briefing, the items that
+// briefing read, which is not the pick behind it once the whole feed's cap has
+// bitten. Everywhere else, the pick the server counted.
+function markAllCount(){
+  var b = document.getElementById('markAll');
+  if(BRIEF) return BRIEF.count;
+  return b ? (parseInt(b.dataset.total, 10) || 0) : 0;
+}
 function labelMarkAll(){
   var b = document.getElementById('markAll');
   if(!b) return;
-  var total = parseInt(b.dataset.total, 10) || 0;
-  if(SWIPE) b.title = 'mark all ' + total + ' items' + markAllScope() + ' read';
-  else b.textContent = '✓ mark all ' + total + ' read';
+  var total = markAllCount();
+  if(BRIEF){
+    var says = 'mark the ' + total + (total === 1 ? ' item' : ' items') + ' this briefing read as read';
+    if(SWIPE) b.title = says;
+    else b.textContent = "✓ mark the briefing's " + total + " read";
+    b.title = says;
+    return;
+  }
+  b.title = 'mark all ' + total + ' items' + markAllScope() + ' read';
+  if(!SWIPE) b.textContent = '✓ mark all ' + total + ' read';
 }
 function decBulkCount(n){
   var b = document.getElementById('markAll');
@@ -667,7 +689,11 @@ function recountChips(){
     var n = chip.querySelector('.fn'), base = parseInt(chip.dataset.n0, 10);
     if(!n || isNaN(base)) return;
     var group = gone[chip.dataset.kind];
-    var off = chip.dataset.kind === 'x' ? gone.all : (group && group[chip.dataset.key] || 0);
+    // The whole feed's chip and For You's both count every card on the page:
+    // one because it stands for all of them, the other because its page is
+    // nothing else.
+    var whole = chip.dataset.kind === 'x' || chip.dataset.kind === 'all';
+    var off = whole ? gone.all : (group && group[chip.dataset.key] || 0);
     n.textContent = Math.max(0, base - off);
   });
 }
@@ -1368,13 +1394,19 @@ document.addEventListener('click', function(e){
 // not affect which items belong to it.
 var markAllBtn = document.getElementById('markAll');
 if(markAllBtn) markAllBtn.addEventListener('click', function(){
-  var total = parseInt(markAllBtn.dataset.total, 10) || 0;
-  if((SWIPE || SUMMARY_ON) && !window.confirm('Mark all ' + total + (total === 1 ? ' item' : ' items') + markAllScope() + ' read?')) return;
+  var total = markAllCount();
+  var asks = BRIEF
+    ? 'Mark the ' + total + (total === 1 ? ' item' : ' items') + ' this briefing read as read?'
+    : 'Mark all ' + total + (total === 1 ? ' item' : ' items') + markAllScope() + ' read?';
+  if((SWIPE || SUMMARY_ON) && !window.confirm(asks)) return;
   markAllBtn.disabled = true;
   if(flushTimer) clearTimeout(flushTimer);
   pending = {};
   var fd = new FormData(), q = new URLSearchParams(location.search);
-  ['app', 'type', 'x', 'sub'].forEach(function(k){ if(q.has(k)) fd.append(k, q.get(k)); });
+  // Under a briefing the server is asked for exactly what that briefing read;
+  // the pick's filters would be a different set of items and a wider one.
+  if(BRIEF) fd.append('brief', BRIEF.key);
+  else ['app', 'type', 'x', 'sub'].forEach(function(k){ if(q.has(k)) fd.append(k, q.get(k)); });
   markFlights.then(function(){ return fetch('/mark-all', {method:'POST', body:fd}); })
     .then(function(res){ return res.json(); })
     .then(function(d){ if(!d.ok) throw 0; location.reload(); })
@@ -1554,6 +1586,10 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   // what a briefing is, and how overtaken it is has to be asked about again
   // every time it is opened.
   var behind = {}, behindNote = null;
+  // How many items the briefing on screen read, which is what mark-all clears
+  // under it. Kept here rather than read back off the panel, since the panel is
+  // prose by the time it is on screen.
+  var covered = 0;
 
   // Kept per language as well as per source: a briefing is in the language it
   // was written in, so the two are separate things to have and switching back
@@ -1600,13 +1636,15 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   // that ended up above the viewport by that restore are exempted, since nobody
   // scrolled past them — the same care the page takes over a restored offset.
   // mark-all comes along into the briefing, relabelled: having read one and
-  // decided the items behind it are not worth opening, clearing that source's
-  // backlog is the next thing you do.
+  // decided the items behind it are not worth opening, clearing what it read is
+  // the next thing you do. What it read, not what the pick holds — the whole
+  // feed's briefing is capped, and the rest was never mentioned to you.
   function show(on){
     if (!panel) return;
     if (on && !open) atFeed = window.scrollY || 0;
     open = on;
     SUMMARY_ON = on;
+    BRIEF = on && covered ? {key: mine, count: covered} : null;
     document.body.classList.toggle('sumon', on);
     labelMarkAll();
     stamp(on);
@@ -1615,8 +1653,13 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     exemptBehind();
   }
 
+  // A run is in flight and there is nothing on screen that has been read yet, so
+  // mark-all goes back to meaning the pick until there is.
   function waiting(){
     if (!panel) return;
+    covered = 0;
+    BRIEF = null;
+    labelMarkAll();
     panel.textContent = '';
     var note = document.createElement('div');
     note.className = 'note';
@@ -1653,7 +1696,13 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     var when = '';
     try { when = new Date(d.generated).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(e){}
     var n = d.count || 0;
-    meta.textContent = n + (n === 1 ? ' unread item' : ' unread items')
+    covered = n;
+    if (open) BRIEF = {key: mine, count: n};
+    labelMarkAll();
+    // "200 of 356" when the cap bit: a briefing that read part of a backlog has
+    // to say so, or the next thing you do is act as though it read all of it.
+    var of = (d.backlog && d.backlog > n) ? ' of ' + d.backlog : '';
+    meta.textContent = n + of + (n === 1 && !of ? ' unread item' : ' unread items')
       + (when ? ', summarized ' + when : '');
     behindNote = document.createElement('span');
     behindNote.className = 'sold';
@@ -1684,6 +1733,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     var fd = new FormData();
     fd.append('app', app);
     fd.append('lang', SUM_LANG);
+    fd.append('order', FEED_ASC ? 'asc' : 'desc');
     fetch('/summarize', {method:'POST', body:fd})
       .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
       .then(function(){ watch(); })

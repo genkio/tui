@@ -207,13 +207,20 @@ at a time, and tapping it loads a page of that chip's items and nothing else
 (`?app=reddit`, `?type=video`), so the counts always say what a pick would bring
 rather than what is left of it. The header's own count stays every source's
 unread whichever chip is on — the chips already say what each one holds, and
-repeating the picked one there would leave nothing stating the whole. Tapping the
-chip that is on, or **clear**, brings the whole list back. Any marks that haven't
-reached the server yet are flushed before the page goes.
+repeating the picked one there would leave nothing stating the whole. Any marks
+that haven't reached the server yet are flushed before the page goes.
 
-A source chip with anything unread behind it is drawn as a **pair**: the label
-picks that source, and the ✦ beside it asks for a briefing of everything the
-chip counts (see **Summarizing a backlog**). A chip at zero is only a chip —
+The row opens with **all**, which is the whole feed: it counts every source's
+backlog, it is the chip that is on when nothing narrows the page, and it is the
+way back from a pick. (Tapping the picked chip a second time still does the same
+thing.) It replaces the old **clear** link, which sat at the far end of the row
+saying the same thing from further away.
+
+A chip with anything unread behind it is drawn as a **pair**: the label picks,
+and the ✦ beside it asks for a briefing of everything the chip counts (see
+**Summarizing a backlog**). That holds for **all** too — its ✦ briefs every
+source at once, which is the only briefing that can say what the day was about
+rather than what one service's day was about. A chip at zero is only a chip:
 there is nothing there to brief anybody on.
 
 x has two chips: its own in blue and a **black** one wearing the same `𝕏`. The
@@ -407,8 +414,8 @@ else, and the header's **unread** link goes back to the feed.
 
 ### Summarizing a backlog
 
-Every source chip with a backlog carries a ✦ beside it. Tapping it hands that
-source's unread items to [Codex](https://github.com/openai/codex) —
+Every chip with a backlog carries a ✦ beside it, **all** included. Tapping it
+hands that chip's unread items to [Codex](https://github.com/openai/codex) —
 `gpt-5.6-luna` at its default reasoning level — and nothing else happens to your
 page: the icon starts spinning and you carry on reading. That is the point of it.
 A run takes a minute or two, so waiting on a blank screen for one would be the
@@ -437,7 +444,7 @@ renamed in translation is one you cannot find again.
 
 A briefing goes in place of the cards it is of, so opening one from another page
 takes you to that source's own page first (`?app=reddit&summary=1`, which is a
-URL you can keep). Tapping the icon again puts the cards back exactly as they
+URL you can keep; the whole feed's is `?summary=1`). Tapping the icon again puts the cards back exactly as they
 were — hidden, not reloaded, so the scroll position, the players and anything
 part-expanded all survive the round trip. **again**, in the briefing's header,
 spends a fresh run over the backlog as it stands now.
@@ -450,7 +457,7 @@ no sooner — so a chip may spin for a while waiting its turn. Needs the `codex`
 CLI on the host's PATH and logged in; without it the icon says so and goes back
 to idle.
 
-Each briefing reads the source's **whole** backlog, oldest first — a summary of
+Each briefing reads the **whole** backlog behind its chip, oldest first — a summary of
 the newest slice would have a hole in it that nothing on the page could tell you
 about. There is no item limit; the only bound is a 700-character clip per item,
 which keeps one long article from spending the whole prompt, so a prompt grows
@@ -458,6 +465,19 @@ with the count and nothing else. A few hundred posts is tens of thousands of
 tokens (x at 303 items ≈ 36k, reddit at 380 ≈ 59k). A backlog deep enough to
 outrun the model's context fails as a job, carrying whatever codex said about
 it, rather than being quietly trimmed to fit.
+
+**all** is the one exception, and the only briefing with a limit: every source's
+backlog added together is the widest read the feed can ask for, so it stops at
+**200 items**, taken from the end you are reading from — newest first by default,
+oldest first if that is how the feed is set. A capped briefing says so in its
+header ("200 of 356 unread items"), because one that read part of a backlog and
+kept quiet about it is one you would act on as though it had read all of it. A
+source's own backlog is still read whole: one service's day is not the sum of
+every service's, and it was the sum that needed a bound.
+
+The whole feed's briefing is told to group by **what the items are about rather
+than which service they came from** — a section per source would be the chip row
+over again — and to say so once when the same story ran in more than one place.
 
 Finished briefings are kept in the tab's `sessionStorage`, so toggling the two
 views costs nothing and a reload still finds them — session rather than local
@@ -468,9 +488,13 @@ backlog behind itself would leave you unable to act on what it just told you.
 
 Deciding it read enough is your move, and **mark all read** stays on screen for
 it — the one control the briefing does not hide, still under the thumb in the
-deck. A briefing only ever covers one source, so that is all the button clears:
-it asks first, and names the source it is about to empty rather than saying "this
-feed", because the other sources' backlogs are none of this briefing's business.
+deck. With a briefing open it clears **exactly what that briefing read** — it
+asks first, and says so: "Mark the 200 items this briefing read as read?" That is
+narrower than the pick behind it in two ways that matter. The whole feed's
+briefing is capped, so the rest of the backlog was never mentioned to you, and
+whatever arrived in the sweep since it ran was not in it either. Both are left
+unread, which is the only reading of "mark all read" that cannot clear something
+you were never told about.
 
 ### Summarizing a discussion
 
