@@ -301,10 +301,13 @@ type cardData struct {
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
-	Expand      bool
-	Saved       bool    // starred: the footer button offers to unsave it
-	Pos         float64 // seconds into PosSrc to resume at; 0 when there is nothing to resume
-	PosSrc      string  // the stream that position belongs to
+	// A Hacker News card: the footer offers a briefing of the discussion under
+	// it, which is the half of the item the feed does not carry.
+	Gist   bool
+	Expand bool
+	Saved  bool    // starred: the footer button offers to unsave it
+	Pos    float64 // seconds into PosSrc to resume at; 0 when there is nothing to resume
+	PosSrc string  // the stream that position belongs to
 	// A blocked row: the title and where it came from, without the content that
 	// is the part you asked not to see, and the keyword that caught it.
 	Compact bool
@@ -706,6 +709,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 	c.Keep = keepURL(it.App, it.ID, c.Video)
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
+	_, c.Gist = hnRefOf(it)
 	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	c.Type = itemType(it)
 	return c

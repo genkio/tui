@@ -90,12 +90,26 @@ type summaryJob struct {
 	seen      map[string]bool
 }
 
-// summaryAsk is what goes in the queue: a source and the language to write about
-// it in, since the language is chosen when the icon is tapped and the run may
-// not start for minutes.
+// summaryAsk is what goes in the queue: what to write about and the language to
+// write it in, since the language is chosen when the button is tapped and the
+// run may not start for minutes. An id makes it one item's discussion rather
+// than a source's backlog.
 type summaryAsk struct {
 	app  string
+	id   string
 	lang string
+}
+
+func (a summaryAsk) key() string { return summaryKey(a.app, a.id) }
+
+// summaryKey is how a job is addressed: a source briefing goes under the source
+// itself, since there is only ever one of those, and an item's under a key of
+// its own. Prefixed rather than joined bare, so no id can collide with a source.
+func summaryKey(app, id string) string {
+	if id == "" {
+		return app
+	}
+	return "item:" + app + ":" + id
 }
 
 // summarizer runs the briefings. They are jobs held here rather than work done
@@ -106,9 +120,14 @@ type summaryAsk struct {
 // each other finishes no sooner.
 //
 // codex is the CLI call, swapped out in tests, which have no business spending
-// five minutes on a model to find out whether a handler validates its form.
+// five minutes on a model to find out whether a handler validates its form. hn
+// is the comment fetch an item's briefing starts with, swapped for the same
+// reason; find is how an item is looked up, which the server widens past the
+// backlog cache to the saved list.
 type summarizer struct {
 	codex func(ctx context.Context, prompt string) (string, error)
+	hn    func(ctx context.Context, ref hnRef) (hnThread, error)
+	find  func(app, id string, now time.Time) (core.Item, bool)
 	cache *feedCache
 	queue chan summaryAsk
 	mu    sync.Mutex
@@ -118,6 +137,10 @@ type summarizer struct {
 func newSummarizer(cache *feedCache) *summarizer {
 	return &summarizer{
 		codex: codexSummary,
+		hn:    fetchHNThread,
+		find: func(app, id string, now time.Time) (core.Item, bool) {
+			return cache.item(app, id, now)
+		},
 		cache: cache,
 		queue: make(chan summaryAsk, summaryQueue),
 		jobs:  map[string]summaryJob{},
@@ -134,38 +157,47 @@ func (s *summarizer) serve(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ask := <-s.queue:
-			s.put(ask.app, s.brief(ctx, ask))
+			s.put(ask.key(), s.brief(ctx, ask))
 		}
 	}
 }
 
-// start puts a source in the queue, unless one is already going for it. The
-// running state is written before the queueing, so a chip that has just been
+// start puts an ask in the queue, unless one is already going for it. The
+// running state is written before the queueing, so a control that has just been
 // tapped reads as busy however long the queue is.
-func (s *summarizer) start(app, lang string) error {
+func (s *summarizer) start(app, id, lang string) error {
 	lang = summaryLang(lang)
+	key := summaryKey(app, id)
 	s.mu.Lock()
-	if s.jobs[app].State == "running" {
+	if s.jobs[key].State == "running" {
 		s.mu.Unlock()
 		return nil // already going: the tap that started it says the same thing
 	}
-	s.jobs[app] = summaryJob{State: "running", Lang: lang}
+	s.jobs[key] = summaryJob{State: "running", Lang: lang}
 	s.mu.Unlock()
 	select {
-	case s.queue <- summaryAsk{app: app, lang: lang}:
+	case s.queue <- summaryAsk{app: app, id: id, lang: lang}:
 		return nil
 	default:
 		s.mu.Lock()
-		delete(s.jobs, app)
+		delete(s.jobs, key)
 		s.mu.Unlock()
 		return errors.New("too many briefings are already waiting — let one finish")
 	}
 }
 
-// brief is one run: the backlog as it stands when its turn comes round, not as
+// brief is one run, of whichever kind was asked for.
+func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
+	if ask.id != "" {
+		return s.briefItem(ctx, ask)
+	}
+	return s.briefApp(ctx, ask)
+}
+
+// briefApp is a source's backlog as it stands when its turn comes round, not as
 // it stood when the chip was tapped, since a queue can hold a source for
 // minutes and the fresher list is the one worth reading.
-func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
+func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
 	items := summaryItems(s.cache.unread(time.Now(), ""), ask.app)
 	if len(items) == 0 {
 		return summaryJob{State: "failed", Lang: ask.lang, Err: "nothing unread there any more"}
@@ -191,20 +223,70 @@ func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
 	}
 }
 
-func (s *summarizer) put(app string, job summaryJob) {
+// briefItem is one card's discussion: what the room said under it, which is the
+// part a Hacker News card does not carry. A story is read through its comments
+// and a comment through its replies — the same run either way, over a different
+// piece of the same tree.
+//
+// The fetch happens here rather than when the button is tapped, on the worker's
+// turn: a thread is a megabyte of JSON over a public API, and the run behind it
+// is minutes, so there is nothing to gain by getting it any earlier.
+func (s *summarizer) briefItem(ctx context.Context, ask summaryAsk) summaryJob {
+	fail := func(why string) summaryJob {
+		return summaryJob{State: "failed", Lang: ask.lang, Err: why}
+	}
+	it, ok := s.find(ask.app, ask.id, time.Now())
+	if !ok {
+		return fail("that item is no longer here")
+	}
+	ref, ok := hnRefOf(it)
+	if !ok {
+		return fail("only Hacker News items carry a discussion to summarize")
+	}
+	th, err := s.hn(ctx, ref)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fail("the server stopped before the summary was written")
+		}
+		return fail(err.Error())
+	}
+	if th.Count == 0 {
+		if ref.Kind == "comment" {
+			return fail("nobody has replied to that comment yet")
+		}
+		return fail("nothing has been said under that story yet")
+	}
+	md, err := s.codex(ctx, itemSummaryPrompt(it, th, ask.lang))
+	if err != nil {
+		if ctx.Err() != nil {
+			return fail("the server stopped before the summary was written")
+		}
+		return fail(err.Error())
+	}
+	return summaryJob{
+		State: "done", Lang: ask.lang, Count: th.Count,
+		HTML:      linkify(md),
+		Generated: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func (s *summarizer) put(key string, job summaryJob) {
 	s.mu.Lock()
-	s.jobs[app] = job
+	s.jobs[key] = job
 	s.mu.Unlock()
 }
 
-func (s *summarizer) job(app string) (summaryJob, bool) {
+// job is one briefing in full. The key is the source for a backlog and
+// summaryKey's for an item; the overtaken count is a backlog's business alone,
+// and an item job carries no ids for it to be counted against.
+func (s *summarizer) job(key string) (summaryJob, bool) {
 	s.mu.Lock()
-	j, ok := s.jobs[app]
+	j, ok := s.jobs[key]
 	s.mu.Unlock()
 	if !ok {
 		return j, false
 	}
-	j.New = s.overtaken(app, j)
+	j.New = s.overtaken(key, j)
 	return j, true
 }
 
@@ -212,26 +294,30 @@ func (s *summarizer) job(app string) (summaryJob, bool) {
 // unread items it never read, which is a count of the backlog now against the
 // ids the run went through. Counted on the way out rather than kept on the job,
 // since it changes with every sweep and every mark while the job stands still.
-func (s *summarizer) overtaken(app string, j summaryJob) int {
+// Item jobs have no ids to be counted against and fall out at the first test,
+// which is right: a discussion is not a backlog and cannot be overtaken by one.
+func (s *summarizer) overtaken(key string, j summaryJob) int {
 	if j.State != "done" || s.cache == nil || len(j.seen) == 0 {
 		return 0
 	}
-	return s.cache.unreadNew(app, j.seen)
+	return s.cache.unreadNew(key, j.seen)
 }
 
-// states is every source's job without the prose: what the chips need to draw
-// themselves, which is polled while anything is running.
+// states is every job without the prose: what the chips and the cards' buttons
+// need to draw themselves, which is polled while anything is running. Both kinds
+// are in the one map, keyed as they are asked for, so a page watching a card and
+// a page watching a source ask the same question.
 func (s *summarizer) states() map[string]summaryJob {
 	s.mu.Lock()
 	out := make(map[string]summaryJob, len(s.jobs))
-	for app, j := range s.jobs {
+	for key, j := range s.jobs {
 		j.HTML = ""
-		out[app] = j
+		out[key] = j
 	}
 	s.mu.Unlock()
-	for app, j := range out {
-		j.New = s.overtaken(app, j)
-		out[app] = j
+	for key, j := range out {
+		j.New = s.overtaken(key, j)
+		out[key] = j
 	}
 	return out
 }
@@ -243,37 +329,58 @@ func (s *summarizer) states() map[string]summaryJob {
 // Nothing is marked read by being summarized. Having been told what is in a
 // batch is not having read it, and a briefing that emptied the backlog behind
 // itself would leave you unable to act on what it just told you.
+// An id makes it one item's discussion instead — a Hacker News card, whose
+// comments are the half of it the feed does not carry.
 func startSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
 	app := strings.TrimSpace(r.FormValue("app"))
 	if app == "" {
 		http.Error(w, "missing app", http.StatusBadRequest)
 		return
 	}
-	// Refused here rather than left to fail in the worker: a chip should not spin
-	// for a minute to be told there was nothing behind it.
+	// Refused here rather than left to fail in the worker: a control should not
+	// spin for a minute to be told there was nothing behind it.
+	if id := strings.TrimSpace(r.FormValue("id")); id != "" {
+		it, ok := sum.find(app, id, time.Now())
+		if !ok {
+			http.Error(w, "no such item: it is neither in the backlog nor saved", http.StatusNotFound)
+			return
+		}
+		if _, ok := hnRefOf(it); !ok {
+			http.Error(w, "only Hacker News items carry a discussion to summarize", http.StatusBadRequest)
+			return
+		}
+		startAsk(w, r, sum, app, id)
+		return
+	}
 	if len(summaryItems(sum.cache.unread(time.Now(), ""), app)) == 0 {
 		http.Error(w, "nothing unread there to summarize", http.StatusNotFound)
 		return
 	}
-	// Which language to write it in is the browser's setting, sent with the ask
-	// rather than kept here: one server serves whoever opens it, and the choice
-	// belongs to the person reading.
-	if err := sum.start(app, r.FormValue("lang")); err != nil {
+	startAsk(w, r, sum, app, "")
+}
+
+// startAsk queues the run and answers with the job. Which language to write it
+// in is the browser's setting, sent with the ask rather than kept here: one
+// server serves whoever opens it, and the choice belongs to the person reading.
+func startAsk(w http.ResponseWriter, r *http.Request, sum *summarizer, app, id string) {
+	if err := sum.start(app, id, r.FormValue("lang")); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	j, _ := sum.job(app)
+	j, _ := sum.job(summaryKey(app, id))
 	writeSummaryJSON(w, http.StatusAccepted, j)
 }
 
-// showSummary (GET /summarize) reports on the jobs: one source in full with
-// ?app=, or every source's state without the prose, which is what a page asks
-// for on load and polls while a chip is spinning.
+// showSummary (GET /summarize) reports on the jobs: one of them in full with
+// ?app= (and ?id= for an item's discussion), or every job's state without the
+// prose, which is what a page asks for on load and polls while anything is
+// spinning.
 func showSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
-	if app := strings.TrimSpace(r.URL.Query().Get("app")); app != "" {
-		j, ok := sum.job(app)
+	q := r.URL.Query()
+	if app := strings.TrimSpace(q.Get("app")); app != "" {
+		j, ok := sum.job(summaryKey(app, strings.TrimSpace(q.Get("id"))))
 		if !ok {
-			http.Error(w, "no summary of that source", http.StatusNotFound)
+			http.Error(w, "no summary of that", http.StatusNotFound)
 			return
 		}
 		writeSummaryJSON(w, http.StatusOK, j)
@@ -370,6 +477,63 @@ Write Markdown:
 		}
 		b.WriteString("\n")
 	}
+	return b.String()
+}
+
+// itemSummaryPrompt writes the discussion request: what the card is, then every
+// comment under it, depth-first. No links are asked for and none are wanted —
+// this lands inside a card that already links the thread, and a handle is how
+// you find a commenter again.
+func itemSummaryPrompt(it core.Item, th hnThread, lang string) string {
+	var b strings.Builder
+	if th.Ref.Kind == "comment" {
+		fmt.Fprintf(&b, "Summarize the replies to one Hacker News comment for the person reading it.\n\n")
+		fmt.Fprintf(&b, "Thread: %s\n", oneLine(itemTitle(it)))
+		if th.Author != "" {
+			fmt.Fprintf(&b, "The comment, by %s:\n%s\n", th.Author, clipRunes(th.Text, hnTextRunes))
+		}
+		fmt.Fprintf(&b, "\n%d replies follow, depth-first, each with how deep under the comment it sits.\n\n", th.Count)
+	} else {
+		fmt.Fprintf(&b, "Summarize the Hacker News discussion under a story for someone deciding whether to open it.\n\n")
+		title := th.Title
+		if title == "" {
+			title = itemTitle(it)
+		}
+		fmt.Fprintf(&b, "Story: %s\n", oneLine(title))
+		if th.URL != "" {
+			fmt.Fprintf(&b, "Article: %s\n", th.URL)
+		}
+		if th.Points > 0 {
+			fmt.Fprintf(&b, "Points: %d\n", th.Points)
+		}
+		if th.Text != "" {
+			fmt.Fprintf(&b, "The post itself, by %s:\n%s\n", th.Author, clipRunes(th.Text, hnTextRunes))
+		}
+		fmt.Fprintf(&b, "\n%d comments follow, depth-first, each with how deep in the reply tree it sits.\n\n", th.Count)
+	}
+
+	fmt.Fprintf(&b, `Answer from the comments below alone: run no commands, open no files, fetch
+nothing. Never invent a comment, a name or a fact that is not in them.
+
+%s Leave @handles and names as they are written rather than translating them.
+
+Write Markdown, and keep the whole thing under 250 words — this is read on a
+card, under the item it is about:
+
+- Open with two or three sentences on what the discussion is actually about and
+  where it came down.
+- Then bullets: one per position, argument or correction that carries weight,
+  each naming the handles that made it. Say plainly what is contested and what
+  went unanswered.
+- End with one line on whether the discussion is worth reading past the item
+  itself, and why.
+- No headings, no links, no preamble, no sign-off, no code fence around the
+  whole thing.
+
+`, summaryLangs[summaryLang(lang)])
+
+	n := 0
+	hnWrite(&b, th.Replies, 1, &n)
 	return b.String()
 }
 

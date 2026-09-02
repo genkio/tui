@@ -472,6 +472,43 @@ deck. A briefing only ever covers one source, so that is all the button clears:
 it asks first, and names the source it is about to empty rather than saying "this
 feed", because the other sources' backlogs are none of this briefing's business.
 
+### Summarizing a discussion
+
+A Hacker News card carries half its item. "Hacker News: Best" is a stub — the
+article's link, its points, a comment count — and "Hacker News: Best Comments" is
+one voice out of a room, with no sign of what the room said back. **gist**, in
+the footer of those cards and no others, goes and gets the rest: the comments
+under a story, or the replies under a comment, from
+[Algolia's HN API](https://hn.algolia.com/api) in one call rather than the
+official API's one request per comment.
+
+It is the same machinery the source briefings run on, so it behaves the same
+way: the tap fires and nothing else, the run is the server's rather than the
+request's, and a thread and a backlog queue behind each other rather than racing
+for the one codex process. The button says which state it is in — **reading…**
+while codex has it, filled in the accent colour once there is one — and a toast
+carries the failure if there is one.
+
+The summary lands **under the footer that asked for it, inside the card**, not in
+place of the feed: this is about one item, so it belongs with that item. Tapping
+the button again folds it away, and again brings it back without spending a
+second run. **again**, in its header, is how you spend one. It opens with what the
+discussion is actually about, then a bullet per position or correction that
+carries weight, naming the handles that made it, and closes on whether the thread
+is worth reading past the item. No links: the card already links the thread, and a
+handle is how you find a commenter again.
+
+A comment nobody answered has no discussion under it, and the button says so
+rather than reading the comment back to you. The whole tree goes in — replies at
+every depth, each stated with how deep it sits, since who is answering whom is
+most of what a thread means — clipped to 700 characters a comment, the same
+bargain the backlog briefings strike. A deleted comment is dropped and the
+replies under it move up: they are still answering something.
+
+Results are kept per item and per language in the tab's `sessionStorage`, the
+language setting applies to the next run as it does everywhere else, and nothing
+is marked read by being summarized.
+
 ### Swipe mode
 
 The same feed can be dealt as a deck instead of scrolled: one card at a time,

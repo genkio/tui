@@ -300,7 +300,7 @@ func TestSummarizeRunsOneAtATime(t *testing.T) {
 	// the whole of what was asked for.
 	idle := newSummarizer(cache)
 	for i := 0; i < 3; i++ {
-		if err := idle.start("reddit", "en"); err != nil {
+		if err := idle.start("reddit", "", "en"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -310,9 +310,9 @@ func TestSummarizeRunsOneAtATime(t *testing.T) {
 
 	// The bound is against a stuck queue, not something anyone should meet.
 	for i := 0; i < summaryQueue; i++ {
-		_ = idle.start("app"+strconv.Itoa(i), "en")
+		_ = idle.start("app"+strconv.Itoa(i), "", "en")
 	}
-	if err := idle.start("one too many", "en"); err == nil {
+	if err := idle.start("one too many", "", "en"); err == nil {
 		t.Error("a full queue should say so rather than growing forever")
 	}
 }
@@ -604,3 +604,161 @@ func TestSummaryFlagDoesNotRideAlong(t *testing.T) {
 }
 
 func ptr(t feedTally) *feedTally { return &t }
+
+// hnItem is a Hacker News story as Inoreader hands it over: a stub pointing at
+// the article and at the thread.
+func hnItem() core.Item {
+	return core.Item{
+		App: "inoreader", ID: "77", Source: "Hacker News: Best",
+		Title: "Tmp.0ut Volume 5",
+		URL:   "https://tmpout.sh/5/",
+		Body:  "Article URL: https://tmpout.sh/5/\n\nComments URL: https://news.ycombinator.com/item?id=49516059",
+	}
+}
+
+// testItemSummarizer is the real thing with both subprocesses gone: no codex,
+// and no trip to Hacker News.
+func testItemSummarizer(t *testing.T, cache *feedCache, thread hnThread, threadErr error, codex func(context.Context, string) (string, error)) *summarizer {
+	t.Helper()
+	sum := testSummarizer(t, cache, codex)
+	sum.hn = func(_ context.Context, ref hnRef) (hnThread, error) {
+		thread.Ref = ref
+		return thread, threadErr
+	}
+	return sum
+}
+
+func settledKey(t *testing.T, sum *summarizer, key string) summaryJob {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if j, ok := sum.job(key); ok && j.State != "running" {
+			return j
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("%s never settled", key)
+	return summaryJob{}
+}
+
+// A Hacker News card carries half the item: the discussion under it is the other
+// half, and the button in its footer is what goes and gets it.
+func TestSummarizeOneItemsDiscussion(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{hnItem()}, now)
+
+	thread := hnThreadOf(hnRef{}, hnAPIItem{
+		Title: strptr("Tmp.0ut Volume 5"), URL: strptr("https://tmpout.sh/5/"), Points: intptr(191),
+		Children: []hnAPIItem{{Author: strptr("alice"), Text: strptr("<p>worth reading</p>")}},
+	})
+	prompts := make(chan string, 1)
+	sum := testItemSummarizer(t, cache, thread, nil, func(_ context.Context, p string) (string, error) {
+		prompts <- p
+		return "The thread is mostly about zines.\n\n- alice liked it", nil
+	})
+
+	rec := post(t, sum, "app=inoreader&id=77")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+
+	key := summaryKey("inoreader", "77")
+	if j := settledKey(t, sum, key); j.State != "done" {
+		t.Fatalf("job = %+v, want done", j)
+	}
+	rec = get(t, sum, "app=inoreader&id=77")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("fetch = %d %s", rec.Code, rec.Body.String())
+	}
+	var got summaryJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	// The count is the comments it read, not a backlog, and nothing can overtake
+	// a discussion the way a sweep overtakes a briefing.
+	if got.Count != 1 || got.New != 0 || got.Generated == "" {
+		t.Errorf("job = %+v, want one comment read and no overtaking", got)
+	}
+	if !strings.Contains(got.HTML, "<li>alice liked it</li>") {
+		t.Errorf("html = %q, want the rendered Markdown", got.HTML)
+	}
+	select {
+	case p := <-prompts:
+		if !strings.Contains(p, "worth reading") || !strings.Contains(p, "Story: Tmp.0ut Volume 5") {
+			t.Errorf("prompt = %q, want the thread in it", p)
+		}
+	default:
+		t.Error("codex was never asked")
+	}
+
+	// The source's own briefing is a separate job under a separate key: asking
+	// about one must not answer with the other.
+	if _, ok := sum.job("inoreader"); ok {
+		t.Error("an item's briefing must not stand in for its source's")
+	}
+}
+
+// Only Hacker News, for now, and only items that are still somewhere: neither
+// should cost a spinner and a minute to find out.
+func TestSummarizeItemRefusesWhatItCannotRead(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		hnItem(),
+		{App: "reddit", ID: "1", Title: "not hacker news", Source: "r/golang"},
+	}, now)
+	sum := testItemSummarizer(t, cache, hnThread{}, nil, func(context.Context, string) (string, error) {
+		t.Error("codex should not have been asked")
+		return "", nil
+	})
+
+	if rec := post(t, sum, "app=reddit&id=1"); rec.Code != http.StatusBadRequest {
+		t.Errorf("a reddit item = %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	if rec := post(t, sum, "app=inoreader&id=nope"); rec.Code != http.StatusNotFound {
+		t.Errorf("a missing item = %d %s, want 404", rec.Code, rec.Body.String())
+	}
+}
+
+// A "best comment" that nobody answered has no discussion under it, and saying
+// so is better than a briefing that reads the comment back to you.
+func TestSummarizeItemSaysWhenNobodyReplied(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{{
+		App: "inoreader", ID: "88", Source: "Hacker News: Best Comments",
+		Title: `New comment by zahlman in "A story"`,
+		URL:   "https://news.ycombinator.com/item?id=49526135",
+		Body:  "a comment nobody answered",
+	}}, now)
+	sum := testItemSummarizer(t, cache, hnThread{}, nil, func(context.Context, string) (string, error) {
+		t.Error("codex should not have been asked")
+		return "", nil
+	})
+
+	if rec := post(t, sum, "app=inoreader&id=88"); rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	j := settledKey(t, sum, summaryKey("inoreader", "88"))
+	if j.State != "failed" || !strings.Contains(j.Err, "replied") {
+		t.Errorf("job = %+v, want a failure saying nobody replied", j)
+	}
+}
+
+// Hacker News being down is the run's failure, in its own words, not a silent
+// briefing over nothing.
+func TestSummarizeItemCarriesTheFetchFailure(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{hnItem()}, time.Now())
+	sum := testItemSummarizer(t, cache, hnThread{}, errors.New("could not reach Hacker News"), func(context.Context, string) (string, error) {
+		t.Error("codex should not have been asked")
+		return "", nil
+	})
+
+	post(t, sum, "app=inoreader&id=77")
+	j := settledKey(t, sum, summaryKey("inoreader", "77"))
+	if j.State != "failed" || !strings.Contains(j.Err, "could not reach Hacker News") {
+		t.Errorf("job = %+v, want the fetch's own words", j)
+	}
+}

@@ -96,6 +96,12 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		return err
 	}
 	sum := newSummarizer(cache)
+	// An item's discussion can be asked for from anywhere its card is drawn, and
+	// the saved list outlives the backlog, so a briefing looks an item up the same
+	// way its own page does rather than in the cache alone.
+	sum.find = func(app, id string, now time.Time) (core.Item, bool) {
+		return findItem(app, id, now, cache, saved, rendered)
+	}
 	flusher := newMarkFlusher(root, cache)
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
 	if syncPath != "" {

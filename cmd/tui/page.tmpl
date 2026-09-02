@@ -267,7 +267,24 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 @media (pointer: fine){.deckctl{display:none}}
 .open{color:var(--muted);text-decoration:none;font-weight:700;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.gist{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+/* the discussion under a Hacker News card, asked for from the card. Filled in
+   the accent colour once there is one, the same thing the source sparkles say,
+   and dimmed while codex is reading the thread. */
+.gist[data-state="done"]{color:var(--accent)}
+.gist[data-state="running"]{opacity:.55;cursor:default}
+/* ...and where it lands: under the footer that asked for it, inside the card,
+   set off by the same rule the tag row uses rather than a box of its own. */
+.gistbox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:14px}
+.gmeta{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.gistbox .body{font-size:14px}
+.gistbox .body ul,.gistbox .body ol{margin:6px 0;padding-left:20px}
+.gistbox .body li{margin:3px 0}
+.gistbox .body p{margin:6px 0}
+.gagain{
+  margin-left:auto;padding:0;border:0;background:none;font-family:inherit;font-size:12px;font-weight:600;
+  color:var(--accent);white-space:nowrap;cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+}
 .rgv:disabled{opacity:.6;cursor:default}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
@@ -1829,6 +1846,216 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   });
 })();
 
+// Gist: the discussion under one Hacker News card. A story's item is a stub —
+// the article's link and a count — and a comment's is one voice out of a room,
+// so what the thread came to is the half of it the feed cannot carry. The button
+// goes and gets the comments (all of them, replies included, from Algolia's HN
+// API) and hands them to the same worker the source briefings run on, so a
+// thread and a backlog queue behind each other rather than racing.
+//
+// It lands under the footer that asked for it, inside the card, and the button
+// then toggles it: a briefing about one item belongs with that item, not in
+// place of the feed the way a source's does.
+(function(){
+  var poll = null, getting = {};
+
+  function buttons(){ return document.querySelectorAll('article.card button.gist'); }
+  function cardOf(b){ return b.closest('article.card'); }
+  function btn(card){ return card.querySelector(':scope > .footer > button.gist'); }
+  function key(card){ return 'item:' + card.dataset.app + ':' + card.dataset.id; }
+  function query(card){ return 'app=' + encodeURIComponent(card.dataset.app) + '&id=' + encodeURIComponent(card.dataset.id); }
+  // Per language as well as per item, for the reason the source briefings are:
+  // a summary is in the language it was written in, so the two are separate
+  // things to have and switching back finds the earlier one still there.
+  function slot(card){ return 'tui:gist:' + card.dataset.app + ':' + card.dataset.id + ':' + SUM_LANG; }
+  function held(card){
+    try { var raw = sessionStorage.getItem(slot(card)); return raw ? JSON.parse(raw) : null; }
+    catch(e){ return null; }
+  }
+  function hold(card, d){
+    try { sessionStorage.setItem(slot(card), JSON.stringify(d)); } catch(e){}
+  }
+
+  function state(card){ var b = btn(card); return b ? b.dataset.state : ''; }
+  function setState(card, s){
+    var b = btn(card);
+    if (!b) return;
+    b.dataset.state = s;
+    b.textContent = s === 'running' ? 'reading…' : 'gist';
+    b.title = s === 'running' ? 'reading the discussion…'
+      : s === 'done' ? 'the discussion under this, summarized'
+      : 'summarize the discussion under this';
+  }
+
+  function box(card){
+    var el = card.querySelector(':scope > .gistbox');
+    if (el) return el;
+    var foot = card.querySelector(':scope > .footer');
+    if (!foot) return null;
+    el = document.createElement('div');
+    el.className = 'gistbox';
+    foot.insertAdjacentElement('afterend', el);
+    return el;
+  }
+
+  function waiting(card){
+    var el = box(card);
+    if (!el) return;
+    el.textContent = '';
+    el.classList.remove('hid');
+    var note = document.createElement('div');
+    note.className = 'gmeta';
+    note.textContent = 'Reading the thread — this takes a minute or two.';
+    el.appendChild(note);
+  }
+
+  function render(card, d){
+    var el = box(card);
+    if (!el) return;
+    el.textContent = '';
+    el.classList.remove('hid');
+    var meta = document.createElement('div');
+    meta.className = 'gmeta';
+    var when = '';
+    try { when = new Date(d.generated).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(e){}
+    var n = d.count || 0;
+    meta.textContent = n + (n === 1 ? ' comment' : ' comments') + (when ? ', read ' + when : '');
+    // Not class "rest": that is the card's own expand control, and this button
+    // has no business unfolding the post it sits under.
+    var again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'gagain';
+    again.textContent = 'again';
+    again.title = 'summarize the discussion as it stands now';
+    again.addEventListener('click', function(){ start(card); });
+    meta.appendChild(again);
+    var body = document.createElement('div');
+    body.className = 'body';
+    // Server-rendered from Markdown by the renderer the cards use, so the model's
+    // output cannot bring HTML of its own with it.
+    body.innerHTML = d.html;
+    el.appendChild(meta);
+    el.appendChild(body);
+  }
+
+  function start(card){
+    if (state(card) === 'running') return;
+    setState(card, 'running');
+    waiting(card);
+    var fd = new FormData();
+    fd.append('app', card.dataset.app);
+    fd.append('id', card.dataset.id);
+    fd.append('lang', SUM_LANG);
+    fetch('/summarize', {method:'POST', body:fd})
+      .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
+      .then(function(){ watch(); })
+      .catch(function(err){
+        setState(card, held(card) ? 'done' : 'idle');
+        var el = card.querySelector(':scope > .gistbox');
+        if (el) el.remove();
+        toast((err && err.message || '').trim() || 'could not summarize that discussion');
+      });
+  }
+
+  // The prose, once the job says there is some. open is for the card you are
+  // sitting in front of waiting on; one that finished while you were elsewhere
+  // fills its button in and waits to be asked.
+  function collect(card, open){
+    var k = key(card);
+    if (getting[k]) return; // a poll every three seconds must not stack fetches
+    getting[k] = 1;
+    fetch('/summarize?' + query(card))
+      .then(function(res){ if(!res.ok) throw 0; return res.json(); })
+      .then(function(d){
+        if (!d || !d.html) throw 0;
+        if (d.lang && d.lang !== SUM_LANG) throw 0; // written in the other one
+        hold(card, d);
+        setState(card, 'done');
+        if (open) render(card, d);
+      })
+      .catch(function(){
+        setState(card, held(card) ? 'done' : 'idle');
+      })
+      .then(function(){ delete getting[k]; });
+  }
+
+  // What the server says about the cards on this page, folded into their
+  // buttons. Returns whether any is still going, which is what decides whether
+  // to keep asking. The map carries the source briefings too; a key that is not
+  // a card here is not this loop's business.
+  function sync(jobs){
+    var going = false;
+    buttons().forEach(function(b){
+      var card = cardOf(b), j = jobs[key(card)], was = b.dataset.state;
+      if (!j || (j.lang && j.lang !== SUM_LANG)){
+        if (was === 'running') setState(card, held(card) ? 'done' : 'idle');
+        return;
+      }
+      if (j.state === 'running'){ going = true; setState(card, 'running'); return; }
+      if (j.state === 'done'){
+        if (was !== 'done') collect(card, was === 'running');
+        return;
+      }
+      if (was === 'running'){
+        setState(card, held(card) ? 'done' : 'idle');
+        var el = card.querySelector(':scope > .gistbox');
+        if (el) el.remove();
+        toast(j.error || 'could not summarize that discussion');
+      }
+    });
+    return going;
+  }
+
+  function watch(){
+    if (poll) return;
+    poll = setInterval(function(){
+      fetch('/summarize')
+        .then(function(res){ return res.json(); })
+        .then(function(d){
+          if (sync((d && d.jobs) || {})) return;
+          clearInterval(poll); poll = null;
+        })
+        .catch(function(){});
+    }, 3000);
+  }
+
+  document.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button.gist') : null;
+    if (!b) return;
+    var card = cardOf(b);
+    if (b.dataset.state === 'idle'){ start(card); return; }
+    if (b.dataset.state === 'running'){ waiting(card); return; }
+    var el = card.querySelector(':scope > .gistbox');
+    if (el && !el.classList.contains('hid')){ el.classList.add('hid'); return; }
+    var d = held(card);
+    if (d && d.html){ render(card, d); return; }
+    collect(card, true);
+  });
+
+  if (!buttons().length) return;
+
+  // What this tab already holds settles the buttons before the server is asked,
+  // and the server settles the rest: a run started here and left, or one asked
+  // for from another tab.
+  buttons().forEach(function(b){ if (held(cardOf(b))) setState(cardOf(b), 'done'); });
+  fetch('/summarize')
+    .then(function(res){ return res.json(); })
+    .then(function(d){ if (sync((d && d.jobs) || {})) watch(); })
+    .catch(function(){});
+
+  // The language setting changed. Nothing already written is rewritten, so the
+  // buttons re-read themselves against what is held for the language now in
+  // hand, and anything on screen in the language you have just left goes away.
+  document.addEventListener('tui:sumlang', function(){
+    buttons().forEach(function(b){
+      var card = cardOf(b);
+      var el = card.querySelector(':scope > .gistbox');
+      if (el) el.remove();
+      if (b.dataset.state !== 'running') setState(card, held(card) ? 'done' : 'idle');
+    });
+  });
+})();
+
 // The block list, edited in the browser's own <dialog>: a textarea of one
 // keyword per line, which is the shape the list already has, so there is
 // nothing to add or delete a row at a time. Cancel puts back what the server
@@ -1956,4 +2183,4 @@ document.addEventListener('click', function(e){
 });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}
