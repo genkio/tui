@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1942,8 +1943,11 @@ func TestMarkAllClearsTheServerSelection(t *testing.T) {
 	}
 	// Under a briefing it clears what that briefing read, which is not the pick
 	// behind it once the whole feed's cap has bitten.
-	if !strings.Contains(page, `if(BRIEF) fd.append('brief', BRIEF.key);`) {
-		t.Error("mark-all under a briefing should name the briefing")
+	if !strings.Contains(page, `fd.append('brief', BRIEF.key); if(BRIEF.gen) fd.append('gen', BRIEF.gen);`) {
+		t.Error("mark-all under a briefing should name the briefing and the run that wrote it")
+	}
+	if !strings.Contains(page, `if (open) BRIEF = {key: mine, count: n, gen: stampedAt};`) {
+		t.Error("the briefing on screen should carry the stamp of the run it came from")
 	}
 	if !strings.Contains(page, `fetch('/mark-all', {method:'POST', body:fd})`) {
 		t.Error("mark-all should ask the server to clear the full selection")
@@ -2635,5 +2639,60 @@ func TestMarkAllUnderABriefingClearsOnlyWhatItRead(t *testing.T) {
 	}
 	if len(cache.unread(now.Add(time.Minute), "")) != 1 {
 		t.Error("a refused mark-all must clear nothing")
+	}
+}
+
+// A briefing lives in the tab that rendered it, while the server's job is only
+// ever the latest run of that source: reading a long one and then finding the
+// re-run behind it timed out must not leave mark-all unable to clear what you
+// have just read. The page says which run it is looking at, and a run the server
+// has no ids for is still refused.
+func TestMarkAllUnderABriefingOutlivesALaterRun(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "summarized", At: now.Add(-2 * time.Hour)},
+		{App: "x", ID: "2", Title: "summarized too", At: now.Add(-time.Hour)},
+	}, now)
+	runs := 0
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
+		runs++
+		if runs > 1 {
+			return "", errors.New("the summary took longer than 5m0s")
+		}
+		return "a briefing", nil
+	})
+	post(t, sum, "app=all")
+	read := settled(t, sum, allApp)
+	if read.State != "done" || read.Generated == "" {
+		t.Fatalf("job = %+v, want a finished briefing with a stamp", read)
+	}
+	// "again", or another tab's tap, and this one fails: the briefing on screen
+	// is still the one that was read.
+	post(t, sum, "app=all")
+	if j := settled(t, sum, allApp); j.State != "failed" {
+		t.Fatalf("second run = %+v, want it failed", j)
+	}
+
+	flusher := &markFlusher{cache: cache, wake: make(chan struct{}, 1)}
+	form := url.Values{"brief": {allApp}, "gen": {read.Generated}}
+	req := httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handleMarkAll(rec, req, cache, flusher, sum)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"marked":2`) {
+		t.Fatalf("got %d %s, want the briefing's two items marked", rec.Code, rec.Body.String())
+	}
+	if left := cache.unread(now, ""); len(left) != 0 {
+		t.Fatalf("unread after = %+v, want the briefing's items cleared", left)
+	}
+
+	form = url.Values{"brief": {allApp}, "gen": {"2020-01-01T00:00:00Z"}}
+	req = httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	handleMarkAll(rec, req, cache, flusher, sum)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("got %d %s, want a run the server never wrote refused", rec.Code, rec.Body.String())
 	}
 }

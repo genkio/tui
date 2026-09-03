@@ -48,6 +48,12 @@ const (
 	// what mark-all clears under it, so the cap never leaves you having cleared
 	// something you were not told about.
 	summaryAllCap = 200
+	// How many finished briefings' ids to keep around for mark-all. jobs holds
+	// only the latest run of a source, while a page holds the briefing it
+	// rendered for as long as its tab is open: a re-run that is still going, or
+	// one that failed, must not leave you unable to clear the briefing in front
+	// of you. A handful of sources times a few runs each is the whole of it.
+	summaryKept = 24
 )
 
 // The languages a briefing can be asked for, and how each one is asked for.
@@ -148,6 +154,11 @@ type summarizer struct {
 	queue chan summaryAsk
 	mu    sync.Mutex
 	jobs  map[string]summaryJob
+	// What finished briefings read, outliving the job that wrote them: keyed by
+	// the run's own stamp, so mark-all under a briefing clears what that
+	// briefing read rather than what the latest run of the same source did.
+	read map[string]map[string]bool
+	kept []string // read's keys, oldest first, for eviction
 }
 
 func newSummarizer(cache *feedCache) *summarizer {
@@ -160,6 +171,7 @@ func newSummarizer(cache *feedCache) *summarizer {
 		cache: cache,
 		queue: make(chan summaryAsk, summaryQueue),
 		jobs:  map[string]summaryJob{},
+		read:  map[string]map[string]bool{},
 	}
 }
 
@@ -296,6 +308,17 @@ func (s *summarizer) briefItem(ctx context.Context, ask summaryAsk) summaryJob {
 func (s *summarizer) put(key string, job summaryJob) {
 	s.mu.Lock()
 	s.jobs[key] = job
+	if len(job.seen) > 0 && job.Generated != "" {
+		stamped := key + "@" + job.Generated
+		if _, held := s.read[stamped]; !held {
+			s.kept = append(s.kept, stamped)
+		}
+		s.read[stamped] = job.seen
+		for len(s.kept) > summaryKept {
+			delete(s.read, s.kept[0])
+			s.kept = s.kept[1:]
+		}
+	}
 	s.mu.Unlock()
 }
 
@@ -386,16 +409,26 @@ func startSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
 }
 
 // covered is what a finished briefing read, as feed keys, which is what mark-all
-// clears under it. Nil for a job that never finished or was never asked for.
-func (s *summarizer) covered(key string) map[string]bool {
+// clears under it. The stamp names which run is meant: the page sends back the
+// one it rendered, and asking for a run this server no longer holds the ids of
+// is a refusal rather than a different briefing's items cleared under you. A
+// page from before briefings were stamped sends none, and gets the latest
+// finished run, which is what it must have been looking at.
+// Nil for a run that never finished or was never asked for.
+func (s *summarizer) covered(key, gen string) map[string]bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	j, ok := s.jobs[key]
-	if !ok || j.State != "done" {
+	seen := s.read[key+"@"+gen]
+	if gen == "" {
+		if j, ok := s.jobs[key]; ok && j.State == "done" {
+			seen = j.seen
+		}
+	}
+	if len(seen) == 0 {
 		return nil
 	}
-	out := make(map[string]bool, len(j.seen))
-	for k := range j.seen {
+	out := make(map[string]bool, len(seen))
+	for k := range seen {
 		out[k] = true
 	}
 	return out

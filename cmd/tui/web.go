@@ -745,9 +745,9 @@ func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flu
 	// mentioned, and clearing those would be clearing what you were never told
 	// about. Items that arrived since are left unread for the same reason.
 	if brief := strings.TrimSpace(r.FormValue("brief")); brief != "" {
-		covered := sum.covered(brief)
+		covered := sum.covered(brief, strings.TrimSpace(r.FormValue("gen")))
 		if covered == nil {
-			http.Error(w, "that briefing is no longer here", http.StatusNotFound)
+			http.Error(w, "the server no longer has that briefing — summarize again to clear what it reads", http.StatusNotFound)
 			return
 		}
 		for _, it := range cache.unread(time.Now(), "") {

@@ -1406,12 +1406,20 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
   var fd = new FormData(), q = new URLSearchParams(location.search);
   // Under a briefing the server is asked for exactly what that briefing read;
   // the pick's filters would be a different set of items and a wider one.
-  if(BRIEF) fd.append('brief', BRIEF.key);
+  // The stamp says which run of it: a tab holds the briefing it rendered while
+  // the server holds the latest run, and clearing what a later one read is not
+  // clearing what you were told.
+  if(BRIEF){ fd.append('brief', BRIEF.key); if(BRIEF.gen) fd.append('gen', BRIEF.gen); }
   else ['app', 'type', 'x', 'sub'].forEach(function(k){ if(q.has(k)) fd.append(k, q.get(k)); });
   markFlights.then(function(){ return fetch('/mark-all', {method:'POST', body:fd}); })
-    .then(function(res){ return res.json(); })
-    .then(function(d){ if(!d.ok) throw 0; location.reload(); })
-    .catch(function(){ markAllBtn.disabled = false; toast('could not mark this feed read'); });
+    .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
+    .then(function(d){ if(!d.ok) throw new Error(''); location.reload(); })
+    // The server's own words when it has any: a refusal that says why is the
+    // difference between running the briefing again and tapping this forever.
+    .catch(function(err){
+      markAllBtn.disabled = false;
+      toast((err && err.message || '').trim() || 'could not mark this feed read');
+    });
 });
 var settingsDlg = document.getElementById('settingsdlg');
 var settingsOpen = document.getElementById('settingsOpen');
@@ -1588,9 +1596,11 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   // every time it is opened.
   var behind = {}, behindNote = null;
   // How many items the briefing on screen read, which is what mark-all clears
-  // under it. Kept here rather than read back off the panel, since the panel is
-  // prose by the time it is on screen.
-  var covered = 0;
+  // under it, and which run of it wrote them: a tab keeps a briefing for as long
+  // as it is open, while the server's job is only ever the latest run. Kept here
+  // rather than read back off the panel, since the panel is prose by the time it
+  // is on screen.
+  var covered = 0, stampedAt = '';
 
   // Kept per language as well as per source: a briefing is in the language it
   // was written in, so the two are separate things to have and switching back
@@ -1645,7 +1655,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     if (on && !open) atFeed = window.scrollY || 0;
     open = on;
     SUMMARY_ON = on;
-    BRIEF = on && covered ? {key: mine, count: covered} : null;
+    BRIEF = on && covered ? {key: mine, count: covered, gen: stampedAt} : null;
     document.body.classList.toggle('sumon', on);
     labelMarkAll();
     stamp(on);
@@ -1659,6 +1669,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   function waiting(){
     if (!panel) return;
     covered = 0;
+    stampedAt = '';
     BRIEF = null;
     labelMarkAll();
     panel.textContent = '';
@@ -1698,7 +1709,8 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     try { when = new Date(d.generated).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); } catch(e){}
     var n = d.count || 0;
     covered = n;
-    if (open) BRIEF = {key: mine, count: n};
+    stampedAt = d.generated || '';
+    if (open) BRIEF = {key: mine, count: n, gen: stampedAt};
     labelMarkAll();
     // "200 of 356" when the cap bit: a briefing that read part of a backlog has
     // to say so, or the next thing you do is act as though it read all of it.
