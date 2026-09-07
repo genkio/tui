@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,7 +134,14 @@ func TestFeedDBMigratesJSONOnce(t *testing.T) {
 func TestFeedDBSnapshotCanRestore(t *testing.T) {
 	root := t.TempDir()
 	livePath := filepath.Join(root, "live", "feed.db")
-	backupPath := filepath.Join(root, "sync", "feed.db")
+	backupPath := filepath.Join(root, "sync", "feed.db.gz")
+	legacyPath := filepath.Join(root, "sync", "feed.db")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte("stale uncompressed snapshot"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	db, err := openFeedDB(livePath)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +178,24 @@ func TestFeedDBSnapshotCanRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backup, err := sql.Open("sqlite", backupPath)
+	entries, err := os.ReadDir(filepath.Dir(livePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".snapshot") {
+			t.Fatalf("staging file left behind: %q", e.Name())
+		}
+	}
+	if _, err := os.Stat(legacyPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("uncompressed snapshot still in the sync directory: %v", err)
+	}
+
+	unpacked := filepath.Join(root, "unpacked.db")
+	if err := gunzipFile(backupPath, unpacked); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := sql.Open("sqlite", unpacked)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,41 +334,60 @@ func TestSavedItemTagsPersistUntilUnsave(t *testing.T) {
 }
 
 func TestPrepareFeedDBRestoresSyncedSnapshot(t *testing.T) {
-	root := t.TempDir()
-	syncDir := filepath.Join(root, "sync")
-	localDir := filepath.Join(root, "local")
-	t.Setenv("TUI_SYNC_DIR", syncDir)
-	t.Setenv("XDG_STATE_HOME", localDir)
-	backupPath := filepath.Join(syncDir, "feed.db")
-	db, err := openFeedDB(backupPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cache, err := loadFeedCacheDB(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cache.upsert([]core.Item{item("x", "1", "restored")}, time.Now())
-	if err := cache.save(); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.close(); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range []struct{ name, file string }{
+		{"compressed", "feed.db.gz"},
+		{"legacy uncompressed", "feed.db"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			syncDir := filepath.Join(root, "sync")
+			localDir := filepath.Join(root, "local")
+			t.Setenv("TUI_SYNC_DIR", syncDir)
+			t.Setenv("XDG_STATE_HOME", localDir)
 
-	restored, gotBackup, err := prepareFeedDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restored.close()
-	if gotBackup != backupPath {
-		t.Fatalf("backup path = %q, want %q", gotBackup, backupPath)
-	}
-	cache, err = loadFeedCacheDB(restored)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cache.unreadCount() != 1 {
-		t.Fatalf("restored unread count = %d, want 1", cache.unreadCount())
+			seed := filepath.Join(root, "seed.db")
+			db, err := openFeedDB(seed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cache, err := loadFeedCacheDB(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cache.upsert([]core.Item{item("x", "1", "restored")}, time.Now())
+			if err := cache.save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(syncDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			backupPath := filepath.Join(syncDir, tc.file)
+			if tc.file == "feed.db.gz" {
+				if err := gzipFile(seed, backupPath); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := copyFile(seed, backupPath); err != nil {
+				t.Fatal(err)
+			}
+
+			restored, gotBackup, err := prepareFeedDB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restored.close()
+			if want := filepath.Join(syncDir, "feed.db.gz"); gotBackup != want {
+				t.Fatalf("backup path = %q, want %q", gotBackup, want)
+			}
+			cache, err = loadFeedCacheDB(restored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cache.unreadCount() != 1 {
+				t.Fatalf("restored unread count = %d, want 1", cache.unreadCount())
+			}
+		})
 	}
 }

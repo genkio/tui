@@ -212,8 +212,11 @@ func backlogCount(app string) (string, bool) {
 	}
 	c := loadFeedCache("")
 	dbPath := core.FeedDBPath()
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) && core.SyncDir() != "" {
-		dbPath = filepath.Join(core.SyncDir(), "feed.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		if snap, cleanup, err := readableSyncSnapshot(); err == nil {
+			defer cleanup()
+			dbPath = snap
+		}
 	}
 	if _, err := os.Stat(dbPath); err == nil {
 		if fromDB, err := readFeedCacheDB(dbPath); err == nil {
