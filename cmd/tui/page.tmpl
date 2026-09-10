@@ -2211,7 +2211,11 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     if (open){ open = false; layout(); return; }
     expand(false);
   });
+  // Open by default: the narrowing is the point of the row, so show it all and
+  // let "less" put it back. The layout pass still runs first, to learn whether
+  // there is anything to expand at all.
   layout();
+  if (!more.classList.contains('hid')) expand(false);
   window.addEventListener('resize', layout);
 })();
 
