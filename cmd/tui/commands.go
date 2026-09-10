@@ -44,6 +44,11 @@ func runServeCommand(args []string) error {
 	if *syncDir != "" {
 		exportSyncDir(*syncDir)
 	}
+	// After the sync dir, which is where the credentials file lives. A plugin
+	// loads this for itself when it starts, but the server does work of its own
+	// that needs a session — /bili resolves a stream inside this process — and
+	// bilibili answers an anonymous lookup with "request was banned".
+	core.LoadUserEnv()
 	root, err := os.Getwd()
 	if err != nil {
 		return err

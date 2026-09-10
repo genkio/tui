@@ -154,6 +154,11 @@ func TestBiliHandleGivesUpOnALookupFailure(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
 	}
+	// What bilibili said, not a shrug: a banned request means a session to renew
+	// and a missing video means neither, and the reply has to tell them apart.
+	if !strings.Contains(rec.Body.String(), "risk control") {
+		t.Errorf("body = %q, want bilibili's own reason in it", rec.Body.String())
+	}
 
 	if calls != 1 {
 		t.Errorf("lookup calls = %d, want one: a lookup that failed is not worth repeating now", calls)

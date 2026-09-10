@@ -59,12 +59,20 @@ type biliStream struct {
 	at   time.Time
 }
 
+// biliMiss is a lookup that failed and what it said, kept so the retry window
+// answers with the reason rather than a shrug: "request was banned" is the
+// difference between a session to renew and a video to give up on.
+type biliMiss struct {
+	until time.Time
+	err   error
+}
+
 // biliLens resolves bilibili videos to a stream and proxies the bytes.
 type biliLens struct {
 	mu      sync.Mutex
 	cids    map[string]int64      // bvid -> cid; a video's page id never changes
 	streams map[string]biliStream // bvid -> its mirrors, until they age out
-	miss    map[string]time.Time  // bvid -> when it may be retried
+	miss    map[string]biliMiss   // bvid -> why it failed, until it may be retried
 	gate    chan struct{}
 
 	now    func() time.Time
@@ -78,7 +86,7 @@ func newBiliLens() *biliLens {
 	return &biliLens{
 		cids:    map[string]int64{},
 		streams: map[string]biliStream{},
-		miss:    map[string]time.Time{},
+		miss:    map[string]biliMiss{},
 		gate:    make(chan struct{}, biliLookups),
 		now:     time.Now,
 		cookie:  biliCookie,
@@ -130,9 +138,9 @@ func (l *biliLens) handle(w http.ResponseWriter, r *http.Request) {
 // remembered URL that has expired looks exactly like this, and a second lookup
 // is cheaper than a failed tap.
 func (l *biliLens) fetch(ctx context.Context, id, rng string) (*http.Response, error) {
-	urls, ok := l.stream(ctx, id, false)
-	if !ok {
-		return nil, errors.New("bilibili handed out no playable stream")
+	urls, err := l.stream(ctx, id, false)
+	if err != nil {
+		return nil, err
 	}
 	resp, err := l.open(ctx, urls, rng)
 	if err == nil || ctx.Err() != nil {
@@ -140,45 +148,48 @@ func (l *biliLens) fetch(ctx context.Context, id, rng string) (*http.Response, e
 	}
 	// Every mirror refused. A URL that quietly expired looks exactly like this,
 	// so it is worth one fresh lookup before the tap is given up on.
-	urls, ok = l.stream(ctx, id, true)
-	if !ok {
-		return nil, err
+	urls, reErr := l.stream(ctx, id, true)
+	if reErr != nil {
+		return nil, err // the mirrors' refusal says more than a second lookup's
 	}
 	return l.open(ctx, urls, rng)
 }
 
 // stream returns the video's mirrors, resolving them when they are missing or
 // aged out. fresh forces a lookup, ignoring what is remembered.
-func (l *biliLens) stream(ctx context.Context, id string, fresh bool) ([]string, bool) {
+func (l *biliLens) stream(ctx context.Context, id string, fresh bool) ([]string, error) {
 	l.mu.Lock()
 	got, hit := l.streams[id]
-	until, missed := l.miss[id]
+	missed, wasMiss := l.miss[id]
 	l.mu.Unlock()
 	switch {
 	case fresh: // the caller just watched these mirrors fail
 	case hit && l.now().Sub(got.at) < biliPlayTTL:
-		return got.urls, true
-	case missed && l.now().Before(until):
-		return nil, false
+		return got.urls, nil
+	case wasMiss && l.now().Before(missed.until):
+		return nil, missed.err
 	}
 
 	select {
 	case l.gate <- struct{}{}:
 	case <-ctx.Done():
-		return nil, false
+		return nil, ctx.Err()
 	}
 	urls, err := l.lookup(ctx, id)
 	<-l.gate
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if err != nil || len(urls) == 0 {
-		l.miss[id] = l.now().Add(biliMissTTL)
-		return nil, false
+	if err == nil && len(urls) == 0 {
+		err = errors.New("bilibili handed out no playable stream")
+	}
+	if err != nil {
+		l.miss[id] = biliMiss{until: l.now().Add(biliMissTTL), err: err}
+		return nil, err
 	}
 	delete(l.miss, id)
 	l.streams[id] = biliStream{urls: urls, at: l.now()}
-	return urls, true
+	return urls, nil
 }
 
 // lookup is the two calls a stream costs: the video's cid, then the play URLs
