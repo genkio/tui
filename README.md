@@ -517,10 +517,22 @@ The summary lands **under the footer that asked for it, inside the card**, not i
 place of the feed: this is about one item, so it belongs with that item. Tapping
 the button again folds it away, and again brings it back without spending a
 second run. **again**, in its header, is how you spend one. It opens with what the
-discussion is actually about, then a bullet per position or correction that
-carries weight, naming the handles that made it, and closes on whether the thread
-is worth reading past the item. No links: the card already links the thread, and a
-handle is how you find a commenter again.
+linked article says, then what the discussion is actually about, then a bullet per
+position or correction that carries weight, and closes on whether the thread is
+worth reading past the item. No links: the card already links the thread.
+
+Nobody is named. Handles are stripped on the way into the prompt rather than
+asked to be left out of the answer, so the summary is about the positions and
+not about who held them.
+
+The server fetches the article first and hands the model its text along with the
+comments: what the room said back only means something next to what it said back
+about, and neither HN feed carries the article. Under a comment, which links
+neither a story nor an article, the story it sits in is looked up by id (the
+official API, for a title and a link, rather than Algolia answering with the
+whole comment tree) and its article is the one fetched. It is best-effort — a
+paywall, a PDF, a login wall or a dead host loses the opening paragraph and
+nothing else — and an Ask HN, which links its own thread, is not fetched at all.
 
 A comment nobody answered has no discussion under it, and the button says so
 rather than reading the comment back to you. The whole tree goes in — replies at

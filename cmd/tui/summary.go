@@ -147,13 +147,15 @@ func summaryKey(app, id string) string {
 // reason; find is how an item is looked up, which the server widens past the
 // backlog cache to the saved list.
 type summarizer struct {
-	codex func(ctx context.Context, prompt string) (string, error)
-	hn    func(ctx context.Context, ref hnRef) (hnThread, error)
-	find  func(app, id string, now time.Time) (core.Item, bool)
-	cache *feedCache
-	queue chan summaryAsk
-	mu    sync.Mutex
-	jobs  map[string]summaryJob
+	codex   func(ctx context.Context, prompt string) (string, error)
+	hn      func(ctx context.Context, ref hnRef) (hnThread, error)
+	story   func(ctx context.Context, id string) (title, url string, err error)
+	article func(ctx context.Context, url string) (string, error)
+	find    func(app, id string, now time.Time) (core.Item, bool)
+	cache   *feedCache
+	queue   chan summaryAsk
+	mu      sync.Mutex
+	jobs    map[string]summaryJob
 	// What finished briefings read, outliving the job that wrote them: keyed by
 	// the run's own stamp, so mark-all under a briefing clears what that
 	// briefing read rather than what the latest run of the same source did.
@@ -163,8 +165,10 @@ type summarizer struct {
 
 func newSummarizer(cache *feedCache) *summarizer {
 	return &summarizer{
-		codex: codexSummary,
-		hn:    fetchHNThread,
+		codex:   codexSummary,
+		hn:      fetchHNThread,
+		story:   fetchHNStory,
+		article: fetchHNArticle,
 		find: func(app, id string, now time.Time) (core.Item, bool) {
 			return cache.item(app, id, now)
 		},
@@ -291,7 +295,23 @@ func (s *summarizer) briefItem(ctx context.Context, ask summaryAsk) summaryJob {
 		}
 		return fail("nothing has been said under that story yet")
 	}
-	md, err := s.codex(ctx, itemSummaryPrompt(it, th, ask.lang))
+	// The article a reply is arguing about is as much the point under a comment
+	// as under a story; a comment just has to be told which story it sits in
+	// before it can go and get it.
+	if ref.Kind == "comment" && th.StoryID != "" && s.story != nil {
+		th.StoryTitle, th.StoryURL, _ = s.story(ctx, th.StoryID)
+	}
+	// Best-effort throughout: a paywall or a dead host loses the article
+	// paragraph, not the briefing.
+	articleURL := th.URL
+	if ref.Kind == "comment" {
+		articleURL = th.StoryURL
+	}
+	var article string
+	if s.article != nil && articleURL != "" {
+		article, _ = s.article(ctx, articleURL)
+	}
+	md, err := s.codex(ctx, itemSummaryPrompt(it, th, article, ask.lang))
 	if err != nil {
 		if ctx.Err() != nil {
 			return fail("the server stopped before the summary was written")
@@ -583,17 +603,29 @@ in the one theme instead of repeating it.
 	return b.String()
 }
 
-// itemSummaryPrompt writes the discussion request: what the card is, then every
-// comment under it, depth-first. No links are asked for and none are wanted —
-// this lands inside a card that already links the thread, and a handle is how
-// you find a commenter again.
-func itemSummaryPrompt(it core.Item, th hnThread, lang string) string {
+// itemSummaryPrompt writes the discussion request: what the card is, the
+// article it hangs off when the server could fetch one, then every comment
+// under it, depth-first. No links are asked for and none are wanted — this
+// lands inside a card that already links the thread.
+//
+// Who said what is left out on purpose, here and in the comment dump: the
+// positions are the point, and a list of handles is noise to anyone who is not
+// already in that thread.
+func itemSummaryPrompt(it core.Item, th hnThread, article, lang string) string {
+	article = strings.TrimSpace(article)
 	var b strings.Builder
 	if th.Ref.Kind == "comment" {
 		fmt.Fprintf(&b, "Summarize the replies to one Hacker News comment for the person reading it.\n\n")
 		fmt.Fprintf(&b, "Thread: %s\n", oneLine(itemTitle(it)))
-		if th.Author != "" {
-			fmt.Fprintf(&b, "The comment, by %s:\n%s\n", th.Author, clipRunes(th.Text, hnTextRunes))
+		if th.StoryURL != "" {
+			fmt.Fprintf(&b, "Article the thread is about: %s\n", th.StoryURL)
+		}
+		if th.Text != "" {
+			fmt.Fprintf(&b, "The comment:\n%s\n", clipRunes(th.Text, hnTextRunes))
+		}
+		if article != "" {
+			fmt.Fprintf(&b, "\nThe article's text, as fetched from that URL (page chrome and all):\n%s\n",
+				clipRunes(article, hnArticleRunes))
 		}
 		fmt.Fprintf(&b, "\n%d replies follow, depth-first, each with how deep under the comment it sits.\n\n", th.Count)
 	} else {
@@ -610,30 +642,44 @@ func itemSummaryPrompt(it core.Item, th hnThread, lang string) string {
 			fmt.Fprintf(&b, "Points: %d\n", th.Points)
 		}
 		if th.Text != "" {
-			fmt.Fprintf(&b, "The post itself, by %s:\n%s\n", th.Author, clipRunes(th.Text, hnTextRunes))
+			fmt.Fprintf(&b, "The post itself:\n%s\n", clipRunes(th.Text, hnTextRunes))
+		}
+		if article != "" {
+			fmt.Fprintf(&b, "\nThe article's text, as fetched from that URL (page chrome and all):\n%s\n",
+				clipRunes(article, hnArticleRunes))
 		}
 		fmt.Fprintf(&b, "\n%d comments follow, depth-first, each with how deep in the reply tree it sits.\n\n", th.Count)
 	}
 
-	fmt.Fprintf(&b, `Answer from the comments below alone: run no commands, open no files, fetch
-nothing. Never invent a comment, a name or a fact that is not in them.
+	opener := "- Open with two or three sentences on what the discussion is actually about and\n  where it came down."
+	if article != "" {
+		opener = "- Open with two or three sentences on what the article itself says — what it\n" +
+			"  is, what it claims, what is new in it. This first, before any of the\n" +
+			"  discussion.\n" +
+			"- Then two or three sentences on what the discussion is actually about and\n  where it came down."
+	}
 
-%s Leave @handles and names as they are written rather than translating them.
+	fmt.Fprintf(&b, `Answer from what is given here alone: run no commands, open no files, fetch
+nothing. Never invent a comment or a fact that is not in it.
+
+%s Leave product and company names as they are written rather than translating
+them.
+
+Never name a commenter. No handles, no "one commenter", no "several users" —
+who held a position is not worth the words; what the position is, is.
 
 Write Markdown, and keep the whole thing under 250 words — this is read on a
 card, under the item it is about:
 
-- Open with two or three sentences on what the discussion is actually about and
-  where it came down.
-- Then bullets: one per position, argument or correction that carries weight,
-  each naming the handles that made it. Say plainly what is contested and what
-  went unanswered.
+%s
+- Then bullets: one per position, argument or correction that carries weight.
+  Say plainly what is contested and what went unanswered.
 - End with one line on whether the discussion is worth reading past the item
   itself, and why.
 - No headings, no links, no preamble, no sign-off, no code fence around the
   whole thing.
 
-`, summaryLangs[summaryLang(lang)])
+`, summaryLangs[summaryLang(lang)], opener)
 
 	n := 0
 	hnWrite(&b, th.Replies, 1, &n)

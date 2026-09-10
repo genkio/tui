@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -151,14 +152,14 @@ func TestItemSummaryPromptCarriesTheDiscussion(t *testing.T) {
 			Children: []hnAPIItem{{Author: strptr("bob"), Text: strptr("<p>reply</p>")}},
 		}},
 	})
-	p := itemSummaryPrompt(core.Item{Title: "A story", Source: "Hacker News: Best"}, th, "en")
+	p := itemSummaryPrompt(core.Item{Title: "A story", Source: "Hacker News: Best"}, th, "", "en")
 	for _, want := range []string{
 		"Story: A story",
 		"Article: https://example.com/a",
 		"Points: 191",
 		"2 comments follow",
-		"--- comment 1 · depth 1 · by alice\nfirst",
-		"--- comment 2 · depth 2 · by bob\nreply",
+		"--- comment 1 · depth 1\nfirst",
+		"--- comment 2 · depth 2\nreply",
 		"Write in English",
 	} {
 		if !strings.Contains(p, want) {
@@ -172,17 +173,139 @@ func TestItemSummaryPromptOfACommentIsAboutItsReplies(t *testing.T) {
 		Author: strptr("zahlman"), Text: strptr("<p>the comment</p>"),
 		Children: []hnAPIItem{{Author: strptr("bob"), Text: strptr("<p>no</p>")}},
 	})
-	p := itemSummaryPrompt(core.Item{Title: `New comment by zahlman in "A story"`, Source: "Hacker News: Best Comments"}, th, "zh")
+	p := itemSummaryPrompt(core.Item{Title: `New comment by zahlman in "A story"`, Source: "Hacker News: Best Comments"}, th, "", "zh")
 	for _, want := range []string{
 		"replies to one Hacker News comment",
 		`Thread: New comment by zahlman in "A story"`,
-		"The comment, by zahlman:\nthe comment",
+		"The comment:\nthe comment",
 		"1 replies follow",
 		"简体中文",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt is missing %q:\n%s", want, p)
 		}
+	}
+}
+
+// Handles are dropped on the way in, not asked to be dropped on the way out:
+// the model is never given a name it could put in the summary.
+func TestItemSummaryPromptNamesNobody(t *testing.T) {
+	th := hnThreadOf(hnRef{ID: "1", Kind: "story"}, hnAPIItem{
+		Title: strptr("A story"), Author: strptr("op"), Text: strptr("<p>asking</p>"),
+		Children: []hnAPIItem{{Author: strptr("nunez"), Text: strptr("<p>works for me</p>")}},
+	})
+	p := itemSummaryPrompt(core.Item{Title: "A story", Source: "Hacker News: Best"}, th, "", "en")
+	for _, gone := range []string{"nunez", "by op", "the handles"} {
+		if strings.Contains(p, gone) {
+			t.Errorf("prompt should not carry %q:\n%s", gone, p)
+		}
+	}
+	if !strings.Contains(p, "Never name a commenter") {
+		t.Errorf("prompt should forbid naming commenters:\n%s", p)
+	}
+}
+
+// The article is the first thing the summary is about, when there is one to
+// read; a fetch that came back empty leaves the discussion opener alone.
+func TestItemSummaryPromptOpensWithTheArticle(t *testing.T) {
+	th := hnThreadOf(hnRef{ID: "1", Kind: "story"}, hnAPIItem{
+		Title: strptr("A story"), URL: strptr("https://example.com/a"),
+		Children: []hnAPIItem{{Author: strptr("alice"), Text: strptr("<p>first</p>")}},
+	})
+	it := core.Item{Title: "A story", Source: "Hacker News: Best"}
+	with := itemSummaryPrompt(it, th, "The article says a thing.", "en")
+	for _, want := range []string{"The article's text", "The article says a thing.", "what the article itself says"} {
+		if !strings.Contains(with, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, with)
+		}
+	}
+	without := itemSummaryPrompt(it, th, "  ", "en")
+	if strings.Contains(without, "what the article itself says") {
+		t.Errorf("with no article there is nothing to open with:\n%s", without)
+	}
+}
+
+// A comment is arguing about the same article the story is, so its briefing
+// opens on the article too — it just has to be told which story it sits in.
+func TestItemSummaryPromptOfACommentCarriesTheArticle(t *testing.T) {
+	th := hnThreadOf(hnRef{ID: "2", Kind: "comment"}, hnAPIItem{
+		Author: strptr("zahlman"), Text: strptr("<p>the comment</p>"), StoryID: intptr(1),
+		Children: []hnAPIItem{{Author: strptr("bob"), Text: strptr("<p>no</p>")}},
+	})
+	if th.StoryID != "1" {
+		t.Fatalf("StoryID = %q, want the story the comment sits under", th.StoryID)
+	}
+	th.StoryURL = "https://example.com/a"
+	p := itemSummaryPrompt(core.Item{Title: "A comment", Source: "Hacker News: Best Comments"}, th,
+		"The article says a thing.", "en")
+	for _, want := range []string{
+		"Article the thread is about: https://example.com/a",
+		"The article says a thing.",
+		"what the article itself says",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, p)
+		}
+	}
+}
+
+func TestFetchHNStoryReadsTitleAndLink(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/1.json" {
+			t.Errorf("asked for %q, want the story's own id", r.URL.Path)
+		}
+		io.WriteString(w, `{"id":1,"type":"story","title":"A story","url":"https://example.com/a"}`)
+	}))
+	defer srv.Close()
+	was := hnStoryAPI
+	hnStoryAPI = srv.URL + "/"
+	defer func() { hnStoryAPI = was }()
+
+	title, url, err := fetchHNStory(context.Background(), "1")
+	if err != nil || title != "A story" || url != "https://example.com/a" {
+		t.Errorf("fetchHNStory() = %q, %q, %v", title, url, err)
+	}
+}
+
+func TestFetchHNArticleReadsThePageAsText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, `<html><head><title>t</title><style>p{}</style></head>`+
+			`<body><nav>menu here</nav><script>var x = 1;</script>`+
+			`<p>First paragraph.</p><p>Second &amp; last.</p></body></html>`)
+	}))
+	defer srv.Close()
+	got, err := fetchHNArticle(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("fetchHNArticle: %v", err)
+	}
+	for _, want := range []string{"First paragraph.", "Second & last."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("article text is missing %q:\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"menu here", "var x", "p{}"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("article text should not carry %q:\n%s", gone, got)
+		}
+	}
+}
+
+// An Ask HN links its own thread, and a PDF is not something to feed a prompt:
+// neither is fetched, and neither is an error.
+func TestFetchHNArticleSkipsWhatIsNotAnArticle(t *testing.T) {
+	got, err := fetchHNArticle(context.Background(), "https://news.ycombinator.com/item?id=49500001")
+	if err != nil || got != "" {
+		t.Errorf("got %q, %v; want the thread link skipped", got, err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		io.WriteString(w, "%PDF-1.7")
+	}))
+	defer srv.Close()
+	if got, err := fetchHNArticle(context.Background(), srv.URL); err != nil || got != "" {
+		t.Errorf("got %q, %v; want the pdf skipped", got, err)
 	}
 }
 
