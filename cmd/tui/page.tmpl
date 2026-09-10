@@ -124,6 +124,14 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .body th,.body td{min-width:96px;padding:6px 8px;border:1px solid var(--line);vertical-align:top}
 .body th{background:var(--bg);font-weight:700}
 .body code{padding:1px 4px;border-radius:4px;background:var(--bg);font-size:.9em}
+/* a code block scrolls sideways rather than wrapping: a wrapped program reads
+   as a different program, and the card is narrower than most lines of code */
+.body pre{
+  margin:12px 0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
+  background:var(--bg);font-size:13px;line-height:1.45;
+  overflow-x:auto;overscroll-behavior-x:contain;
+}
+.body pre code{padding:0;border-radius:0;background:none;font-size:inherit}
 /* how much text the ellipsis is hiding, and the control that reveals it */
 .rest{
   margin-left:5px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:600;
