@@ -2,6 +2,8 @@ module github.com/genkio/tui
 
 go 1.26
 
+toolchain go1.26.8
+
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
