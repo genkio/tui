@@ -1510,18 +1510,29 @@ func TestCardType(t *testing.T) {
 		{"youtube link", core.Item{App: "folo", Body: "clip: https://youtu.be/aqz-KE-bpKQ"}, "video"},
 		{"podcast", core.Item{App: "inoreader", Audio: "https://ex.com/ep.mp3"}, "audio"},
 		{"both", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4", Audio: "https://ex.com/ep.mp3"}, "video"},
-		// A clip is a video however short it runs: the chip counts what the post
-		// carries, not how long it plays.
-		{"fifteen-second clip", core.Item{App: "xforyou", Video: "https://video.twimg.com/a.mp4", VidSecs: 15}, "video"},
-		{"short quoted clip", core.Item{App: "x", Quote: &core.Quote{Video: "https://video.twimg.com/a.mp4", VidSecs: 30}}, "video"},
-		{"clip over an episode", core.Item{
+		// A clip the source says runs under videoFloor is a short rather than a
+		// video: a timeline is full of twenty-second loops attached to a sentence,
+		// and counting those as video makes the chip promise a screenful of
+		// watching and deliver scrolling. It still plays on its card.
+		{"fifteen-second clip", core.Item{App: "xforyou", Video: "https://video.twimg.com/a.mp4", VidSecs: 15}, "short"},
+		{"short quoted clip", core.Item{App: "x", Quote: &core.Quote{Video: "https://video.twimg.com/a.mp4", VidSecs: 30}}, "short"},
+		// An episode with a promo clip attached is still an episode: the clip is
+		// not what you would sit down for.
+		{"short clip over an episode", core.Item{
 			App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 20, Audio: "https://ex.com/ep.mp3",
-		}, "video"},
-		// The longest clip on the card decides nothing: a length is just the badge
-		// over the player, and either clip on the card is enough to be a video.
-		{"quoted clip too", core.Item{
+		}, "audio"},
+		// Five minutes exactly is not under the floor, so it is a video.
+		{"at the floor", core.Item{App: "bilibili", Video: "https://ex.com/v.mp4", VidSecs: videoFloor}, "video"},
+		{"just over the floor", core.Item{App: "bilibili", Video: "https://ex.com/v.mp4", VidSecs: videoFloor + 1}, "video"},
+		// The longest clip on the card decides: a talk with a reaction gif quoted
+		// under it is still a talk.
+		{"long over short", core.Item{
 			App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 900,
 			Quote: &core.Quote{Video: "https://video.twimg.com/b.mp4", VidSecs: 5},
+		}, "video"},
+		{"short over long", core.Item{
+			App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 5,
+			Quote: &core.Quote{Video: "https://video.twimg.com/b.mp4", VidSecs: 900},
 		}, "video"},
 		// Nobody said how long this one runs, and not knowing is not knowing it is
 		// short: a YouTube link's length is looked up from the browser, and a
@@ -1545,6 +1556,7 @@ func TestCardFilters(t *testing.T) {
 		{App: "reddit", ID: "1", Title: "read me", Source: "r/go"},
 		{App: "reddit", ID: "2", Title: "clip", URL: "https://www.redgifs.com/watch/elementaryhoarseflea"},
 		{App: "x", ID: "3", Title: "post", Source: "@vera"},
+		{App: "x", ID: "5", Title: "loop", Source: "@vera", Video: "https://video.twimg.com/loop.mp4", VidSecs: 15},
 		{App: "inoreader", ID: "4", Title: "episode", Audio: "https://ex.com/ep.mp3"},
 	}
 	for _, it := range items {
@@ -1560,6 +1572,7 @@ func TestCardFilters(t *testing.T) {
 		`data-kind="app" data-key="inoreader"`,
 		`data-kind="type" data-key="text"`,
 		`data-kind="type" data-key="video"`,
+		`data-kind="type" data-key="short"`,
 		`data-kind="type" data-key="audio"`,
 		// A pick is a page load, and on the saved list it stays on the saved list.
 		`href="/?app=reddit&amp;saved=1"`,
@@ -1584,9 +1597,11 @@ func TestCardFilters(t *testing.T) {
 		`<div class="filters" id="filters">`,
 		`data-kind="app" data-key="reddit" data-on="0"`,
 		`data-kind="type" data-key="video"`,
+		`data-kind="type" data-key="short"`,
 		`data-kind="type" data-key="audio"`,
 		`href="/?app=reddit"`,
 		`href="/?type=video"`,
+		`href="/?type=short"`,
 	} {
 		if !strings.Contains(feed, want) {
 			t.Errorf("feed page missing %s:\n%s", want, feed)
@@ -1669,6 +1684,7 @@ func TestChipQueryIsOnePick(t *testing.T) {
 		{"", feedSel{}},
 		{"app=reddit", feedSel{Kind: "app", Key: "reddit"}},
 		{"type=video", feedSel{Kind: "type", Key: "video"}},
+		{"type=short", feedSel{Kind: "type", Key: "short"}},
 		{"type=nonsense", feedSel{}},
 		{"app=xforyou", feedSel{Kind: "app", Key: xForYouApp}},
 		{"x=foryou", feedSel{Kind: "app", Key: xForYouApp}},

@@ -195,11 +195,15 @@ sends them with a beacon rather than losing them.
 
 Above the first card is one wrapping row of **chips**: a group for the
 **source** (`𝕏`, `rdt`, `ino`, …) followed by one for what the item carries
-(**text**, **video**, **audio**), each chip counting the unread items it would
-bring — so reading takes the chip numbers down alongside the header's. **video**
-is what the post carries rather than how long it runs: an attached clip, a
-quoted clip, a linked YouTube video and a redgifs one all file as video, and a
-fifteen-second clip files the same as a fifteen-minute one. One is on at a time,
+(**text**, **video**, **short**, **audio**), each chip counting the unread items
+it would bring — so reading takes the chip numbers down alongside the header's.
+**video** meaning something to sit down and watch, so a clip the source says runs
+under **five minutes** files as **short** instead: a timeline is full of
+twenty-second loops attached to a sentence, and counting those as video makes the
+chip promise a screenful of watching and deliver scrolling. A short still plays
+on its card, length badge and keep link and all, and a clip whose length nobody
+reported (a linked YouTube video, a redgifs one) stays a video, since not knowing
+how long something runs is not knowing that it is short. One is on at a time,
 and tapping it loads a page of that chip's items and nothing else
 (`?app=reddit`, `?type=video`), so the counts always say what a pick would bring
 rather than what is left of it. The header's own count stays every source's

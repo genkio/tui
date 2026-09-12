@@ -303,7 +303,7 @@ type cardData struct {
 	HasVideo    bool   // this card or its quote has a player, so show the shared controls
 	Audio       string // attached episode file; the card shows an inline audio player
 	RedGif      string // redgifs clip id; the footer offers to fetch and play it
-	Type        string // what the card carries: "video", "audio" or "text"
+	Type        string // what the card carries: "video", "short", "audio" or "text"
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
@@ -765,20 +765,29 @@ func keepURL(app, id, video string) string {
 // though nothing was attached to the item.
 var ytLinkRe = regexp.MustCompile(`(?:youtube\.com/watch\?[^#]*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)[\w-]{11}`)
 
+// videoFloor separates a video from a short: at or over it, the item is
+// something to sit down and watch; under it, it is one of the loops a timeline
+// attaches to a sentence. Both get a chip of their own — a short is still
+// something to watch, it just isn't what the video chip is for — and the length
+// stays the badge over the player either way.
+const videoFloor = 5 * 60
+
 // itemType sorts an item by what it carries, so a list can be sliced into
 // things to watch, things to listen to, and things to read. Read off the item
 // rather than the built card, because the feed picks a type before it has built
-// anything. An item with both a player and an episode is a video: that is what
-// the eye lands on. A clip is a video however short it runs — the chip counts
-// what the post carries, not how long it plays.
+// anything. An item with both a player and an episode is audio: the episode is
+// what you would sit down for, and a promo clip attached to it is not the point.
 func itemType(it core.Item) string {
-	if carriesVideo(it) {
+	switch {
+	case carriesVideo(it) && !shortClip(it):
 		return "video"
-	}
-	if it.Audio != "" {
+	case it.Audio != "":
 		return "audio"
+	case carriesVideo(it):
+		return "short"
+	default:
+		return "text"
 	}
-	return "text"
 }
 
 func carriesVideo(it core.Item) bool {
@@ -791,6 +800,20 @@ func carriesVideo(it core.Item) bool {
 		return true
 	}
 	return false
+}
+
+// shortClip reports whether the longest clip an item is known to carry runs
+// under videoFloor. A length of zero is the app reporting none, not a clip of no
+// length: an unknown length stays a video, since not knowing how long something
+// runs is not knowing that it is short. That is where a linked YouTube clip
+// lands — its length is looked up from the browser, over /ytlen, long after this
+// — and a redgifs clip, which is not resolved until you ask for it.
+func shortClip(it core.Item) bool {
+	secs := it.VidSecs
+	if it.Quote != nil && it.Quote.VidSecs > secs {
+		secs = it.Quote.VidSecs
+	}
+	return secs > 0 && secs < videoFloor
 }
 
 // chipRow builds the chip row over a list: one group per axis (which service it
@@ -865,7 +888,7 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 
 	if len(t.types) > 1 {
 		var g filterGroup
-		for _, ty := range []string{"text", "video", "audio"} { // always this order, whatever the counts
+		for _, ty := range []string{"text", "video", "short", "audio"} { // always this order, whatever the counts
 			if n := t.types[ty]; n > 0 {
 				g.Chips = append(g.Chips, filterChip{Kind: "type", Key: ty, Label: ty, Count: n})
 			}
@@ -1082,7 +1105,7 @@ func parseSel(q url.Values) feedSel {
 		return sel
 	}
 	switch ty := q.Get("type"); ty {
-	case "text", "video", "audio":
+	case "text", "video", "short", "audio":
 		return feedSel{Kind: "type", Key: ty}
 	}
 	return feedSel{}

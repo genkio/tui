@@ -313,7 +313,8 @@ func (f Feed) renderItem(it Item, selected, expanded, read bool) []string {
 
 func mediaPrefix(it Item) string {
 	switch {
-	case it.Type == "video", it.Type == "" && (it.Video != "" || it.Quote != nil && it.Quote.Video != ""):
+	case it.Type == "video", it.Type == "short",
+		it.Type == "" && (it.Video != "" || it.Quote != nil && it.Quote.Video != ""):
 		return "🎬"
 	case it.Type == "audio", it.Type == "" && it.Audio != "":
 		return "🔊"

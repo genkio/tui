@@ -88,11 +88,12 @@ func TestMediaTypePrefixesTitle(t *testing.T) {
 	f.SetSize(60, 8)
 	f.SetItems([]Item{
 		{App: "x", ID: "1", Type: "video", Title: "watch this"},
+		{App: "x", ID: "4", Type: "short", Title: "a little clip"},
 		{App: "inoreader", ID: "2", Type: "audio", Title: "listen to this"},
 		{App: "reddit", ID: "3", Type: "text", Title: "read this"},
 	}, true)
 	view := ansiStyleRE.ReplaceAllString(f.View(), "")
-	for _, want := range []string{"🎬 watch this", "🔊 listen to this", "read this"} {
+	for _, want := range []string{"🎬 watch this", "🎬 a little clip", "🔊 listen to this", "read this"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("feed missing %q:\n%s", want, view)
 		}
