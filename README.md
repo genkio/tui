@@ -416,8 +416,8 @@ else, and the header's **unread** link goes back to the feed.
 ### Summarizing a backlog
 
 Every chip with a backlog carries a ✦ beside it, **all** included. Tapping it
-hands that chip's unread items to [Codex](https://github.com/openai/codex) —
-`gpt-5.6-luna` at its default reasoning level — and nothing else happens to your
+hands that chip's unread items to [pi](https://pi.dev) driving OpenAI's
+`gpt-5.6-luna` at medium thinking — and nothing else happens to your
 page: the icon starts spinning and you carry on reading. That is the point of it.
 A run takes a minute or two, so waiting on a blank screen for one would be the
 worst way to spend it, and several sources can be spinning at once.
@@ -453,8 +453,8 @@ spends a fresh run over the backlog as it stands now.
 The runs are the server's, not the request's: closing the tab, following a link
 or picking another chip does not abandon one, and reopening the feed finds the
 icons as it left them. Only one runs at a time however many were asked for —
-codex is a subprocess costing minutes and tokens, and a handful racing finishes
-no sooner — so a chip may spin for a while waiting its turn. Needs the `codex`
+pi is a subprocess costing minutes and tokens, and a handful racing finishes
+no sooner — so a chip may spin for a while waiting its turn. Needs the `pi`
 CLI on the host's PATH and logged in; without it the icon says so and goes back
 to idle.
 
@@ -464,7 +464,7 @@ about. There is no item limit; the only bound is a 700-character clip per item,
 which keeps one long article from spending the whole prompt, so a prompt grows
 with the count and nothing else. A few hundred posts is tens of thousands of
 tokens (x at 303 items ≈ 36k, reddit at 380 ≈ 59k). A backlog deep enough to
-outrun the model's context fails as a job, carrying whatever codex said about
+outrun the model's context fails as a job, carrying whatever pi said about
 it, rather than being quietly trimmed to fit.
 
 **all** is the one exception, and the only briefing with a limit: every source's
@@ -510,8 +510,8 @@ official API's one request per comment.
 It is the same machinery the source briefings run on, so it behaves the same
 way: the tap fires and nothing else, the run is the server's rather than the
 request's, and a thread and a backlog queue behind each other rather than racing
-for the one codex process. The button says which state it is in — **reading…**
-while codex has it, filled in the accent colour once there is one — and a toast
+for the one pi process. The button says which state it is in — **reading…**
+while pi has it, filled in the accent colour once there is one — and a toast
 carries the failure if there is one.
 
 The summary lands **under the footer that asked for it, inside the card**, not in

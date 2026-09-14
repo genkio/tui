@@ -15,13 +15,13 @@ import (
 	"github.com/genkio/tui/core"
 )
 
-// testSummarizer is the real thing with the codex call replaced: a test has no
+// testSummarizer is the real thing with the CLI call replaced: a test has no
 // business spending minutes on a model to find out whether a handler picks the
 // right items. Its worker runs for the length of the test.
-func testSummarizer(t *testing.T, cache *feedCache, codex func(context.Context, string) (string, error)) *summarizer {
+func testSummarizer(t *testing.T, cache *feedCache, ask func(context.Context, string) (string, error)) *summarizer {
 	t.Helper()
 	sum := newSummarizer(cache)
-	sum.codex = codex
+	sum.ask = ask
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); sum.serve(ctx) }()
@@ -253,7 +253,7 @@ func TestSummaryStatesListing(t *testing.T) {
 }
 
 // Several sources can be asked for at once — that is the whole point of firing
-// one and carrying on reading — but only one may actually be running: codex is a
+// one and carrying on reading — but only one may actually be running: the model is a
 // subprocess costing minutes and tokens, and a handful racing finishes no sooner.
 func TestSummarizeRunsOneAtATime(t *testing.T) {
 	cache := newTestCache(t)
@@ -321,7 +321,7 @@ func TestSummarizeRefusals(t *testing.T) {
 	cache := newTestCache(t)
 	cache.upsert([]core.Item{{App: "x", ID: "1", Title: "one"}}, time.Now())
 	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
-		return "", errors.New("codex failed: stream error: unknown model")
+		return "", errors.New("pi failed: stream error: unknown model")
 	})
 
 	if rec := post(t, sum, ""); rec.Code != http.StatusBadRequest {
@@ -483,20 +483,20 @@ func TestSummaryPromptShapesTheCitations(t *testing.T) {
 
 // What went wrong has to survive the trip to a toast: the CLI's own words about
 // it, not the exit status it dressed them in.
-func TestCodexTrouble(t *testing.T) {
+func TestPiTrouble(t *testing.T) {
 	fail := errors.New("exit status 1")
 	for _, tc := range []struct {
 		name, log, want string
 	}{
 		{"the line that names it", "workdir: /tmp\nERROR: stream disconnected\ntokens used 400", "ERROR: stream disconnected"},
-		{"its last words otherwise", "workdir: /tmp\nnot logged in: run codex login\n", "not logged in: run codex login"},
+		{"its last words otherwise", "workdir: /tmp\nnot logged in: run pi auth login\n", "not logged in: run pi auth login"},
 		{"the exit status when it said nothing", "  \n", "exit status 1"},
 	} {
-		if got := codexTrouble(tc.log, fail); got != tc.want {
-			t.Errorf("%s: codexTrouble = %q, want %q", tc.name, got, tc.want)
+		if got := piTrouble(tc.log, fail); got != tc.want {
+			t.Errorf("%s: piTrouble = %q, want %q", tc.name, got, tc.want)
 		}
 	}
-	if got := codexTrouble(strings.Repeat("z", 400), fail); len([]rune(got)) != 204 {
+	if got := piTrouble(strings.Repeat("z", 400), fail); len([]rune(got)) != 204 {
 		t.Errorf("a toast cannot hold a whole log: %d runes", len([]rune(got)))
 	}
 }
@@ -619,11 +619,11 @@ func hnItem() core.Item {
 	}
 }
 
-// testItemSummarizer is the real thing with both subprocesses gone: no codex,
+// testItemSummarizer is the real thing with both subprocesses gone: no CLI,
 // and no trip to Hacker News.
-func testItemSummarizer(t *testing.T, cache *feedCache, thread hnThread, threadErr error, codex func(context.Context, string) (string, error)) *summarizer {
+func testItemSummarizer(t *testing.T, cache *feedCache, thread hnThread, threadErr error, ask func(context.Context, string) (string, error)) *summarizer {
 	t.Helper()
-	sum := testSummarizer(t, cache, codex)
+	sum := testSummarizer(t, cache, ask)
 	sum.hn = func(_ context.Context, ref hnRef) (hnThread, error) {
 		thread.Ref = ref
 		return thread, threadErr
@@ -692,7 +692,7 @@ func TestSummarizeOneItemsDiscussion(t *testing.T) {
 			t.Errorf("prompt = %q, want the thread in it", p)
 		}
 	default:
-		t.Error("codex was never asked")
+		t.Error("the model was never asked")
 	}
 
 	// The source's own briefing is a separate job under a separate key: asking
@@ -712,7 +712,7 @@ func TestSummarizeItemRefusesWhatItCannotRead(t *testing.T) {
 		{App: "reddit", ID: "1", Title: "not hacker news", Source: "r/golang"},
 	}, now)
 	sum := testItemSummarizer(t, cache, hnThread{}, nil, func(context.Context, string) (string, error) {
-		t.Error("codex should not have been asked")
+		t.Error("the model should not have been asked")
 		return "", nil
 	})
 
@@ -736,7 +736,7 @@ func TestSummarizeItemSaysWhenNobodyReplied(t *testing.T) {
 		Body:  "a comment nobody answered",
 	}}, now)
 	sum := testItemSummarizer(t, cache, hnThread{}, nil, func(context.Context, string) (string, error) {
-		t.Error("codex should not have been asked")
+		t.Error("the model should not have been asked")
 		return "", nil
 	})
 
@@ -755,7 +755,7 @@ func TestSummarizeItemCarriesTheFetchFailure(t *testing.T) {
 	cache := newTestCache(t)
 	cache.upsert([]core.Item{hnItem()}, time.Now())
 	sum := testItemSummarizer(t, cache, hnThread{}, errors.New("could not reach Hacker News"), func(context.Context, string) (string, error) {
-		t.Error("codex should not have been asked")
+		t.Error("the model should not have been asked")
 		return "", nil
 	})
 

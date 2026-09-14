@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 // would only be a way to get a worse one. Medium is the default level, which is
 // what this work wants — the reading is the cost, not the thinking.
 const (
+	summaryProvider  = "openai-codex"
 	summaryModel     = "gpt-5.6-luna"
 	summaryReasoning = "medium"
 	// A run reads a whole backlog and thinks about it, which is minutes rather
@@ -34,7 +34,7 @@ const (
 	// nothing else — a few hundred posts is tens of thousands of tokens.
 	//
 	// A backlog deep enough to outrun the model's context fails as a job, with
-	// what codex said about it, rather than being silently trimmed to fit.
+	// whatever the CLI said about it, rather than being silently trimmed to fit.
 	summaryBodyRunes = 700
 	// How many sources can be waiting on the one worker. There are only ever a
 	// handful of apps, so this is a bound against a stuck queue rather than a
@@ -138,16 +138,16 @@ func summaryKey(app, id string) string {
 // inside a request for two reasons: a source's chip fires one and you carry on
 // reading, so the request that started it is gone long before it finishes, and
 // several can be asked for at once while only one should actually be running —
-// codex is a subprocess costing minutes and tokens, and a handful of them racing
-// each other finishes no sooner.
+// the model runs in a subprocess costing minutes and tokens, and a handful of
+// them racing each other finishes no sooner.
 //
-// codex is the CLI call, swapped out in tests, which have no business spending
+// ask is the CLI call, swapped out in tests, which have no business spending
 // five minutes on a model to find out whether a handler validates its form. hn
 // is the comment fetch an item's briefing starts with, swapped for the same
 // reason; find is how an item is looked up, which the server widens past the
 // backlog cache to the saved list.
 type summarizer struct {
-	codex   func(ctx context.Context, prompt string) (string, error)
+	ask     func(ctx context.Context, prompt string) (string, error)
 	hn      func(ctx context.Context, ref hnRef) (hnThread, error)
 	story   func(ctx context.Context, id string) (title, url string, err error)
 	article func(ctx context.Context, url string) (string, error)
@@ -165,7 +165,7 @@ type summarizer struct {
 
 func newSummarizer(cache *feedCache) *summarizer {
 	return &summarizer{
-		codex:   codexSummary,
+		ask:     piSummary,
 		hn:      fetchHNThread,
 		story:   fetchHNStory,
 		article: fetchHNArticle,
@@ -234,7 +234,7 @@ func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
 	if len(items) == 0 {
 		return summaryJob{State: "failed", Lang: ask.lang, Err: "nothing unread there any more"}
 	}
-	md, err := s.codex(ctx, summaryPrompt(ask.app, ask.lang, items))
+	md, err := s.ask(ctx, summaryPrompt(ask.app, ask.lang, items))
 	if err != nil {
 		if ctx.Err() != nil {
 			return summaryJob{State: "failed", Lang: ask.lang, Err: "the server stopped before the summary was written"}
@@ -311,7 +311,7 @@ func (s *summarizer) briefItem(ctx context.Context, ask summaryAsk) summaryJob {
 	if s.article != nil && articleURL != "" {
 		article, _ = s.article(ctx, articleURL)
 	}
-	md, err := s.codex(ctx, itemSummaryPrompt(it, th, article, ask.lang))
+	md, err := s.ask(ctx, itemSummaryPrompt(it, th, article, ask.lang))
 	if err != nil {
 		if ctx.Err() != nil {
 			return fail("the server stopped before the summary was written")
@@ -707,69 +707,69 @@ func clipRunes(s string, n int) string {
 	return s
 }
 
-// codexSummary runs the prompt through the Codex CLI and returns the model's
-// last message.
+// piSummary runs the prompt through the pi CLI and returns the model's answer.
+// pi drives OpenAI's Codex models here; the Codex CLI it used to shell out to
+// is gone from these machines.
 //
 // The prompt goes in on stdin rather than as an argument: a few hundred posts
 // runs to hundreds of kilobytes, which is an argument list no shell or exec is
-// obliged to accept. The answer comes back through --output-last-message rather
-// than off stdout, which also carries the CLI's own progress.
+// obliged to accept. In print mode the answer is all that lands on stdout, and
+// pi's own notices go to stderr, so the two never have to be told apart.
 //
-// It is given an empty temporary directory to work in and a read-only sandbox.
-// There is nothing here for a model to run or edit — the whole job is in the
-// prompt — and pointing it at the feed server's own working directory would be
-// handing it a repository it has no business in.
-func codexSummary(ctx context.Context, prompt string) (string, error) {
-	bin, err := exec.LookPath("codex")
+// Every tool is off and so is every bit of discovery — extensions, skills,
+// AGENTS.md. There is nothing here for a model to run or edit, the whole job is
+// in the prompt, and a reviewer told not to write still shells out and writes.
+// It runs in an empty temporary directory for the same reason: pointing it at
+// the feed server's own working directory would be handing it a repository it
+// has no business in.
+func piSummary(ctx context.Context, prompt string) (string, error) {
+	bin, err := exec.LookPath("pi")
 	if err != nil {
-		return "", errors.New("codex is not on PATH: install the Codex CLI to summarize a backlog")
+		return "", errors.New("pi is not on PATH: install the pi CLI to summarize a backlog")
 	}
 	dir, err := os.MkdirTemp("", "tui-summary-")
 	if err != nil {
 		return "", fmt.Errorf("summary workspace: %w", err)
 	}
 	defer os.RemoveAll(dir)
-	out := filepath.Join(dir, "summary.md")
 
 	ctx, cancel := context.WithTimeout(ctx, summaryTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "exec",
+	cmd := exec.CommandContext(ctx, bin,
+		"--print",
+		"--provider", summaryProvider,
 		"--model", summaryModel,
-		"-c", "model_reasoning_effort="+summaryReasoning,
-		"--sandbox", "read-only",
-		"--cd", dir,
-		"--skip-git-repo-check",
-		"--ephemeral",
-		"--color", "never",
-		"--output-last-message", out,
-		"-")
+		"--thinking", summaryReasoning,
+		"--no-tools",
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-context-files",
+		"--no-session")
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(prompt)
-	var log bytes.Buffer
-	cmd.Stdout = &log
+	var out, log bytes.Buffer
+	cmd.Stdout = &out
 	cmd.Stderr = &log
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("the summary took longer than %s — try one source at a time", summaryTimeout)
 		}
-		return "", fmt.Errorf("codex failed: %s", codexTrouble(log.String(), err))
+		return "", fmt.Errorf("pi failed: %s", piTrouble(log.String(), err))
 	}
-	b, err := os.ReadFile(out)
-	if err != nil {
-		return "", fmt.Errorf("codex wrote no summary: %s", codexTrouble(log.String(), err))
-	}
-	md := strings.TrimSpace(string(b))
+	md := strings.TrimSpace(out.String())
 	if md == "" {
-		return "", errors.New("codex returned an empty summary")
+		return "", errors.New("pi returned an empty summary")
 	}
 	return md, nil
 }
 
-// codexTrouble picks what to put in front of the reader when the CLI fails. Its
+// piTrouble picks what to put in front of the reader when the CLI fails. Its
 // own words say more than the exit status does — a stale login, an unknown model
 // — so look for the line that names the trouble, fall back to its last one, and
 // trim to what a toast can hold. The exit status is all that is left when it
 // said nothing at all.
-func codexTrouble(log string, err error) string {
+func piTrouble(log string, err error) string {
 	var last, blamed string
 	for _, ln := range strings.Split(strings.TrimSpace(log), "\n") {
 		ln = strings.TrimSpace(ln)
