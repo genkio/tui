@@ -1,12 +1,31 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/genkio/tui/core"
 )
+
+// TestMain refuses to run the suite when the binary was invoked the way this
+// package invokes plugins — `tui reddit --json`, with a bare word for the app.
+// The server runs those as subprocesses of self(), and under `go test` self()
+// is the test binary: a test that leaves the real fetch in place forks a child
+// that runs the whole suite again, which forks more. One of those got a machine
+// to a load average of 260. A test that means to sweep stubs fetch; nothing
+// here has any business re-execing itself.
+func TestMain(m *testing.M) {
+	for _, a := range os.Args[1:] {
+		if !strings.HasPrefix(a, "-") {
+			fmt.Fprintf(os.Stderr, "tui.test: refusing to run as %q — a test left a real subprocess fetch in place\n", a)
+			os.Exit(2)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 func TestParseCountToken(t *testing.T) {
 	cases := []struct {

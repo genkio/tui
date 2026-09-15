@@ -429,6 +429,12 @@ func TestKickDoesNotBlock(t *testing.T) {
 func TestSweepRunsAfterHook(t *testing.T) {
 	c := loadFeedCache(filepath.Join(t.TempDir(), "feed.json"))
 	s := newSweeper(t.TempDir(), c, nil, nil, false, 0)
+	// Canned, like every other sweeper here: the real fetch runs one subprocess
+	// per app, and under a test binary that subprocess is this test binary.
+	s.mark = (&fakeMark{}).fn
+	s.fetch = func(context.Context, string, int, time.Time) ([]core.Item, bool, error) {
+		return nil, false, nil
+	}
 	called := 0
 	s.after = func() error {
 		called++
