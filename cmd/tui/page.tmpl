@@ -367,7 +367,7 @@ button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);pa
 body.sumon .summary{display:block}
 .smeta{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 /* the briefing has been overtaken: items arrived that it never read. Loud
-   enough to catch the eye next to "again", which is what it is telling you to
+   enough to catch the eye next to "next", which is what it is telling you to
    do, and gone entirely when there is nothing to say. */
 .sold{padding:1px 8px;border:1px solid var(--accent);border-radius:999px;color:var(--accent);font-weight:600}
 .sold:empty{display:none}
@@ -1393,6 +1393,7 @@ document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.rest, button.expand') : null;
   if (!b) return;
   var card = b.closest('article.card');
+  if (!card) return; // the briefing's own controls wear .rest and have no card
   card.querySelectorAll('.preview, .full').forEach(function(el){ el.classList.toggle('hid'); });
   var expanded = card.querySelector('.preview').classList.contains('hid');
   var less = card.querySelector('.footer > button.expand');
@@ -1587,7 +1588,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
 // you were is the point of a summary that names items to open.
 //
 // Results live in sessionStorage, so toggling the two views costs nothing and
-// "again" is how you spend another run. Session rather than local storage
+// "next"/"retry" is how you spend another run. Session rather than local storage
 // because a briefing is about a backlog as it stood, and a backlog is exactly
 // what changes while a tab is closed.
 (function(){
@@ -1729,13 +1730,25 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     behindNote.className = 'sold';
     meta.appendChild(behindNote);
     paintBehind();
-    var again = document.createElement('button');
-    again.type = 'button';
-    again.className = 'rest';
-    again.textContent = 'again';
-    again.title = 'summarize the backlog as it stands now';
-    again.addEventListener('click', function(){ start(mine); waiting(); });
-    meta.appendChild(again);
+    // Two ways to spend another run, and the difference matters: "next" reads the
+    // backlog as it stands, which after a capped briefing is the items behind
+    // these ones; "retry" reads this same batch over again, which is what a run
+    // the model made a mess of needs and what "next" would quietly skip past.
+    var next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'rest';
+    next.textContent = 'next';
+    next.title = 'summarize the backlog as it stands now';
+    next.addEventListener('click', function(){ start(mine); waiting(); });
+    meta.appendChild(next);
+    var gen = d.generated || '';
+    var redo = document.createElement('button');
+    redo.type = 'button';
+    redo.className = 'rest';
+    redo.textContent = 'retry';
+    redo.title = 'write this briefing again over the same items';
+    redo.addEventListener('click', function(){ start(mine, gen); waiting(); });
+    meta.appendChild(redo);
     // What the tab held may predate a sweep or two, and the note is the whole
     // point of being told so: ask the server before believing the count.
     recount();
@@ -1748,13 +1761,16 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     panel.appendChild(body);
   }
 
-  function start(app){
+  // gen asks for the run stamped that way to be written again over its own
+  // items, rather than for the backlog as it stands.
+  function start(app, gen){
     if (state(app) === 'running') return;
     setState(app, 'running');
     var fd = new FormData();
     fd.append('app', app);
     fd.append('lang', SUM_LANG);
     fd.append('order', FEED_ASC ? 'asc' : 'desc');
+    if (gen) fd.append('gen', gen);
     fetch('/summarize', {method:'POST', body:fd})
       .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
       .then(function(){ watch(); })

@@ -300,7 +300,7 @@ func TestSummarizeRunsOneAtATime(t *testing.T) {
 	// the whole of what was asked for.
 	idle := newSummarizer(cache)
 	for i := 0; i < 3; i++ {
-		if err := idle.start("reddit", "", "en", false); err != nil {
+		if err := idle.start(summaryAsk{app: "reddit", lang: "en"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -310,9 +310,9 @@ func TestSummarizeRunsOneAtATime(t *testing.T) {
 
 	// The bound is against a stuck queue, not something anyone should meet.
 	for i := 0; i < summaryQueue; i++ {
-		_ = idle.start("app"+strconv.Itoa(i), "", "en", false)
+		_ = idle.start(summaryAsk{app: "app" + strconv.Itoa(i), lang: "en"})
 	}
-	if err := idle.start("one too many", "", "en", false); err == nil {
+	if err := idle.start(summaryAsk{app: "one too many", lang: "en"}); err == nil {
 		t.Error("a full queue should say so rather than growing forever")
 	}
 }
@@ -340,6 +340,58 @@ func TestSummarizeRefusals(t *testing.T) {
 	j := settled(t, sum, "x")
 	if j.State != "failed" || !strings.Contains(j.Err, "unknown model") {
 		t.Errorf("job = %+v, want the failure and its reason", j)
+	}
+}
+
+// A retry is the same batch over again, whatever has happened to the backlog
+// since: that is the whole difference between it and "next", and a run the model
+// made a mess of is worth another go at the items you were promised.
+func TestRetryRereadsTheRunsOwnItems(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{
+		{App: "reddit", ID: "1", Title: "first", At: now.Add(-3 * time.Hour)},
+		{App: "reddit", ID: "2", Title: "second", At: now.Add(-2 * time.Hour)},
+	}, now)
+
+	prompts := make(chan string, 2)
+	sum := testSummarizer(t, cache, func(_ context.Context, p string) (string, error) {
+		prompts <- p
+		return "- a briefing", nil
+	})
+	if rec := post(t, sum, "app=reddit"); rec.Code != http.StatusAccepted {
+		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
+	}
+	first := settled(t, sum, "reddit")
+	if first.State != "done" {
+		t.Fatalf("job = %+v, want done", first)
+	}
+	<-prompts
+
+	// The backlog moves on under the briefing: one of its items read, another
+	// arrived. Neither is any business of a retry.
+	cache.markRead("reddit", []string{"1"}, now)
+	cache.upsert([]core.Item{{App: "reddit", ID: "3", Title: "landed since", At: now}}, now)
+
+	if rec := post(t, sum, "app=reddit&gen="+first.Generated); rec.Code != http.StatusAccepted {
+		t.Fatalf("retry = %d %s", rec.Code, rec.Body.String())
+	}
+	again := settled(t, sum, "reddit")
+	if again.State != "done" || again.Count != 2 {
+		t.Fatalf("retry job = %+v, want the same two items", again)
+	}
+	prompt := <-prompts
+	if !strings.Contains(prompt, "first") || !strings.Contains(prompt, "second") {
+		t.Errorf("a retry should read the run's own items, read or not:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "landed since") {
+		t.Errorf("a retry should not pick up what arrived after the run:\n%s", prompt)
+	}
+
+	// Asking for a run this server no longer holds the ids of is a refusal rather
+	// than a briefing of whatever the backlog happens to hold.
+	if rec := post(t, sum, "app=reddit&gen=2000-01-01T00:00:00Z"); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown run status = %d, want 404", rec.Code)
 	}
 }
 

@@ -115,11 +115,16 @@ type summaryJob struct {
 // asc is which end of the backlog the page is reading from, which is the end a
 // capped briefing is taken from: told what the 200 you are about to read say,
 // not what 200 you will not reach for days say.
+// redo names an earlier run of the same source by its stamp, and asks for that
+// run's own items over again rather than the backlog as it stands: a briefing
+// the model made a mess of is worth another go at the same batch, while a fresh
+// run would have moved on to whatever has landed since.
 type summaryAsk struct {
 	app  string
 	id   string
 	lang string
 	asc  bool
+	redo string
 }
 
 func (a summaryAsk) key() string { return summaryKey(a.app, a.id) }
@@ -197,18 +202,18 @@ func (s *summarizer) serve(ctx context.Context) {
 // start puts an ask in the queue, unless one is already going for it. The
 // running state is written before the queueing, so a control that has just been
 // tapped reads as busy however long the queue is.
-func (s *summarizer) start(app, id, lang string, asc bool) error {
-	lang = summaryLang(lang)
-	key := summaryKey(app, id)
+func (s *summarizer) start(ask summaryAsk) error {
+	ask.lang = summaryLang(ask.lang)
+	key := ask.key()
 	s.mu.Lock()
 	if s.jobs[key].State == "running" {
 		s.mu.Unlock()
 		return nil // already going: the tap that started it says the same thing
 	}
-	s.jobs[key] = summaryJob{State: "running", Lang: lang}
+	s.jobs[key] = summaryJob{State: "running", Lang: ask.lang}
 	s.mu.Unlock()
 	select {
-	case s.queue <- summaryAsk{app: app, id: id, lang: lang, asc: asc}:
+	case s.queue <- ask:
 		return nil
 	default:
 		s.mu.Lock()
@@ -230,8 +235,11 @@ func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
 // it stood when the chip was tapped, since a queue can hold a source for
 // minutes and the fresher list is the one worth reading.
 func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
-	items, backlog := summaryItems(s.cache.unread(time.Now(), ""), ask.app, ask.asc)
+	items, backlog := s.pick(ask)
 	if len(items) == 0 {
+		if ask.redo != "" {
+			return summaryJob{State: "failed", Lang: ask.lang, Err: "none of what that briefing read is still here"}
+		}
 		return summaryJob{State: "failed", Lang: ask.lang, Err: "nothing unread there any more"}
 	}
 	md, err := s.ask(ctx, summaryPrompt(ask.app, ask.lang, items))
@@ -260,6 +268,21 @@ func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
 		HTML:      linkify(md),
 		Generated: time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+// pick is what a run reads, with how deep the backlog behind it was. A redo
+// reads the named run's own items straight out of the cache, so a second go at a
+// batch is the same batch however much has landed or been marked off since; the
+// depth it is measured against is today's, since "200 of 356" is a statement
+// about the backlog as it stands in front of you.
+func (s *summarizer) pick(ask summaryAsk) ([]core.Item, int) {
+	if ask.redo == "" {
+		return summaryItems(s.cache.unread(time.Now(), ""), ask.app, ask.asc)
+	}
+	items := s.cache.byKeys(s.covered(ask.app, ask.redo), time.Now())
+	sortItems(items, true)
+	_, backlog := summaryItems(s.cache.unread(time.Now(), ""), ask.app, ask.asc)
+	return items, backlog
 }
 
 // briefItem is one card's discussion: what the room said under it, which is the
@@ -418,14 +441,25 @@ func startSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
 			http.Error(w, "only Hacker News items carry a discussion to summarize", http.StatusBadRequest)
 			return
 		}
-		startAsk(w, r, sum, app, id)
+		startAsk(w, r, sum, app, id, "")
+		return
+	}
+	// A redo names the run to read again, and the ids behind it are kept for only
+	// a few runs (summaryKept): say so now rather than hand back a briefing of
+	// whatever the backlog happens to hold.
+	if gen := strings.TrimSpace(r.FormValue("gen")); gen != "" {
+		if len(sum.covered(app, gen)) == 0 {
+			http.Error(w, "the server no longer has that briefing — summarize again to read the backlog as it stands", http.StatusNotFound)
+			return
+		}
+		startAsk(w, r, sum, app, "", gen)
 		return
 	}
 	if items, _ := summaryItems(sum.cache.unread(time.Now(), ""), app, false); len(items) == 0 {
 		http.Error(w, "nothing unread there to summarize", http.StatusNotFound)
 		return
 	}
-	startAsk(w, r, sum, app, "")
+	startAsk(w, r, sum, app, "", "")
 }
 
 // covered is what a finished briefing read, as feed keys, which is what mark-all
@@ -460,8 +494,9 @@ func (s *summarizer) covered(key, gen string) map[string]bool {
 // Which end of the feed the page is reading from rides along for the same
 // reason the language does: it is the browser's setting, and it decides which
 // slice a capped briefing takes.
-func startAsk(w http.ResponseWriter, r *http.Request, sum *summarizer, app, id string) {
-	if err := sum.start(app, id, r.FormValue("lang"), r.FormValue("order") == "asc"); err != nil {
+func startAsk(w http.ResponseWriter, r *http.Request, sum *summarizer, app, id, redo string) {
+	ask := summaryAsk{app: app, id: id, lang: r.FormValue("lang"), asc: r.FormValue("order") == "asc", redo: redo}
+	if err := sum.start(ask); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}

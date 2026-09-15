@@ -258,6 +258,28 @@ func (c *feedCache) item(app, id string, now time.Time) (core.Item, bool) {
 	return e.Wire.Item(now), true
 }
 
+// byKeys returns the cached items under these feed keys, read or not, unsorted.
+// Read ones are kept on purpose: this is how a briefing is written a second time
+// over the batch it already read, and marking a few of them off in between must
+// not quietly change what gets re-read. Ages are recomputed as unread does.
+func (c *feedCache) byKeys(keys map[string]bool, now time.Time) []core.Item {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]core.Item, 0, len(keys))
+	for k := range keys {
+		e, ok := c.byKey[k]
+		if !ok {
+			continue
+		}
+		it := e.Wire.Item(now)
+		if !it.At.IsZero() {
+			it.Age = humanAgo(it.At)
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
 // markRead records your read of these ids and returns the ones the cache has
 // never heard of, which the caller passes straight to the app instead. Synced
 // is deliberately untouched: an entry a drain already reported upstream needs
