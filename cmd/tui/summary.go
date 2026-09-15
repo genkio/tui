@@ -147,13 +147,13 @@ func summaryKey(app, id string) string {
 // them racing each other finishes no sooner.
 //
 // ask is the CLI call, swapped out in tests, which have no business spending
-// five minutes on a model to find out whether a handler validates its form. hn
-// is the comment fetch an item's briefing starts with, swapped for the same
-// reason; find is how an item is looked up, which the server widens past the
-// backlog cache to the saved list.
+// five minutes on a model to find out whether a handler validates its form.
+// thread is the comment fetch an item's briefing starts with, swapped for the
+// same reason; find is how an item is looked up, which the server widens past
+// the backlog cache to the saved list.
 type summarizer struct {
 	ask     func(ctx context.Context, prompt string) (string, error)
-	hn      func(ctx context.Context, ref hnRef) (hnThread, error)
+	thread  func(ctx context.Context, ref gistRef) (discussion, error)
 	story   func(ctx context.Context, id string) (title, url string, err error)
 	article func(ctx context.Context, url string) (string, error)
 	find    func(app, id string, now time.Time) (core.Item, bool)
@@ -171,9 +171,9 @@ type summarizer struct {
 func newSummarizer(cache *feedCache) *summarizer {
 	return &summarizer{
 		ask:     piSummary,
-		hn:      fetchHNThread,
+		thread:  fetchDiscussion,
 		story:   fetchHNStory,
-		article: fetchHNArticle,
+		article: fetchArticle,
 		find: func(app, id string, now time.Time) (core.Item, bool) {
 			return cache.item(app, id, now)
 		},
@@ -286,9 +286,9 @@ func (s *summarizer) pick(ask summaryAsk) ([]core.Item, int) {
 }
 
 // briefItem is one card's discussion: what the room said under it, which is the
-// part a Hacker News card does not carry. A story is read through its comments
-// and a comment through its replies — the same run either way, over a different
-// piece of the same tree.
+// part the card does not carry. A story or a post is read through its comments
+// and a Hacker News comment through its replies — the same run every time, over
+// a different piece of some tree.
 //
 // The fetch happens here rather than when the button is tapped, on the worker's
 // turn: a thread is a megabyte of JSON over a public API, and the run behind it
@@ -301,11 +301,11 @@ func (s *summarizer) briefItem(ctx context.Context, ask summaryAsk) summaryJob {
 	if !ok {
 		return fail("that item is no longer here")
 	}
-	ref, ok := hnRefOf(it)
+	ref, ok := gistRefOf(it)
 	if !ok {
-		return fail("only Hacker News items carry a discussion to summarize")
+		return fail(gistRefusal)
 	}
-	th, err := s.hn(ctx, ref)
+	th, err := s.thread(ctx, ref)
 	if err != nil {
 		if ctx.Err() != nil {
 			return fail("the server stopped before the summary was written")
@@ -313,10 +313,7 @@ func (s *summarizer) briefItem(ctx context.Context, ask summaryAsk) summaryJob {
 		return fail(err.Error())
 	}
 	if th.Count == 0 {
-		if ref.Kind == "comment" {
-			return fail("nobody has replied to that comment yet")
-		}
-		return fail("nothing has been said under that story yet")
+		return fail(nothingSaid(ref))
 	}
 	// The article a reply is arguing about is as much the point under a comment
 	// as under a story; a comment just has to be told which story it sits in
@@ -421,8 +418,8 @@ func (s *summarizer) states() map[string]summaryJob {
 // Nothing is marked read by being summarized. Having been told what is in a
 // batch is not having read it, and a briefing that emptied the backlog behind
 // itself would leave you unable to act on what it just told you.
-// An id makes it one item's discussion instead — a Hacker News card, whose
-// comments are the half of it the feed does not carry.
+// An id makes it one item's discussion instead — a Hacker News or reddit card,
+// whose comments are the half of it the feed does not carry.
 func startSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
 	app := strings.TrimSpace(r.FormValue("app"))
 	if app == "" {
@@ -437,8 +434,8 @@ func startSummary(w http.ResponseWriter, r *http.Request, sum *summarizer) {
 			http.Error(w, "no such item: it is neither in the backlog nor saved", http.StatusNotFound)
 			return
 		}
-		if _, ok := hnRefOf(it); !ok {
-			http.Error(w, "only Hacker News items carry a discussion to summarize", http.StatusBadRequest)
+		if _, ok := gistRefOf(it); !ok {
+			http.Error(w, gistRefusal, http.StatusBadRequest)
 			return
 		}
 		startAsk(w, r, sum, app, id, "")
@@ -646,7 +643,7 @@ in the one theme instead of repeating it.
 // Who said what is left out on purpose, here and in the comment dump: the
 // positions are the point, and a list of handles is noise to anyone who is not
 // already in that thread.
-func itemSummaryPrompt(it core.Item, th hnThread, article, lang string) string {
+func itemSummaryPrompt(it core.Item, th discussion, article, lang string) string {
 	article = strings.TrimSpace(article)
 	var b strings.Builder
 	if th.Ref.Kind == "comment" {
@@ -656,32 +653,44 @@ func itemSummaryPrompt(it core.Item, th hnThread, article, lang string) string {
 			fmt.Fprintf(&b, "Article the thread is about: %s\n", th.StoryURL)
 		}
 		if th.Text != "" {
-			fmt.Fprintf(&b, "The comment:\n%s\n", clipRunes(th.Text, hnTextRunes))
+			fmt.Fprintf(&b, "The comment:\n%s\n", clipRunes(th.Text, commentRunes))
 		}
 		if article != "" {
 			fmt.Fprintf(&b, "\nThe article's text, as fetched from that URL (page chrome and all):\n%s\n",
-				clipRunes(article, hnArticleRunes))
+				clipRunes(article, articleRunes))
 		}
 		fmt.Fprintf(&b, "\n%d replies follow, depth-first, each with how deep under the comment it sits.\n\n", th.Count)
 	} else {
-		fmt.Fprintf(&b, "Summarize the Hacker News discussion under a story for someone deciding whether to open it.\n\n")
+		// A reddit post is a story by another name, and the room under it reads
+		// the same way; what changes is what to call the thing and where the
+		// votes come from.
+		saying, called, votes := "Hacker News discussion under a story", "Story", "Points"
+		if th.Ref.Service == gistReddit {
+			saying, called, votes = "Reddit discussion under a post", "Post", "Upvotes"
+		}
+		fmt.Fprintf(&b, "Summarize the %s for someone deciding whether to open it.\n\n", saying)
 		title := th.Title
 		if title == "" {
 			title = itemTitle(it)
 		}
-		fmt.Fprintf(&b, "Story: %s\n", oneLine(title))
+		fmt.Fprintf(&b, "%s: %s\n", called, oneLine(title))
+		// Which subreddit it ran in is half of what a reddit post means, and the
+		// item carries it as the source it was filed under.
+		if th.Ref.Service == gistReddit && strings.TrimSpace(it.Source) != "" {
+			fmt.Fprintf(&b, "Subreddit: %s\n", oneLine(it.Source))
+		}
 		if th.URL != "" {
 			fmt.Fprintf(&b, "Article: %s\n", th.URL)
 		}
 		if th.Points > 0 {
-			fmt.Fprintf(&b, "Points: %d\n", th.Points)
+			fmt.Fprintf(&b, "%s: %d\n", votes, th.Points)
 		}
 		if th.Text != "" {
-			fmt.Fprintf(&b, "The post itself:\n%s\n", clipRunes(th.Text, hnTextRunes))
+			fmt.Fprintf(&b, "The post itself:\n%s\n", clipRunes(th.Text, commentRunes))
 		}
 		if article != "" {
 			fmt.Fprintf(&b, "\nThe article's text, as fetched from that URL (page chrome and all):\n%s\n",
-				clipRunes(article, hnArticleRunes))
+				clipRunes(article, articleRunes))
 		}
 		fmt.Fprintf(&b, "\n%d comments follow, depth-first, each with how deep in the reply tree it sits.\n\n", th.Count)
 	}
@@ -717,7 +726,7 @@ card, under the item it is about:
 `, summaryLangs[summaryLang(lang)], opener)
 
 	n := 0
-	hnWrite(&b, th.Replies, 1, &n)
+	writeComments(&b, th.Replies, 1, &n)
 	return b.String()
 }
 

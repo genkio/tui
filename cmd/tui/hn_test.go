@@ -18,7 +18,7 @@ func TestHNRefOfPicksTheThread(t *testing.T) {
 	tests := []struct {
 		name string
 		item core.Item
-		want hnRef
+		want gistRef
 		ok   bool
 	}{
 		{
@@ -29,7 +29,7 @@ func TestHNRefOfPicksTheThread(t *testing.T) {
 				URL:   "https://tmpout.sh/5/",
 				Body:  "Article URL: https://tmpout.sh/5/\n\nComments URL: https://news.ycombinator.com/item?id=49516059\n\nPoints: 191\n\n# Comments: 38",
 			},
-			want: hnRef{ID: "49516059", Kind: "story"},
+			want: gistRef{Service: gistHN, ID: "49516059", Kind: "story"},
 			ok:   true,
 		},
 		{
@@ -40,7 +40,7 @@ func TestHNRefOfPicksTheThread(t *testing.T) {
 				Title: "Ask HN: what are you working on?",
 				URL:   "https://news.ycombinator.com/item?id=49500001",
 			},
-			want: hnRef{ID: "49500001", Kind: "story"},
+			want: gistRef{Service: gistHN, ID: "49500001", Kind: "story"},
 			ok:   true,
 		},
 		{
@@ -51,7 +51,7 @@ func TestHNRefOfPicksTheThread(t *testing.T) {
 				URL:   "https://news.ycombinator.com/item?id=49526135",
 				Body:  "There's a huge difference between…",
 			},
-			want: hnRef{ID: "49526135", Kind: "comment"},
+			want: gistRef{Service: gistHN, ID: "49526135", Kind: "comment"},
 			ok:   true,
 		},
 		{
@@ -103,7 +103,7 @@ func TestHNThreadReadsTheTree(t *testing.T) {
 	hnItemAPI = srv.URL + "/"
 	defer func() { hnItemAPI = was }()
 
-	th, err := fetchHNThread(context.Background(), hnRef{ID: "49516059", Kind: "story"})
+	th, err := fetchHNThread(context.Background(), gistRef{Service: gistHN, ID: "49516059", Kind: "story"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestHNThreadReportsWhatTheAPISaid(t *testing.T) {
 	hnItemAPI = srv.URL + "/"
 	defer func() { hnItemAPI = was }()
 
-	if _, err := fetchHNThread(context.Background(), hnRef{ID: "1", Kind: "story"}); err == nil ||
+	if _, err := fetchHNThread(context.Background(), gistRef{Service: gistHN, ID: "1", Kind: "story"}); err == nil ||
 		!strings.Contains(err.Error(), "404") {
 		t.Errorf("err = %v, want the status in it", err)
 	}
@@ -144,7 +144,7 @@ func TestHNThreadReportsWhatTheAPISaid(t *testing.T) {
 // The prompt carries the whole tree, depth-first with its depths, since who is
 // answering whom is most of what a thread means.
 func TestItemSummaryPromptCarriesTheDiscussion(t *testing.T) {
-	th := hnThreadOf(hnRef{ID: "1", Kind: "story"}, hnAPIItem{
+	th := hnThreadOf(gistRef{Service: gistHN, ID: "1", Kind: "story"}, hnAPIItem{
 		Title: strptr("A story"), URL: strptr("https://example.com/a"), Author: strptr("op"),
 		Points: intptr(191),
 		Children: []hnAPIItem{{
@@ -169,7 +169,7 @@ func TestItemSummaryPromptCarriesTheDiscussion(t *testing.T) {
 }
 
 func TestItemSummaryPromptOfACommentIsAboutItsReplies(t *testing.T) {
-	th := hnThreadOf(hnRef{ID: "1", Kind: "comment"}, hnAPIItem{
+	th := hnThreadOf(gistRef{Service: gistHN, ID: "1", Kind: "comment"}, hnAPIItem{
 		Author: strptr("zahlman"), Text: strptr("<p>the comment</p>"),
 		Children: []hnAPIItem{{Author: strptr("bob"), Text: strptr("<p>no</p>")}},
 	})
@@ -190,7 +190,7 @@ func TestItemSummaryPromptOfACommentIsAboutItsReplies(t *testing.T) {
 // Handles are dropped on the way in, not asked to be dropped on the way out:
 // the model is never given a name it could put in the summary.
 func TestItemSummaryPromptNamesNobody(t *testing.T) {
-	th := hnThreadOf(hnRef{ID: "1", Kind: "story"}, hnAPIItem{
+	th := hnThreadOf(gistRef{Service: gistHN, ID: "1", Kind: "story"}, hnAPIItem{
 		Title: strptr("A story"), Author: strptr("op"), Text: strptr("<p>asking</p>"),
 		Children: []hnAPIItem{{Author: strptr("nunez"), Text: strptr("<p>works for me</p>")}},
 	})
@@ -208,7 +208,7 @@ func TestItemSummaryPromptNamesNobody(t *testing.T) {
 // The article is the first thing the summary is about, when there is one to
 // read; a fetch that came back empty leaves the discussion opener alone.
 func TestItemSummaryPromptOpensWithTheArticle(t *testing.T) {
-	th := hnThreadOf(hnRef{ID: "1", Kind: "story"}, hnAPIItem{
+	th := hnThreadOf(gistRef{Service: gistHN, ID: "1", Kind: "story"}, hnAPIItem{
 		Title: strptr("A story"), URL: strptr("https://example.com/a"),
 		Children: []hnAPIItem{{Author: strptr("alice"), Text: strptr("<p>first</p>")}},
 	})
@@ -228,7 +228,7 @@ func TestItemSummaryPromptOpensWithTheArticle(t *testing.T) {
 // A comment is arguing about the same article the story is, so its briefing
 // opens on the article too — it just has to be told which story it sits in.
 func TestItemSummaryPromptOfACommentCarriesTheArticle(t *testing.T) {
-	th := hnThreadOf(hnRef{ID: "2", Kind: "comment"}, hnAPIItem{
+	th := hnThreadOf(gistRef{Service: gistHN, ID: "2", Kind: "comment"}, hnAPIItem{
 		Author: strptr("zahlman"), Text: strptr("<p>the comment</p>"), StoryID: intptr(1),
 		Children: []hnAPIItem{{Author: strptr("bob"), Text: strptr("<p>no</p>")}},
 	})
@@ -267,73 +267,5 @@ func TestFetchHNStoryReadsTitleAndLink(t *testing.T) {
 	}
 }
 
-func TestFetchHNArticleReadsThePageAsText(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, `<html><head><title>t</title><style>p{}</style></head>`+
-			`<body><nav>menu here</nav><script>var x = 1;</script>`+
-			`<p>First paragraph.</p><p>Second &amp; last.</p></body></html>`)
-	}))
-	defer srv.Close()
-	got, err := fetchHNArticle(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatalf("fetchHNArticle: %v", err)
-	}
-	for _, want := range []string{"First paragraph.", "Second & last."} {
-		if !strings.Contains(got, want) {
-			t.Errorf("article text is missing %q:\n%s", want, got)
-		}
-	}
-	for _, gone := range []string{"menu here", "var x", "p{}"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("article text should not carry %q:\n%s", gone, got)
-		}
-	}
-}
-
-// An Ask HN links its own thread, and a PDF is not something to feed a prompt:
-// neither is fetched, and neither is an error.
-func TestFetchHNArticleSkipsWhatIsNotAnArticle(t *testing.T) {
-	got, err := fetchHNArticle(context.Background(), "https://news.ycombinator.com/item?id=49500001")
-	if err != nil || got != "" {
-		t.Errorf("got %q, %v; want the thread link skipped", got, err)
-	}
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/pdf")
-		io.WriteString(w, "%PDF-1.7")
-	}))
-	defer srv.Close()
-	if got, err := fetchHNArticle(context.Background(), srv.URL); err != nil || got != "" {
-		t.Errorf("got %q, %v; want the pdf skipped", got, err)
-	}
-}
-
 func strptr(s string) *string { return &s }
 func intptr(n int) *int       { return &n }
-
-// The button is a Hacker News thing, for now: every other card's footer is as
-// long as it was.
-func TestOnlyHackerNewsCardsOfferAGist(t *testing.T) {
-	hn := renderCard(t, core.Item{
-		App: "inoreader", ID: "77", Source: "Hacker News: Best",
-		Title: "Tmp.0ut Volume 5", URL: "https://tmpout.sh/5/",
-		Body: "Comments URL: https://news.ycombinator.com/item?id=49516059",
-	})
-	if !strings.Contains(hn, `<button class="gist" type="button" data-state="idle"`) {
-		t.Errorf("an HN card's footer should offer a gist:\n%s", hn)
-	}
-	other := renderCard(t, core.Item{App: "reddit", ID: "1", Source: "r/golang", Title: "go 1.30"})
-	if strings.Contains(other, `class="gist"`) {
-		t.Errorf("a reddit card should not offer one:\n%s", other)
-	}
-}
-
-// A compact saved row hides most of the card, but not a summary that was asked
-// for from it: the box only exists because the button was tapped.
-func TestGistShowsOnACompactSavedRow(t *testing.T) {
-	page := renderPage(t, nil, []string{"inoreader"}, nil, "", "")
-	if strings.Contains(page, "compact.expandable>.gistbox") {
-		t.Error("the compact row must not hide a summary it asked for")
-	}
-}

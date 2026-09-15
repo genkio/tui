@@ -501,11 +501,15 @@ you were never told about.
 
 A Hacker News card carries half its item. "Hacker News: Best" is a stub — the
 article's link, its points, a comment count — and "Hacker News: Best Comments" is
-one voice out of a room, with no sign of what the room said back. **gist**, in
-the footer of those cards and no others, goes and gets the rest: the comments
-under a story, or the replies under a comment, from
-[Algolia's HN API](https://hn.algolia.com/api) in one call rather than the
-official API's one request per comment.
+one voice out of a room, with no sign of what the room said back. A reddit card
+is the same bargain: a title, a link and the first screen of a self post, while
+the subreddit's actual verdict is down the page. **gist**, in the footer of those
+cards and no others, goes and gets the rest: the comments under a story or a
+post, or the replies under a comment, in one call. Hacker News answers from
+[Algolia's API](https://hn.algolia.com/api) rather than the official one's
+request per comment; reddit answers from `/comments/<id>.json`, the same JSON API
+the reddit app reads its timeline with, with your session cookie along for the
+private subs and the top 500 comments of a deep thread.
 
 It is the same machinery the source briefings run on, so it behaves the same
 way: the tap fires and nothing else, the run is the server's rather than the
@@ -516,8 +520,10 @@ carries the failure if there is one.
 
 The summary lands **under the footer that asked for it, inside the card**, not in
 place of the feed: this is about one item, so it belongs with that item. Tapping
-the button again folds it away, and again brings it back without spending a
-second run. **again**, in its header, is how you spend one. It opens with what the
+the button while it is open asks whether to read the thread again — a page moves
+on, and a gist from an hour ago is a gist of an older room; saying no folds the
+summary away instead, and tapping again brings it back without spending a second
+run. **again**, in its header, spends one without asking. It opens with what the
 linked article says, then what the discussion is actually about, then a bullet per
 position or correction that carries weight, and closes on whether the thread is
 worth reading past the item. No links: the card already links the thread.
@@ -533,7 +539,8 @@ neither a story nor an article, the story it sits in is looked up by id (the
 official API, for a title and a link, rather than Algolia answering with the
 whole comment tree) and its article is the one fetched. It is best-effort — a
 paywall, a PDF, a login wall or a dead host loses the opening paragraph and
-nothing else — and an Ask HN, which links its own thread, is not fetched at all.
+nothing else — and a discussion that links itself is not fetched at all: an Ask
+HN, a reddit self post, a gallery or a hosted clip is already in the prompt.
 
 A comment nobody answered has no discussion under it, and the button says so
 rather than reading the comment back to you. The whole tree goes in — replies at

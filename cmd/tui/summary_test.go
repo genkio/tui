@@ -673,13 +673,18 @@ func hnItem() core.Item {
 
 // testItemSummarizer is the real thing with both subprocesses gone: no CLI,
 // and no trip to Hacker News.
-func testItemSummarizer(t *testing.T, cache *feedCache, thread hnThread, threadErr error, ask func(context.Context, string) (string, error)) *summarizer {
+func testItemSummarizer(t *testing.T, cache *feedCache, thread discussion, threadErr error, ask func(context.Context, string) (string, error)) *summarizer {
 	t.Helper()
 	sum := testSummarizer(t, cache, ask)
-	sum.hn = func(_ context.Context, ref hnRef) (hnThread, error) {
+	sum.thread = func(_ context.Context, ref gistRef) (discussion, error) {
 		thread.Ref = ref
 		return thread, threadErr
 	}
+	// No trip out to the open web either: the article is a nice-to-have the
+	// briefing goes ahead without, and a test that fetched one would be reading
+	// whatever that host serves today.
+	sum.article = func(context.Context, string) (string, error) { return "", nil }
+	sum.story = func(context.Context, string) (string, string, error) { return "", "", nil }
 	return sum
 }
 
@@ -703,7 +708,7 @@ func TestSummarizeOneItemsDiscussion(t *testing.T) {
 	now := time.Now()
 	cache.upsert([]core.Item{hnItem()}, now)
 
-	thread := hnThreadOf(hnRef{}, hnAPIItem{
+	thread := hnThreadOf(gistRef{Service: gistHN, Kind: "story"}, hnAPIItem{
 		Title: strptr("Tmp.0ut Volume 5"), URL: strptr("https://tmpout.sh/5/"), Points: intptr(191),
 		Children: []hnAPIItem{{Author: strptr("alice"), Text: strptr("<p>worth reading</p>")}},
 	})
@@ -754,22 +759,22 @@ func TestSummarizeOneItemsDiscussion(t *testing.T) {
 	}
 }
 
-// Only Hacker News, for now, and only items that are still somewhere: neither
-// should cost a spinner and a minute to find out.
+// Only the services whose discussions this server can read, and only items that
+// are still somewhere: neither should cost a spinner and a minute to find out.
 func TestSummarizeItemRefusesWhatItCannotRead(t *testing.T) {
 	cache := newTestCache(t)
 	now := time.Now()
 	cache.upsert([]core.Item{
 		hnItem(),
-		{App: "reddit", ID: "1", Title: "not hacker news", Source: "r/golang"},
+		{App: "x", ID: "1", Body: "no room under this one", Source: "@someone"},
 	}, now)
-	sum := testItemSummarizer(t, cache, hnThread{}, nil, func(context.Context, string) (string, error) {
+	sum := testItemSummarizer(t, cache, discussion{}, nil, func(context.Context, string) (string, error) {
 		t.Error("the model should not have been asked")
 		return "", nil
 	})
 
-	if rec := post(t, sum, "app=reddit&id=1"); rec.Code != http.StatusBadRequest {
-		t.Errorf("a reddit item = %d %s, want 400", rec.Code, rec.Body.String())
+	if rec := post(t, sum, "app=x&id=1"); rec.Code != http.StatusBadRequest {
+		t.Errorf("an x post = %d %s, want 400", rec.Code, rec.Body.String())
 	}
 	if rec := post(t, sum, "app=inoreader&id=nope"); rec.Code != http.StatusNotFound {
 		t.Errorf("a missing item = %d %s, want 404", rec.Code, rec.Body.String())
@@ -787,7 +792,7 @@ func TestSummarizeItemSaysWhenNobodyReplied(t *testing.T) {
 		URL:   "https://news.ycombinator.com/item?id=49526135",
 		Body:  "a comment nobody answered",
 	}}, now)
-	sum := testItemSummarizer(t, cache, hnThread{}, nil, func(context.Context, string) (string, error) {
+	sum := testItemSummarizer(t, cache, discussion{}, nil, func(context.Context, string) (string, error) {
 		t.Error("the model should not have been asked")
 		return "", nil
 	})
@@ -806,7 +811,7 @@ func TestSummarizeItemSaysWhenNobodyReplied(t *testing.T) {
 func TestSummarizeItemCarriesTheFetchFailure(t *testing.T) {
 	cache := newTestCache(t)
 	cache.upsert([]core.Item{hnItem()}, time.Now())
-	sum := testItemSummarizer(t, cache, hnThread{}, errors.New("could not reach Hacker News"), func(context.Context, string) (string, error) {
+	sum := testItemSummarizer(t, cache, discussion{}, errors.New("could not reach Hacker News"), func(context.Context, string) (string, error) {
 		t.Error("the model should not have been asked")
 		return "", nil
 	})

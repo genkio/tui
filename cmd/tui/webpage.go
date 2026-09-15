@@ -307,8 +307,8 @@ type cardData struct {
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
 	Quote       *quoteData
-	// A Hacker News card: the footer offers a briefing of the discussion under
-	// it, which is the half of the item the feed does not carry.
+	// A Hacker News or reddit card: the footer offers a briefing of the
+	// discussion under it, which is the half of the item the feed does not carry.
 	Gist   bool
 	Expand bool
 	Saved  bool    // starred: the footer button offers to unsave it
@@ -715,7 +715,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 	c.Keep = keepURL(it.App, it.ID, c.Video)
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
-	_, c.Gist = hnRefOf(it)
+	_, c.Gist = gistRefOf(it)
 	c.Expand = needsExpand(body, title, cl.body) || (c.Quote != nil && c.Quote.PreviewBody != c.Quote.FullBody)
 	c.Type = itemType(it)
 	return c

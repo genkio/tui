@@ -1933,16 +1933,18 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
   });
 })();
 
-// Gist: the discussion under one Hacker News card. A story's item is a stub —
-// the article's link and a count — and a comment's is one voice out of a room,
-// so what the thread came to is the half of it the feed cannot carry. The button
-// goes and gets the comments (all of them, replies included, from Algolia's HN
-// API) and hands them to the same worker the source briefings run on, so a
-// thread and a backlog queue behind each other rather than racing.
+// Gist: the discussion under one Hacker News or reddit card. A story's item is
+// a stub — the article's link and a count — a reddit post's is a title, and an
+// HN comment's is one voice out of a room, so what the thread came to is the
+// half of it the feed cannot carry. The button goes and gets the comments (all
+// of them, replies included, from the service's own API) and hands them to the
+// same worker the source briefings run on, so a thread and a backlog queue
+// behind each other rather than racing.
 //
 // It lands under the footer that asked for it, inside the card, and the button
-// then toggles it: a briefing about one item belongs with that item, not in
-// place of the feed the way a source's does.
+// then folds it away or offers to read the thread again: a briefing about one
+// item belongs with that item, not in place of the feed the way a source's
+// does.
 (function(){
   var poll = null, getting = {};
 
@@ -1970,7 +1972,7 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     b.dataset.state = s;
     b.textContent = s === 'running' ? 'reading…' : 'gist';
     b.title = s === 'running' ? 'reading the discussion…'
-      : s === 'done' ? 'the discussion under this, summarized'
+      : s === 'done' ? 'the discussion under this: hide it, or read the thread again'
       : 'summarize the discussion under this';
   }
 
@@ -2113,7 +2115,16 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     if (b.dataset.state === 'idle'){ start(card); return; }
     if (b.dataset.state === 'running'){ waiting(card); return; }
     var el = card.querySelector(':scope > .gistbox');
-    if (el && !el.classList.contains('hid')){ el.classList.add('hid'); return; }
+    // A summary that is already on screen: the thread has probably moved on
+    // since it was written, so the button offers to read it again rather than
+    // only folding it away. Asking costs a trip to the service and a minute of
+    // the model, which is why it asks first; saying no folds it, which is what
+    // the button did before there was anything to ask.
+    if (el && !el.classList.contains('hid')){
+      if (window.confirm('Read this discussion again? The gist below is replaced by what the thread says now.')) start(card);
+      else el.classList.add('hid');
+      return;
+    }
     var d = held(card);
     if (d && d.html){ render(card, d); return; }
     collect(card, true);
