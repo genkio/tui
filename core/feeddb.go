@@ -60,6 +60,7 @@ var feedColumns = []string{
 	// -1 rather than 0, because "nobody has asked" and "asked, and no" are
 	// different answers and only one of them keeps an item out of the chip.
 	`ALTER TABLE feed_items ADD COLUMN interest REAL NOT NULL DEFAULT -1`,
+	`ALTER TABLE feed_items ADD COLUMN interest_for TEXT NOT NULL DEFAULT ''`,
 }
 
 const feedSchema = `

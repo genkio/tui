@@ -31,11 +31,11 @@ type interestStore struct {
 }
 
 const (
-	// What the textarea will take: a handful of subjects, not an essay. The
-	// whole list rides in every sift request, so its size is paid for once per
-	// batch rather than once per item — but it is still tokens, and a list this
-	// long has stopped being a list of interests.
-	maxInterests   = 40
+	// What the textarea will take: a handful of subjects, not an essay. Every
+	// item is asked about every subject, one question each, so the list is what
+	// decides how many items fit in a request (siftBatchFor) — and a list
+	// longer than this has stopped being a list of interests anyway.
+	maxInterests   = 12
 	maxInterestLen = 120
 )
 

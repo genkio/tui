@@ -73,6 +73,9 @@ type feedEntry struct {
 	// asked about — which is every item when the list is empty, and every item
 	// again the moment the list is edited.
 	Interest float64 `json:"interest,omitempty"`
+	// Which subject on the list the item answers, as the reader wrote it: the
+	// chip on the card in the "for me" pick, so a match can be argued with.
+	InterestFor string `json:"interest_for,omitempty"`
 }
 
 // matched reports whether the item answers something on the reader's own list.
@@ -248,6 +251,9 @@ func (c *feedCache) pick(now time.Time, want func(*feedEntry) bool) []core.Item 
 		// group by and what narrows a page to one of them, and both of those are
 		// done over items long after the entry they came from is out of reach.
 		it.Rank, it.Matched = e.Rank, e.matched()
+		if it.Matched {
+			it.MatchedFor = e.InterestFor
+		}
 		out = append(out, it)
 	}
 	return out
@@ -267,7 +273,8 @@ func (c *feedCache) judge(verdicts map[string]siftVerdict, now time.Time) int {
 		if !ok {
 			continue
 		}
-		e.JudgedAt, e.Worth, e.Rank, e.Interest = stamp, v.Worth, v.Rank, v.Interest
+		e.JudgedAt, e.Worth, e.Rank = stamp, v.Worth, v.Rank
+		e.Interest, e.InterestFor = v.Interest, v.InterestFor
 		if e.skipped() {
 			aside++
 		}
@@ -287,7 +294,8 @@ func (c *feedCache) forget() int {
 		if e.JudgedAt == "" && e.Rank == 0 && e.Interest < 0 {
 			continue
 		}
-		e.JudgedAt, e.Worth, e.Rank, e.Interest = "", 0, 0, -1
+		e.JudgedAt, e.Worth, e.Rank = "", 0, 0
+		e.Interest, e.InterestFor = -1, ""
 		n++
 	}
 	if n > 0 {

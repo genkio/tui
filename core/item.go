@@ -31,8 +31,10 @@ type Item struct {
 	Images  []string  // attached still images; the web card reveals them on demand
 	Quote   *Quote    // the post this one embeds (an x quote), if any
 	// Whether the item answers something on the reader's own list of what they
-	// are following at the moment. Filled in with Rank, and for the same reason.
-	Matched bool
+	// are following at the moment, and which subject it answers, as they wrote
+	// it. Filled in with Rank, and for the same reason.
+	Matched    bool
+	MatchedFor string
 	// Whether the feed service has a finished gist of the discussion under this
 	// item waiting. Filled in when the cache hands the item out, like Rank: the
 	// app it came from has no idea a discussion was ever read.

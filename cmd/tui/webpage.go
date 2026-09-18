@@ -371,10 +371,11 @@ type cardData struct {
 	// the rung it landed on and Gisted whether its discussion is read and
 	// waiting, which the chips count when nothing else counted them for this
 	// page.
-	Worth   string
-	Rank    int
-	Gisted  bool
-	Matched bool
+	Worth      string
+	Rank       int
+	Gisted     bool
+	Matched    bool
+	MatchedFor string
 
 	ShowActions bool
 }
@@ -458,6 +459,12 @@ func buildPageData(in pageInput) pageData {
 			card.Worth = fmt.Sprintf("%.2f", itemWorth(it, in.worth))
 		}
 		card.Rank, card.Gisted, card.Matched = it.Rank, it.Gisted, it.Matched
+		// Which of your subjects caught it, on the card in the pick that is of
+		// them: a match you cannot ask "why is this here" of is a match you end
+		// up ignoring.
+		if in.sel.Kind == "mine" {
+			card.MatchedFor = it.MatchedFor
+		}
 		cards = append(cards, card)
 	}
 

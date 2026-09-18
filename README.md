@@ -456,23 +456,39 @@ best**, and the choice sticks in the browser like the other two.
 
 **settings** carries a textarea for what you are following right now — one
 subject per line, in your own words: *the Fed's rate path*, *anything about
-Zig*, *Japan: visas, tax, living here*. It is the opposite of the block list in
-every way that matters. A keyword is a string matched against a title, which is
-the right tool for "never show me this word" and useless for this, because the
-posts that answer a subject rarely name it. The list is not matched against
-anything: it goes to the model as what you are after, and the third question
-asked of every item is whether the item is about one of them.
+Zig*, *Japan permanent residency*. It is the opposite of the block list in every
+way that matters. A keyword is a string matched against a title, which is the
+right tool for "never show me this word" and useless for this, because the posts
+that answer a subject rarely name it. The list is not matched against anything:
+it goes to the model as what you are after, and a third question is asked of
+every item — which of these subjects is this about?
 
 What that catches gets a **for me** chip, first of the loose chips in the row,
 and is **never skipped** however little the rest of the sift made of it — you
 named the subject yourself, which outranks a model's opinion about whether there
-is much in this particular piece of it. Three lines of interests over a thousand
-items caught 177 of them here, eight of which the cut would otherwise have taken
-away. Saving the list drops every judgment in the backlog, because they were
-answers about the old list, and starts a fresh sift on the way out. The list
-lives on the server rather than in the browser, unlike the settings above it:
-the judging happens there, and the answer belongs to the backlog rather than to
-the tab that asked.
+is much in this particular piece of it. **save** only saves: it drops every
+judgment in the backlog, because they were answers about the old list, and the
+header's **sift** is what asks them all again.
+
+That question took two goes to get right, and both mistakes are worth knowing
+about if you build anything like it. It began as a yes/no per item — *is this
+about one of your subjects?* — and a Cantonese post about robotaxis in Singapore
+came back at 0.81, as sure as the immigration paperwork it was supposed to be
+finding. A yes/no has nothing to weigh against. Asked instead as a **choice**
+between the subjects and an explicit *none of them*, the same post is *none* at
+1.00: a probability only means something against the alternatives, and "none" is
+the alternative that is true nearly every time.
+
+The second mistake was batching it. The cut and the ladder are comparative
+judgments and ride happily twenty-five to a request, but "is this about a
+subject you named" is a rare-event question, and a rare-event question is not
+safe in company. In a batch of twenty-five Cantonese posts with no immigration
+item among them, that same Waymo post came back as *Japan permanent residency*
+at 0.90 — while the actual residency thread, in a batch of its own, came back as
+*none*. Asked one at a time, alone in the state, each is right: 1.00 and 0.98.
+So the sift asks that one question per item, a couple in the air per batch
+worker, which costs a minute over a thousand items rather than ten seconds. The
+other two stay batched.
 
 The **skipped** view is where the judgment gets checked, and it is read exactly
 the way the feed is read: full cards, the deck, the sort toggle, the chips,
