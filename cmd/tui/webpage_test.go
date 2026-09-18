@@ -289,9 +289,15 @@ func TestDeckNavigation(t *testing.T) {
 	deck := renderInput(t, pageInput{
 		items: items, total: len(items), apps: []string{"x", "reddit"}, now: time.Now(), swipe: true,
 	})
-	// The deck walks from one edge column (<>), a column to a thumb.
-	if !strings.Contains(deck, `id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item">&lt;</button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item">&gt;</button></div>`) {
-		t.Fatalf("expected the <> column: %s", deck)
+	// The deck walks from one edge column, a column to a thumb. Both arrows are
+	// drawn rather than typed: a text < is a mathematical sign, and these are
+	// the controls a thumb spends the session on.
+	if !strings.Contains(deck, `id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item"><svg`) ||
+		!strings.Contains(deck, `<button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item"><svg`) {
+		t.Fatalf("expected the drawn edge column: %s", deck)
+	}
+	if strings.Contains(deck, `aria-label="previous item">&lt;`) {
+		t.Error("the arrows should not be typed characters any more")
 	}
 	if !strings.Contains(deck, `.deckctl.atleft{left:max(-8px,calc(50% - 328px))}`) ||
 		!strings.Contains(deck, `.deckctl.atright{right:max(-8px,calc(50% - 328px))}`) {
@@ -696,8 +702,10 @@ func TestRenderPageFreshness(t *testing.T) {
 		!strings.Contains(p, `settingsDlg.showModal()`) {
 		t.Fatal("the native settings dialog should persist the chosen edge: " + p)
 	}
-	if !strings.Contains(p, `id="upd">just now`) {
-		t.Fatal("expected the freshness label: " + p)
+	// The age is in the settings dialog rather than the header row, which is
+	// four links wide on a phone and had no room for a fifth thing.
+	if !strings.Contains(p, `<div class="settingnote">last fetch: <span id="upd">just now</span>`) {
+		t.Fatal("expected the freshness label in settings: " + p)
 	}
 
 	// A sweep in flight says so rather than showing an age about to change.
@@ -706,7 +714,7 @@ func TestRenderPageFreshness(t *testing.T) {
 		apps: []string{"x"}, now: time.Now(),
 		updated: time.Now().Add(-9 * time.Minute), fetching: true,
 	}
-	if got := renderInput(t, in); !strings.Contains(got, `id="upd">fetching…`) {
+	if got := renderInput(t, in); !strings.Contains(got, `id="upd">happening now`) {
 		t.Fatal("a sweep in flight should say so: " + got)
 	}
 
