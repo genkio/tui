@@ -526,6 +526,10 @@ video.ffs{object-fit:cover !important}
 // between the two modes; only the layout and what marks a card read differ.
 var SWIPE = document.getElementById('state').getAttribute('data-swipe') === 'true';
 var MORE = document.getElementById('state').getAttribute('data-more') === 'true';
+// Which chip the page is narrowed to ("app:reddit", "gist:gist"), blank for the
+// whole list: a pick is a page load, so this is settled by the time anything
+// here runs.
+var SEL = document.getElementById('state').getAttribute('data-sel') || '';
 // Set means the deck's arrows take the left edge instead of the right.
 var CONTROLS_LEFT = false;
 try { CONTROLS_LEFT = localStorage.getItem('tui:deck-controls-left') === '1'; } catch(e){}
@@ -2212,6 +2216,17 @@ if(siftBtn) (function(){
     .then(function(res){ return res.json(); })
     .then(function(d){ if (sync((d && d.jobs) || {})) watch(); })
     .catch(function(){});
+
+  // The gist chip: a page of nothing but items whose discussion has already
+  // been read, so every one of them opens on arrival. Waiting a minute for a
+  // thread is what the chip exists to save you from — having to tap each card
+  // once more, having got here, would be the same wait in another shape.
+  if (SEL === 'gist:gist') buttons().forEach(function(b){
+    var card = cardOf(b);
+    var d = held(card);
+    if (d && d.html) render(card, d);
+    else collect(card, true);
+  });
 
   // The language setting changed. Nothing already written is rewritten, so the
   // buttons re-read themselves against what is held for the language now in

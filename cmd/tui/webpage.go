@@ -99,6 +99,8 @@ type feedTally struct {
 	// The sift's ladder: rung -> how many items sit on it. Empty on a list
 	// nothing has judged, which is how the row knows not to draw the group.
 	ranks map[int]int
+	// How many items have a discussion read and waiting under them.
+	gists int
 	// app -> subcategory -> count, for the services that have one (see subApps).
 	// Nested rather than flat because two services can name a stream the same
 	// thing, and a subcategory only ever narrows its own source.
@@ -143,6 +145,9 @@ func tallyItems(items []core.Item) feedTally {
 		if it.Rank > 0 {
 			t.ranks[it.Rank]++
 		}
+		if it.Gisted {
+			t.gists++
+		}
 		t.addSub(it.App, it.Source, it.Author)
 	}
 	return t
@@ -165,6 +170,9 @@ func tallyCards(cards []cardData) feedTally {
 		t.types[c.Type]++
 		if c.Rank > 0 {
 			t.ranks[c.Rank]++
+		}
+		if c.Gisted {
+			t.gists++
 		}
 		t.addSub(c.App, c.Source, c.Author)
 	}
@@ -348,10 +356,12 @@ type cardData struct {
 	Keyword string
 	// In the skipped view, what the model gave this item, as "0.08". The card
 	// wears it so a judgment can be argued with rather than just obeyed. Rank is
-	// the rung it landed on, which the chips count when nothing else counted
-	// them for this page.
-	Worth string
-	Rank  int
+	// the rung it landed on and Gisted whether its discussion is read and
+	// waiting, which the chips count when nothing else counted them for this
+	// page.
+	Worth  string
+	Rank   int
+	Gisted bool
 
 	ShowActions bool
 }
@@ -434,7 +444,7 @@ func buildPageData(in pageInput) pageData {
 		if in.skippedView || in.order == orderBest {
 			card.Worth = fmt.Sprintf("%.2f", itemWorth(it, in.worth))
 		}
-		card.Rank = it.Rank
+		card.Rank, card.Gisted = it.Rank, it.Gisted
 		cards = append(cards, card)
 	}
 
@@ -962,6 +972,16 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 		}
 	}
 
+	// The discussions already read, as one chip of their own at the end of the
+	// row. A gist is a minute of waiting, so you fire off a handful from the
+	// cards and carry on; this is where they turn up when they are done, to be
+	// read one after another like any other page of the feed.
+	if t.gists > 0 {
+		out = append(out, filterGroup{Chips: []filterChip{{
+			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists,
+		}}})
+	}
+
 	if len(t.types) > 1 {
 		var g filterGroup
 		for _, ty := range []string{"text", "video", "short", "audio"} { // always this order, whatever the counts
@@ -1072,7 +1092,7 @@ func chipHref(q url.Values, sel feedSel) string {
 		// The filter params this replaces, one no page carries, and the briefing
 		// flag: a pick is a page of cards, whatever the page it was tapped from
 		// happened to be showing.
-		case "app", "type", "rank", "x", "sub", "json", "summary":
+		case "app", "type", "rank", "gist", "x", "sub", "json", "summary":
 		default:
 			out[k] = v
 		}
@@ -1080,6 +1100,8 @@ func chipHref(q url.Values, sel feedSel) string {
 	switch sel.Kind {
 	case "app", "type", "rank":
 		out.Set(sel.Kind, sel.Key)
+	case "gist":
+		out.Set("gist", "1")
 	}
 	if sel.Kind == "app" && sel.Sub != "" {
 		out.Set("sub", sel.Sub)
@@ -1226,6 +1248,9 @@ func parseSel(q url.Values) feedSel {
 	case "text", "video", "short", "audio":
 		return feedSel{Kind: "type", Key: ty}
 	}
+	if q.Get("gist") == "1" {
+		return feedSel{Kind: "gist", Key: "gist"}
+	}
 	if r := q.Get("rank"); r != "" {
 		for _, l := range siftLevels {
 			if l.Key == r {
@@ -1254,6 +1279,10 @@ func selectItems(items []core.Item, sel feedSel) []core.Item {
 			}
 		case "rank":
 			if l, ok := siftLevelOf(it.Rank); ok && l.Key == sel.Key {
+				out = append(out, it)
+			}
+		case "gist":
+			if it.Gisted {
 				out = append(out, it)
 			}
 		}

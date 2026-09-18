@@ -166,6 +166,11 @@ type summarizer struct {
 	// briefing read rather than what the latest run of the same source did.
 	read map[string]map[string]bool
 	kept []string // read's keys, oldest first, for eviction
+	// The items whose discussion has been read and is waiting, by feed key. A
+	// gist is a minute of somebody else's time, so they are fired off in a
+	// handful and collected later rather than waited on one at a time — and
+	// this is what the gist chip counts, so "later" is a place you can go.
+	gists map[string]bool
 }
 
 func newSummarizer(cache *feedCache) *summarizer {
@@ -181,6 +186,7 @@ func newSummarizer(cache *feedCache) *summarizer {
 		queue: make(chan summaryAsk, summaryQueue),
 		jobs:  map[string]summaryJob{},
 		read:  map[string]map[string]bool{},
+		gists: map[string]bool{},
 	}
 }
 
@@ -194,7 +200,15 @@ func (s *summarizer) serve(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ask := <-s.queue:
-			s.put(ask.key(), s.brief(ctx, ask))
+			job := s.brief(ctx, ask)
+			s.put(ask.key(), job)
+			// An item's own briefing that came to something is one the feed can
+			// now point you at, which is the whole of the gist chip.
+			if ask.id != "" && job.State == "done" && job.HTML != "" {
+				s.mu.Lock()
+				s.gists[core.Key(ask.app, ask.id)] = true
+				s.mu.Unlock()
+			}
 		}
 	}
 }
@@ -390,6 +404,19 @@ func (s *summarizer) overtaken(key string, j summaryJob) int {
 		return s.cache.unreadNew("", j.seen) // every source, the way the briefing read them
 	}
 	return s.cache.unreadNew(key, j.seen)
+}
+
+// gisted is every item with a discussion read and waiting, by feed key. The
+// jobs themselves are this process's and go with it: a restart empties the chip
+// rather than pointing at prose the server no longer holds.
+func (s *summarizer) gisted() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]bool, len(s.gists))
+	for k := range s.gists {
+		out[k] = true
+	}
+	return out
 }
 
 // states is every job without the prose: what the chips and the cards' buttons

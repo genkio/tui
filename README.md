@@ -632,6 +632,16 @@ Results are kept per item and per language in the tab's `sessionStorage`, the
 language setting applies to the next run as it does everywhere else, and nothing
 is marked read by being summarized.
 
+A gist is a minute of somebody else's time, and nothing on the page waits for
+it: tap **gist** on three or four cards, carry on reading, and the ones that
+came to something collect under a **gist** chip in the filter row. Picking it is
+a page of exactly those items with every discussion already open under its card,
+so a handful fired off while you were scrolling turns into a short reading list
+you go through one after another like any other page of the feed. The chip
+counts only what is finished — a run still going has nothing to point at — and
+the gists belong to the running server, so a restart empties the chip rather
+than offering prose it no longer holds.
+
 ### Swipe mode
 
 The same feed can be dealt as a deck instead of scrolled: one card at a time,

@@ -143,7 +143,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, sweep, saved, tags, block, rendered)
+		handleAll(w, r, root, loader, cache, sweep, saved, tags, block, rendered, sum)
 	})
 	// POST puts the unjudged backlog through TypeSafe and GET reports on the
 	// run. A POST because it spends an API key's tokens, so nothing should be
@@ -364,7 +364,7 @@ func clientWindow(deck bool) int {
 // a matter of hiding cards. Nothing here fetches: x's For You used to be served
 // live from inside this request and is now a swept source like the rest
 // (xForYouApp), which is what makes it summarizable and clearable.
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, tags *tagStore, block *blocker, rendered *renderedItems) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, tags *tagStore, block *blocker, rendered *renderedItems, sum *summarizer) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
 	tmpl, err := loader.load()
@@ -465,6 +465,14 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// The whole backlog, whichever chip is on: it is what the chips count, so
 	// every one of them still says what picking it would bring.
 	backlog := cache.unread(now, "")
+	// Which of them have a discussion read and waiting. Marked here rather than
+	// in the cache because the gists are the summarizer's and live only as long
+	// as this process does, while the backlog outlives it.
+	if gists := sum.gisted(); len(gists) > 0 {
+		for i := range backlog {
+			backlog[i].Gisted = gists[core.Key(backlog[i].App, backlog[i].ID)]
+		}
+	}
 	tally := tallyItems(backlog)
 
 	items := selectItems(backlog, sel)

@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/genkio/tui/core"
 )
@@ -105,5 +107,90 @@ func TestNothingSaidNamesWhatWasEmpty(t *testing.T) {
 		if got := nothingSaid(tc.ref); !strings.Contains(got, tc.want) {
 			t.Errorf("nothingSaid(%+v) = %q, want %q in it", tc.ref, got, tc.want)
 		}
+	}
+}
+
+// The gist chip: a discussion takes a minute to read, so you fire off a handful
+// from the cards and carry on, and the ones that came to something collect
+// under a chip of their own to be read one after another.
+func TestGistChipCollectsWhatIsReady(t *testing.T) {
+	items := []core.Item{
+		{App: "reddit", ID: "1", Title: "read already", Gisted: true},
+		{App: "hn", ID: "2", Title: "still going"},
+		{App: "hn", ID: "3", Title: "read already too", Gisted: true},
+	}
+	tally := tallyItems(items)
+	page := renderInput(t, pageInput{
+		items: items, total: len(items), apps: []string{"reddit", "hn"}, now: time.Now(),
+		tally: &tally, query: url.Values{},
+	})
+	if !strings.Contains(page, `<span>gist</span><span class="fn">2</span>`) {
+		t.Errorf("the chip should count the discussions waiting: %s", page)
+	}
+	if !strings.Contains(page, `href="/?gist=1" data-kind="gist"`) {
+		t.Error("the chip should link to a page of them")
+	}
+	// A card whose gist is still running is not on that page.
+	got := selectItems(items, feedSel{Kind: "gist", Key: "gist"})
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "3" {
+		t.Fatalf("the gist pick holds %+v, want the two that are ready", got)
+	}
+	// Nothing read yet is nothing to point at, so the chip is not drawn.
+	plain := tallyItems([]core.Item{{App: "hn", ID: "2", Title: "still going"}})
+	page = renderInput(t, pageInput{
+		items: items[1:2], total: 1, apps: []string{"hn"}, now: time.Now(),
+		tally: &plain, query: url.Values{},
+	})
+	if strings.Contains(page, `data-kind="gist"`) {
+		t.Error("an empty gist chip should not be drawn")
+	}
+}
+
+// On that page every card opens itself: having waited for the thread once,
+// tapping each card again would be the same wait in another shape.
+func TestGistPickOpensEveryCard(t *testing.T) {
+	page := renderInput(t, pageInput{
+		items: []core.Item{{App: "hn", ID: "1", Title: "a", URL: "https://news.ycombinator.com/item?id=1", Gisted: true}},
+		total: 1, apps: []string{"hn"}, now: time.Now(),
+		sel: feedSel{Kind: "gist", Key: "gist"}, query: url.Values{"gist": {"1"}},
+	})
+	if !strings.Contains(page, `data-sel="gist:gist"`) {
+		t.Error("the page should say which chip it is narrowed to")
+	}
+	if !strings.Contains(page, `if (SEL === 'gist:gist') buttons().forEach(`) {
+		t.Error("the gist pick should open the discussions it collected")
+	}
+}
+
+// A finished item briefing is what the chip counts, and only a finished one:
+// a run still going, or one that came to nothing, has nothing to point at.
+func TestSummarizerTracksFinishedGists(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{{
+		App: "inoreader", ID: "1", Source: "Hacker News: Best", Title: "a story",
+		URL: "https://news.ycombinator.com/item?id=1",
+	}}, time.Now())
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
+		return "what the room said", nil
+	})
+	sum.thread = func(context.Context, gistRef) (discussion, error) {
+		return discussion{Count: 3, Ref: gistRef{Service: gistHN, Kind: "story"}, Title: "a story"}, nil
+	}
+	sum.article = nil
+	if len(sum.gisted()) != 0 {
+		t.Fatal("nothing has been read yet")
+	}
+	if rec := post(t, sum, "app=inoreader&id=1"); rec.Code != http.StatusAccepted {
+		t.Fatalf("POST = %d: %s", rec.Code, rec.Body)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(sum.gisted()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the gist never landed: %+v", sum.states())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !sum.gisted()[core.Key("inoreader", "1")] {
+		t.Errorf("gisted = %v, want the item's own feed key", sum.gisted())
 	}
 }
