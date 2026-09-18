@@ -454,6 +454,26 @@ after the last run sit on the middle rung rather than sinking to the bottom: a
 missing answer is not a low one. The toggle cycles **↑ oldest → ↓ newest → ✦
 best**, and the choice sticks in the browser like the other two.
 
+**settings** carries a textarea for what you are following right now — one
+subject per line, in your own words: *the Fed's rate path*, *anything about
+Zig*, *Japan: visas, tax, living here*. It is the opposite of the block list in
+every way that matters. A keyword is a string matched against a title, which is
+the right tool for "never show me this word" and useless for this, because the
+posts that answer a subject rarely name it. The list is not matched against
+anything: it goes to the model as what you are after, and the third question
+asked of every item is whether the item is about one of them.
+
+What that catches gets a **for me** chip, first of the loose chips in the row,
+and is **never skipped** however little the rest of the sift made of it — you
+named the subject yourself, which outranks a model's opinion about whether there
+is much in this particular piece of it. Three lines of interests over a thousand
+items caught 177 of them here, eight of which the cut would otherwise have taken
+away. Saving the list drops every judgment in the backlog, because they were
+answers about the old list, and starts a fresh sift on the way out. The list
+lives on the server rather than in the browser, unlike the settings above it:
+the judging happens there, and the answer belongs to the backlog rather than to
+the tab that asked.
+
 The **skipped** view is where the judgment gets checked, and it is read exactly
 the way the feed is read: full cards, the deck, the sort toggle, the chips,
 mark-all — and scrolling past one marks it read for real, which is the whole

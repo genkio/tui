@@ -57,6 +57,9 @@ var feedColumns = []string{
 	`ALTER TABLE feed_items ADD COLUMN judged_at TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE feed_items ADD COLUMN worth REAL NOT NULL DEFAULT 0`,
 	`ALTER TABLE feed_items ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`,
+	// -1 rather than 0, because "nobody has asked" and "asked, and no" are
+	// different answers and only one of them keeps an item out of the chip.
+	`ALTER TABLE feed_items ADD COLUMN interest REAL NOT NULL DEFAULT -1`,
 }
 
 const feedSchema = `

@@ -68,7 +68,15 @@ type feedEntry struct {
 	JudgedAt string  `json:"judged_at,omitempty"`
 	Worth    float64 `json:"worth,omitempty"`
 	Rank     int     `json:"rank,omitempty"`
+	// How well the item answers what the reader said they are following at the
+	// moment (see interestStore), 0 to 1, or below zero for an item nothing has
+	// asked about — which is every item when the list is empty, and every item
+	// again the moment the list is edited.
+	Interest float64 `json:"interest,omitempty"`
 }
+
+// matched reports whether the item answers something on the reader's own list.
+func (e *feedEntry) matched() bool { return e.Interest >= interestCut }
 
 // judged reports whether a run has answered for this item. Both halves are
 // required: a row from before the ladder existed carries a worth and no rung,
@@ -78,7 +86,10 @@ func (e *feedEntry) judged() bool { return e.JudgedAt != "" && e.Rank > 0 }
 // skipped reports whether the sift set this item aside: judged, and judged not
 // worth the reading. It stays in the backlog table either way — this is a
 // bucket to go through and disagree with, not a delete.
-func (e *feedEntry) skipped() bool { return e.judged() && e.Worth < siftCut }
+// A match is never skipped, whatever the cut made of it. The reader named the
+// subject themselves, which outranks a model's opinion about whether there is
+// anything in this particular piece of it.
+func (e *feedEntry) skipped() bool { return e.judged() && e.Worth < siftCut && !e.matched() }
 
 // appStatus is the last thing a sweep learned about one service: enough for the
 // header's health dot, the stale-session warning, and whether its backlog is
@@ -236,7 +247,7 @@ func (c *feedCache) pick(now time.Time, want func(*feedEntry) bool) []core.Item 
 		// The rung rides on the item, the way the age does: it is what the chips
 		// group by and what narrows a page to one of them, and both of those are
 		// done over items long after the entry they came from is out of reach.
-		it.Rank = e.Rank
+		it.Rank, it.Matched = e.Rank, e.matched()
 		out = append(out, it)
 	}
 	return out
@@ -256,13 +267,39 @@ func (c *feedCache) judge(verdicts map[string]siftVerdict, now time.Time) int {
 		if !ok {
 			continue
 		}
-		e.JudgedAt, e.Worth, e.Rank = stamp, v.Worth, v.Rank
+		e.JudgedAt, e.Worth, e.Rank, e.Interest = stamp, v.Worth, v.Rank, v.Interest
 		if e.skipped() {
 			aside++
 		}
 		c.rev++
 	}
 	return aside
+}
+
+// forget drops every judgment, which is what editing the interest list has to
+// do: an answer about a list is worth nothing once the list has changed, and
+// the three questions are asked together anyway. Returns how many it cleared.
+func (c *feedCache) forget() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, e := range c.entries {
+		if e.JudgedAt == "" && e.Rank == 0 && e.Interest < 0 {
+			continue
+		}
+		e.JudgedAt, e.Worth, e.Rank, e.Interest = "", 0, 0, -1
+		n++
+	}
+	if n > 0 {
+		c.rev++
+	}
+	return n
+}
+
+// matchedCount is how many items answer the reader's own list, which is what
+// its chip counts.
+func (c *feedCache) matchedCount() int {
+	return c.count(func(e *feedEntry) bool { return !e.Read && e.matched() })
 }
 
 // skippedCount is the size of the pile, for the header's link to it, and

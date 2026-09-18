@@ -42,6 +42,11 @@ const (
 	// sift that takes something you wanted costs you the item; one that leaves
 	// filler in the feed costs you a scroll, and those are not the same price.
 	siftCut = 0.2
+	// Where a match is called a match. Higher than the cut and deliberately so:
+	// the list is a handful of subjects the reader typed out, so "this is about
+	// one of them" is a question with a clear answer, and a chip that fills up
+	// with things that are nearly about them is a chip nobody trusts.
+	interestCut = 0.6
 	// What an item no run has reached counts as in the best-first order:
 	// neither good nor bad. Missing is not the same answer as low.
 	siftUnknown = 0.5
@@ -81,6 +86,8 @@ const siftReader = `Someone working through their own feed backlog: sources they
 const siftQuestion = `Is this item worth the reader's time to open and read?`
 
 const siftRankQuestion = `How much does this item repay opening?`
+
+const siftInterestQuestion = `Is this item about one of the subjects the reader is following right now, listed in ` + "`interests`" + `?`
 
 // siftLevel is one rung of the ladder the sift puts an item on: the key a chip
 // is picked by, the word that chip wears, and the situation the model is given
@@ -159,15 +166,19 @@ type siftJob struct {
 // judge is the call to the model, swapped out in tests, which have no business
 // spending an API key to find out whether a handler validates its form.
 type sifter struct {
-	judge func(ctx context.Context, items []core.Item) (map[string]siftVerdict, error)
+	judge func(ctx context.Context, items []core.Item, interests []string) (map[string]siftVerdict, error)
 	cache *feedCache
-	queue chan struct{}
-	mu    sync.Mutex
-	job   siftJob
+	// What the reader is following at the moment, read once when a run starts:
+	// the list is the same for every batch in that run, and one edited halfway
+	// through would leave a backlog judged against two different lists.
+	interests *interestStore
+	queue     chan struct{}
+	mu        sync.Mutex
+	job       siftJob
 }
 
-func newSifter(cache *feedCache) *sifter {
-	return &sifter{judge: typesafeJudge, cache: cache, queue: make(chan struct{}, 1)}
+func newSifter(cache *feedCache, interests *interestStore) *sifter {
+	return &sifter{judge: typesafeJudge, cache: cache, interests: interests, queue: make(chan struct{}, 1)}
 }
 
 // serve is the one worker, taking a run at a time until the server stops.
@@ -230,6 +241,10 @@ func (s *sifter) run(parent context.Context) {
 	defer cancel()
 
 	items := s.cache.unjudged(time.Now())
+	var interests []string
+	if s.interests != nil {
+		interests = s.interests.list()
+	}
 	batches := make(chan []core.Item)
 	var (
 		wg       sync.WaitGroup
@@ -241,7 +256,7 @@ func (s *sifter) run(parent context.Context) {
 		go func() {
 			defer wg.Done()
 			for batch := range batches {
-				verdicts, err := s.judge(ctx, batch)
+				verdicts, err := s.judge(ctx, batch, interests)
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
@@ -304,18 +319,21 @@ func (s *sifter) landed(verdicts map[string]siftVerdict) {
 type siftVerdict struct {
 	Worth float64
 	Rank  int
+	// How well it answers the reader's own list, or below zero when there was
+	// no list to answer — which is not the same as being asked and missing it.
+	Interest float64
 }
 
 // typesafeJudge asks Jev about one batch and returns what it made of each item,
 // by feed key. An item the answer says nothing about is left out rather than
 // guessed at: unjudged is a state this whole thing is built to survive, and a
 // made-up number is not.
-func typesafeJudge(ctx context.Context, items []core.Item) (map[string]siftVerdict, error) {
+func typesafeJudge(ctx context.Context, items []core.Item, interests []string) (map[string]siftVerdict, error) {
 	key := strings.TrimSpace(os.Getenv(typesafeKey))
 	if key == "" {
 		return nil, errors.New(typesafeKey + " is not set")
 	}
-	body, err := json.Marshal(siftRequest(items))
+	body, err := json.Marshal(siftRequest(items, interests))
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +378,13 @@ func typesafeJudge(ctx context.Context, items []core.Item) (map[string]siftVerdi
 		if !ok {
 			continue
 		}
-		out[core.Key(it.App, it.ID)] = siftVerdict{Worth: worth.Noul, Rank: siftRankOf(rank.Score)}
+		v := siftVerdict{Worth: worth.Noul, Rank: siftRankOf(rank.Score), Interest: -1}
+		// Absent when there was no list to ask about, which leaves the item
+		// unmatched rather than matched at zero.
+		if match, ok := answer.Answers[siftInterestID(i)]; ok {
+			v.Interest = match.Noul
+		}
+		out[core.Key(it.App, it.ID)] = v
 	}
 	if len(out) == 0 {
 		return nil, errors.New("typesafe answered none of the batch")
@@ -412,12 +436,17 @@ func typesafeTrouble(raw []byte) string {
 	return "no reason given"
 }
 
-func siftAskID(i int) string  { return "w" + strconv.Itoa(i) }
-func siftRankID(i int) string { return "r" + strconv.Itoa(i) }
+func siftAskID(i int) string      { return "w" + strconv.Itoa(i) }
+func siftRankID(i int) string     { return "r" + strconv.Itoa(i) }
+func siftInterestID(i int) string { return "i" + strconv.Itoa(i) }
 
 type siftState struct {
 	Reader string      `json:"reader"`
 	Items  []siftEntry `json:"items"`
+	// What the reader typed into settings: the subjects they are following at
+	// the moment, one per line, as they wrote them. Left out entirely when
+	// there are none, so the model is never asked to match against nothing.
+	Interests []string `json:"interests,omitempty"`
 }
 
 // siftEntry is one item as the model sees it: what it is, where it came from
@@ -454,10 +483,10 @@ type siftBody struct {
 // rather than one request each because Jev reads the state once either way, so
 // the second question costs a fraction of the first item it is asked about —
 // which is the whole reason a backlog this deep is affordable at all.
-func siftRequest(items []core.Item) siftBody {
+func siftRequest(items []core.Item, interests []string) siftBody {
 	b := siftBody{
 		Model:     typesafeModel,
-		State:     siftState{Reader: siftReader, Items: make([]siftEntry, 0, len(items))},
+		State:     siftState{Reader: siftReader, Items: make([]siftEntry, 0, len(items)), Interests: interests},
 		Questions: make(map[string]siftAsk, len(items)),
 	}
 	for i, it := range items {
@@ -494,6 +523,20 @@ func siftRequest(items []core.Item) siftBody {
 			Type:         "score",
 			Instructions: fmt.Sprintf("%s The item is `items[%d]`.", siftRankQuestion, i),
 			Criteria:     siftRungs(),
+		}
+		// Only when there is a list. An empty one would be a question with no
+		// possible yes, asked of every item in the backlog.
+		if len(interests) > 0 {
+			b.Questions[siftInterestID(i)] = siftAsk{
+				Type:         "noul",
+				Instructions: fmt.Sprintf("%s The item is `items[%d]`.", siftInterestQuestion, i),
+				Criteria: map[string]string{
+					"true": "The item is about one of those subjects, or is a direct development " +
+						"in it. A near neighbour is not a match: the reader named the subject, not " +
+						"the field it sits in.",
+					"false": "None of them, or only in the way anything is related to anything.",
+				},
+			}
 		}
 	}
 	return b

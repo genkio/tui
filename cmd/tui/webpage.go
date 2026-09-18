@@ -99,8 +99,10 @@ type feedTally struct {
 	// The sift's ladder: rung -> how many items sit on it. Empty on a list
 	// nothing has judged, which is how the row knows not to draw the group.
 	ranks map[int]int
-	// How many items have a discussion read and waiting under them.
-	gists int
+	// How many items have a discussion read and waiting under them, and how many
+	// answer something on the reader's own list.
+	gists   int
+	matched int
 	// app -> subcategory -> count, for the services that have one (see subApps).
 	// Nested rather than flat because two services can name a stream the same
 	// thing, and a subcategory only ever narrows its own source.
@@ -148,6 +150,9 @@ func tallyItems(items []core.Item) feedTally {
 		if it.Gisted {
 			t.gists++
 		}
+		if it.Matched {
+			t.matched++
+		}
 		t.addSub(it.App, it.Source, it.Author)
 	}
 	return t
@@ -173,6 +178,9 @@ func tallyCards(cards []cardData) feedTally {
 		}
 		if c.Gisted {
 			t.gists++
+		}
+		if c.Matched {
+			t.matched++
 		}
 		t.addSub(c.App, c.Source, c.Author)
 	}
@@ -200,6 +208,8 @@ type pageInput struct {
 	// saved list, and the blocked view renders it.
 	block       *blocker
 	blockedView bool
+	// The reader's own list of subjects, as the settings textarea shows it.
+	interests string
 	// What the sift set aside: skippedView is that pile being the page, and
 	// worth is what each item on the page was given, by feed key, which is what
 	// the best-first order sorts on and what a card wears.
@@ -252,8 +262,10 @@ type pageData struct {
 	ClearBlocked bool
 	Keywords     int
 	KeywordText  string
-	Swipe        bool // deck of one card at a time, swiped through
-	BulkMark     bool // the cached backlog can clear the whole pick server-side
+	// The reader's own list of subjects, in the settings dialog's textarea.
+	Interests string
+	Swipe     bool // deck of one card at a time, swiped through
+	BulkMark  bool // the cached backlog can clear the whole pick server-side
 	// Where to go for the other layout, blank on the views that have no say
 	// (saved, blocked, nothing logged in).
 	DeckHref string
@@ -359,9 +371,10 @@ type cardData struct {
 	// the rung it landed on and Gisted whether its discussion is read and
 	// waiting, which the chips count when nothing else counted them for this
 	// page.
-	Worth  string
-	Rank   int
-	Gisted bool
+	Worth   string
+	Rank    int
+	Gisted  bool
+	Matched bool
 
 	ShowActions bool
 }
@@ -444,7 +457,7 @@ func buildPageData(in pageInput) pageData {
 		if in.skippedView || in.order == orderBest {
 			card.Worth = fmt.Sprintf("%.2f", itemWorth(it, in.worth))
 		}
-		card.Rank, card.Gisted = it.Rank, it.Gisted
+		card.Rank, card.Gisted, card.Matched = it.Rank, it.Gisted, it.Matched
 		cards = append(cards, card)
 	}
 
@@ -552,6 +565,7 @@ func buildPageData(in pageInput) pageData {
 		ClearBlocked:  in.blockedView && in.block.count() > 0,
 		Keywords:      in.block.keywordCount(),
 		KeywordText:   keywordText,
+		Interests:     in.interests,
 		Filters:       filters,
 		Subs:          subs,
 		Sel:           in.sel.String(),
@@ -972,6 +986,15 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 		}
 	}
 
+	// What the reader asked for by name, first of the three loose chips: a list
+	// they typed themselves outranks anything a model worked out about them, so
+	// it sits closest to the sources and its items are never skipped.
+	if t.matched > 0 {
+		out = append(out, filterGroup{Chips: []filterChip{{
+			Kind: "mine", Key: "mine", Label: "for me", Count: t.matched,
+		}}})
+	}
+
 	// The discussions already read, as one chip of their own at the end of the
 	// row. A gist is a minute of waiting, so you fire off a handful from the
 	// cards and carry on; this is where they turn up when they are done, to be
@@ -1092,7 +1115,7 @@ func chipHref(q url.Values, sel feedSel) string {
 		// The filter params this replaces, one no page carries, and the briefing
 		// flag: a pick is a page of cards, whatever the page it was tapped from
 		// happened to be showing.
-		case "app", "type", "rank", "gist", "x", "sub", "json", "summary":
+		case "app", "type", "rank", "gist", "mine", "x", "sub", "json", "summary":
 		default:
 			out[k] = v
 		}
@@ -1102,6 +1125,8 @@ func chipHref(q url.Values, sel feedSel) string {
 		out.Set(sel.Kind, sel.Key)
 	case "gist":
 		out.Set("gist", "1")
+	case "mine":
+		out.Set("mine", "1")
 	}
 	if sel.Kind == "app" && sel.Sub != "" {
 		out.Set("sub", sel.Sub)
@@ -1251,6 +1276,9 @@ func parseSel(q url.Values) feedSel {
 	if q.Get("gist") == "1" {
 		return feedSel{Kind: "gist", Key: "gist"}
 	}
+	if q.Get("mine") == "1" {
+		return feedSel{Kind: "mine", Key: "mine"}
+	}
 	if r := q.Get("rank"); r != "" {
 		for _, l := range siftLevels {
 			if l.Key == r {
@@ -1283,6 +1311,10 @@ func selectItems(items []core.Item, sel feedSel) []core.Item {
 			}
 		case "gist":
 			if it.Gisted {
+				out = append(out, it)
+			}
+		case "mine":
+			if it.Matched {
 				out = append(out, it)
 			}
 		}

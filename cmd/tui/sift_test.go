@@ -16,10 +16,10 @@ import (
 
 // testSifter is the real thing with the model call replaced: a test has no
 // business spending an API key to find out what a handler does with an answer.
-func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, []core.Item) (map[string]siftVerdict, error)) *sifter {
+func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, []core.Item, []string) (map[string]siftVerdict, error)) *sifter {
 	t.Helper()
 	t.Setenv(typesafeKey, "test-key")
-	s := newSifter(cache)
+	s := newSifter(cache, &interestStore{})
 	s.judge = judge
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -36,12 +36,12 @@ func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, []co
 
 // worthOf answers with a fixed yes/no number per item id and a rung derived
 // from it, which is every judgment most of these tests need to describe.
-func worthOf(scores map[string]float64) func(context.Context, []core.Item) (map[string]siftVerdict, error) {
-	return func(_ context.Context, items []core.Item) (map[string]siftVerdict, error) {
+func worthOf(scores map[string]float64) func(context.Context, []core.Item, []string) (map[string]siftVerdict, error) {
+	return func(_ context.Context, items []core.Item, _ []string) (map[string]siftVerdict, error) {
 		out := map[string]siftVerdict{}
 		for _, it := range items {
 			w := scores[it.ID]
-			out[core.Key(it.App, it.ID)] = siftVerdict{Worth: w, Rank: siftRankOf(w * float64(len(siftLevels)-1))}
+			out[core.Key(it.App, it.ID)] = siftVerdict{Worth: w, Rank: siftRankOf(w * float64(len(siftLevels)-1)), Interest: -1}
 		}
 		return out, nil
 	}
@@ -110,12 +110,12 @@ func TestSiftJudgesOnlyWhatIsUnjudged(t *testing.T) {
 	c.upsert([]core.Item{item("x", "1", "one"), item("x", "2", "two")}, now)
 
 	var seen [][]string
-	s := testSifter(t, c, func(_ context.Context, items []core.Item) (map[string]siftVerdict, error) {
+	s := testSifter(t, c, func(_ context.Context, items []core.Item, _ []string) (map[string]siftVerdict, error) {
 		var batch []string
 		out := map[string]siftVerdict{}
 		for _, it := range items {
 			batch = append(batch, it.ID)
-			out[core.Key(it.App, it.ID)] = siftVerdict{Worth: 0.9, Rank: 2}
+			out[core.Key(it.App, it.ID)] = siftVerdict{Worth: 0.9, Rank: 2, Interest: -1}
 		}
 		seen = append(seen, batch)
 		return out, nil
@@ -141,7 +141,7 @@ func TestSiftJudgesOnlyWhatIsUnjudged(t *testing.T) {
 func TestSiftStopsAtTheFirstFailure(t *testing.T) {
 	c := newTestCache(t)
 	c.upsert([]core.Item{item("x", "1", "one")}, time.Now())
-	s := testSifter(t, c, func(context.Context, []core.Item) (map[string]siftVerdict, error) {
+	s := testSifter(t, c, func(context.Context, []core.Item, []string) (map[string]siftVerdict, error) {
 		return nil, errors.New("typesafe said 401 Unauthorized: bad key")
 	})
 	if err := s.start(); err != nil {
@@ -179,7 +179,7 @@ func TestSiftRequestAsksPerItem(t *testing.T) {
 	body := siftRequest([]core.Item{
 		{App: "x", ID: "1", Body: "a post with no title of its own", Source: "@someone"},
 		{App: "hn", ID: "2", Title: "Show HN: a thing", URL: "https://example.com"},
-	})
+	}, nil)
 	if body.Model != typesafeModel {
 		t.Fatalf("model = %q", body.Model)
 	}
@@ -373,8 +373,8 @@ func TestMarkAllInTheSkippedViewClearsThePile(t *testing.T) {
 	now := time.Now()
 	c.upsert([]core.Item{item("x", "1", "keep"), item("x", "2", "aside")}, now)
 	c.judge(map[string]siftVerdict{
-		core.Key("x", "1"): {Worth: 0.9, Rank: 3},
-		core.Key("x", "2"): {Worth: 0.02, Rank: 1},
+		core.Key("x", "1"): {Worth: 0.9, Rank: 3, Interest: -1},
+		core.Key("x", "2"): {Worth: 0.02, Rank: 1, Interest: -1},
 	}, now)
 
 	req := httptest.NewRequest(http.MethodPost, "/mark-all", strings.NewReader("skipped=1"))

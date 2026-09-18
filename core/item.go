@@ -30,6 +30,9 @@ type Item struct {
 	Audio   string    // direct audio file of an attached episode (a podcast enclosure)
 	Images  []string  // attached still images; the web card reveals them on demand
 	Quote   *Quote    // the post this one embeds (an x quote), if any
+	// Whether the item answers something on the reader's own list of what they
+	// are following at the moment. Filled in with Rank, and for the same reason.
+	Matched bool
 	// Whether the feed service has a finished gist of the discussion under this
 	// item waiting. Filled in when the cache hands the item out, like Rank: the
 	// app it came from has no idea a discussion was ever read.

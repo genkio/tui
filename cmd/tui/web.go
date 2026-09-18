@@ -102,7 +102,11 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	sum.find = func(app, id string, now time.Time) (core.Item, bool) {
 		return findItem(app, id, now, cache, saved, rendered)
 	}
-	sift := newSifter(cache)
+	interests, err := loadInterestsDB(db)
+	if err != nil {
+		return err
+	}
+	sift := newSifter(cache, interests)
 	flusher := newMarkFlusher(root, cache)
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
 	if syncPath != "" {
@@ -143,7 +147,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			http.NotFound(w, r)
 			return
 		}
-		handleAll(w, r, root, loader, cache, sweep, saved, tags, block, rendered, sum)
+		handleAll(w, r, root, loader, cache, sweep, saved, tags, block, rendered, sum, interests)
 	})
 	// POST puts the unjudged backlog through TypeSafe and GET reports on the
 	// run. A POST because it spends an API key's tokens, so nothing should be
@@ -230,6 +234,16 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			w.Header().Set("Allow", "GET, POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+	// The reader's own list of what they are following, which a sift asks about
+	// every item. A POST because saving it drops every judgment in the backlog.
+	mux.HandleFunc("/interests", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleInterests(w, r, interests, cache)
 	})
 	mux.HandleFunc("/blocked/clear", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -364,7 +378,7 @@ func clientWindow(deck bool) int {
 // a matter of hiding cards. Nothing here fetches: x's For You used to be served
 // live from inside this request and is now a swept source like the rest
 // (xForYouApp), which is what makes it summarizable and clearable.
-func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, tags *tagStore, block *blocker, rendered *renderedItems, sum *summarizer) {
+func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *pageLoader, cache *feedCache, sweep *sweeper, saved *savedStore, tags *tagStore, block *blocker, rendered *renderedItems, sum *summarizer, interests *interestStore) {
 	// In --dev a template typo should show up immediately, so load (and in dev,
 	// re-parse) the template first.
 	tmpl, err := loader.load()
@@ -511,7 +525,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		items: items, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
 		swipe: deck, order: order, worth: worth, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
-		summaryOpen: q.Get("summary") == "1",
+		summaryOpen: q.Get("summary") == "1", interests: interests.words(),
 	})
 }
 
