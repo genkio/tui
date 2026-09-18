@@ -34,22 +34,22 @@ func TestInterestsParseWhatWasTyped(t *testing.T) {
 // is the alternative that is true nearly every time.
 func TestSiftAsksTheListAsOneChoice(t *testing.T) {
 	it := core.Item{App: "hn", ID: "1", Title: "Zig 0.16 released", Body: "the release notes"}
-	// The batch never carries it: the question is asked of one item alone.
-	if _, asked := siftRequest([]core.Item{it}).Questions[siftInterestID]; asked {
-		t.Error("the batch should not carry the subject question")
+	// No list, no question: its only possible answer would be "none".
+	if _, asked := siftRequest(it, nil).Questions[siftInterestID]; asked {
+		t.Error("no list, no question")
 	}
 	list := []string{"anything about Zig", "the Fed's rate path"}
-	body := siftMatchRequest(it, list)
-	if len(body.Questions) != 1 {
-		t.Fatalf("%d questions, want the one", len(body.Questions))
+	body := siftRequest(it, list)
+	if len(body.Questions) != 3 {
+		t.Fatalf("%d questions, want the cut, the ladder and the subject", len(body.Questions))
 	}
 	q, ok := body.Questions[siftInterestID]
 	if !ok || q.Type != "choice" {
 		t.Fatalf("interest question = %+v, want a choice", q)
 	}
 	// One item alone is the whole state, so there is no index to point at.
-	one, ok := body.State.(siftEntry)
-	if !ok || one.Title != "Zig 0.16 released" || one.Text != "the release notes" {
+	one, ok := body.State.(siftState)
+	if !ok || one.Item.Title != "Zig 0.16 released" || one.Item.Text != "the release notes" {
 		t.Fatalf("state = %+v, want the item on its own", body.State)
 	}
 	if strings.Contains(q.Instructions, "items[") {
@@ -75,15 +75,15 @@ func TestSiftAsksTheListAsOneChoice(t *testing.T) {
 func TestSubjectIsAskedOfOneItemAtATime(t *testing.T) {
 	c := newTestCache(t)
 	c.upsert([]core.Item{item("x", "1", "one"), item("x", "2", "two")}, time.Now())
-	s := testSifter(t, c, worthOf(map[string]float64{"1": 0.9, "2": 0.9}))
 	var alone int
-	s.match = func(_ context.Context, it core.Item, interests []string) (float64, string, error) {
+	s := testSifter(t, c, func(_ context.Context, it core.Item, interests []string) (siftVerdict, error) {
 		alone++
+		v := siftVerdict{Worth: 0.9, Rank: 2}
 		if it.ID == "1" {
-			return 0.97, interests[0], nil
+			v.Interest, v.InterestFor = 0.97, interests[0]
 		}
-		return 0, "", nil
-	}
+		return v, nil
+	})
 	if err := s.interests.set("anything about Zig"); err != nil {
 		t.Fatal(err)
 	}
@@ -229,11 +229,10 @@ func TestSiftSendsTheListItStartedWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	var asked []string
-	s := testSifter(t, c, worthOf(map[string]float64{"1": 0.9}))
-	s.match = func(_ context.Context, _ core.Item, interests []string) (float64, string, error) {
+	s := testSifter(t, c, func(_ context.Context, _ core.Item, interests []string) (siftVerdict, error) {
 		asked = interests
-		return 0.9, interests[0], nil
-	}
+		return siftVerdict{Worth: 0.9, Rank: 2, Interest: 0.9, InterestFor: interests[0]}, nil
+	})
 	s.interests = store
 	if err := s.start(); err != nil {
 		t.Fatal(err)

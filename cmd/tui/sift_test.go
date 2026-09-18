@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 // testSifter is the real thing with the model call replaced: a test has no
 // business spending an API key to find out what a handler does with an answer.
-func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, []core.Item) (map[string]siftVerdict, error)) *sifter {
+func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, core.Item, []string) (siftVerdict, error)) *sifter {
 	t.Helper()
 	t.Setenv(typesafeKey, "test-key")
 	s := newSifter(cache, &interestStore{})
@@ -36,14 +37,10 @@ func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, []co
 
 // worthOf answers with a fixed yes/no number per item id and a rung derived
 // from it, which is every judgment most of these tests need to describe.
-func worthOf(scores map[string]float64) func(context.Context, []core.Item) (map[string]siftVerdict, error) {
-	return func(_ context.Context, items []core.Item) (map[string]siftVerdict, error) {
-		out := map[string]siftVerdict{}
-		for _, it := range items {
-			w := scores[it.ID]
-			out[core.Key(it.App, it.ID)] = siftVerdict{Worth: w, Rank: siftRankOf(w * float64(len(siftLevels)-1)), Interest: -1}
-		}
-		return out, nil
+func worthOf(scores map[string]float64) func(context.Context, core.Item, []string) (siftVerdict, error) {
+	return func(_ context.Context, it core.Item, _ []string) (siftVerdict, error) {
+		w := scores[it.ID]
+		return siftVerdict{Worth: w, Rank: siftRankOf(w * float64(len(siftLevels)-1)), Interest: -1}, nil
 	}
 }
 
@@ -109,16 +106,13 @@ func TestSiftJudgesOnlyWhatIsUnjudged(t *testing.T) {
 	now := time.Now()
 	c.upsert([]core.Item{item("x", "1", "one"), item("x", "2", "two")}, now)
 
-	var seen [][]string
-	s := testSifter(t, c, func(_ context.Context, items []core.Item) (map[string]siftVerdict, error) {
-		var batch []string
-		out := map[string]siftVerdict{}
-		for _, it := range items {
-			batch = append(batch, it.ID)
-			out[core.Key(it.App, it.ID)] = siftVerdict{Worth: 0.9, Rank: 2, Interest: -1}
-		}
-		seen = append(seen, batch)
-		return out, nil
+	var mu sync.Mutex
+	var asked []string
+	s := testSifter(t, c, func(_ context.Context, it core.Item, _ []string) (siftVerdict, error) {
+		mu.Lock()
+		asked = append(asked, it.ID)
+		mu.Unlock()
+		return siftVerdict{Worth: 0.9, Rank: 2, Interest: -1}, nil
 	})
 	if err := s.start(); err != nil {
 		t.Fatal(err)
@@ -131,8 +125,10 @@ func TestSiftJudgesOnlyWhatIsUnjudged(t *testing.T) {
 	}
 	settledSift(t, s)
 
-	if len(seen) != 2 || len(seen[1]) != 1 || seen[1][0] != "3" {
-		t.Fatalf("batches = %v, want the second run to ask about the new item alone", seen)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(asked) != 3 || asked[2] != "3" {
+		t.Fatalf("asked about %v, want the second run to ask about the new item alone", asked)
 	}
 }
 
@@ -141,8 +137,8 @@ func TestSiftJudgesOnlyWhatIsUnjudged(t *testing.T) {
 func TestSiftStopsAtTheFirstFailure(t *testing.T) {
 	c := newTestCache(t)
 	c.upsert([]core.Item{item("x", "1", "one")}, time.Now())
-	s := testSifter(t, c, func(context.Context, []core.Item) (map[string]siftVerdict, error) {
-		return nil, errors.New("typesafe said 401 Unauthorized: bad key")
+	s := testSifter(t, c, func(context.Context, core.Item, []string) (siftVerdict, error) {
+		return siftVerdict{}, errors.New("typesafe said 401 Unauthorized: bad key")
 	})
 	if err := s.start(); err != nil {
 		t.Fatal(err)
@@ -171,52 +167,48 @@ func TestSiftRefusesWhatItCannotDo(t *testing.T) {
 	}
 }
 
-// Two questions per item, each pointed at that item's place in the state: the
-// yes/no the cut is drawn on and the ladder the chips group by. The batch is
-// read once and every question answered against it in parallel, which is the
-// whole reason a backlog this deep is affordable.
-func TestSiftRequestAsksPerItem(t *testing.T) {
-	body := siftRequest([]core.Item{
-		{App: "x", ID: "1", Body: "a post with no title of its own", Source: "@someone"},
-		{App: "hn", ID: "2", Title: "Show HN: a thing", URL: "https://example.com"},
-	})
+// One item to a request, and every question asked of that one item: the state
+// is read once per request either way, so a batch shared the reading of
+// twenty-five items rather than the reading of one, and paid for it in every
+// answer (see typesafeJudge).
+func TestSiftRequestCarriesOneItem(t *testing.T) {
+	body := siftRequest(core.Item{
+		App: "x", ID: "1", Body: "a post with no title of its own", Source: "@someone",
+		URL: "https://example.com",
+	}, nil)
 	if body.Model != typesafeModel {
 		t.Fatalf("model = %q", body.Model)
 	}
-	if len(body.Questions) != 4 {
-		t.Fatalf("%d questions, want the cut and the ladder for each of two items", len(body.Questions))
+	if len(body.Questions) != 2 {
+		t.Fatalf("%d questions, want the cut and the ladder", len(body.Questions))
 	}
-	state, ok := body.State.(siftState)
-	if !ok {
-		t.Fatalf("state = %T, want a batch", body.State)
+	if q := body.Questions[siftAskID]; q.Type != "noul" {
+		t.Errorf("the cut = %+v, want a noul", q)
 	}
-	q, ok := body.Questions["w1"]
-	if !ok || q.Type != "noul" {
-		t.Fatalf("second question = %+v, want a noul", q)
-	}
-	if !strings.Contains(q.Instructions, "`items[1]`") {
-		t.Errorf("a question should name its item's place in the state: %q", q.Instructions)
-	}
-	if yesno, ok := q.Criteria.(map[string]string); !ok || yesno["true"] == "" || yesno["false"] == "" {
-		t.Error("a yes and a no should each say what they mean")
-	}
-	r, ok := body.Questions["r1"]
-	if !ok || r.Type != "score" {
-		t.Fatalf("second item's ladder = %+v, want a score", r)
-	}
-	if !strings.Contains(r.Instructions, "`items[1]`") {
-		t.Errorf("the ladder should name its item too: %q", r.Instructions)
+	r := body.Questions[siftRankID]
+	if r.Type != "score" {
+		t.Fatalf("the ladder = %+v, want a score", r)
 	}
 	rungs, ok := r.Criteria.([]string)
 	if !ok || len(rungs) != len(siftLevels) {
 		t.Fatalf("rungs = %+v, want one description per level, lowest first", r.Criteria)
 	}
+	// Nothing to index into and nothing to number: the item is the state.
+	state, ok := body.State.(siftState)
+	if !ok {
+		t.Fatalf("state = %T, want one item", body.State)
+	}
+	for _, q := range body.Questions {
+		if strings.Contains(q.Instructions, "items[") {
+			t.Errorf("a question should not point at an index: %q", q.Instructions)
+		}
+	}
 	// An x post is all body; its title is that body over again and is not sent
 	// twice.
-	if state.Items[0].Title != "" {
-		t.Errorf("x item carried a title of %q", state.Items[0].Title)
+	if state.Item.Title != "" {
+		t.Errorf("x item carried a title of %q", state.Item.Title)
 	}
-	if state.Items[0].Text == "" {
+	if state.Item.Text == "" {
 		t.Error("x item lost its text")
 	}
 	raw, err := json.Marshal(body)
@@ -225,7 +217,7 @@ func TestSiftRequestAsksPerItem(t *testing.T) {
 	}
 	// Neither is anything to judge, and both would be spent on every item.
 	if strings.Contains(string(raw), "example.com") {
-		t.Error("the batch should not carry item URLs")
+		t.Error("the request should not carry the item's URL")
 	}
 }
 

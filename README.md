@@ -403,13 +403,20 @@ question per item — *is this worth the reader's time?* — and files what it s
 no to under **skipped** in the header, out of the feed and out of every count.
 
 It runs on TypeSafe rather than on a chat model because of what it is: a few
-hundred judgments and no prose anywhere in the answer. Jev reads a batch once
-and answers every question against it in parallel, so the cost is 25 items to a
-request, four requests in flight, and the whole backlog in a few seconds rather
-than the minute a briefing spends on one source. That is the difference that
-matters here — a briefing is one prompt that has to fit in one context window
+hundred judgments and no prose anywhere in the answer. That is the difference
+that matters — a briefing is one prompt that has to fit in one context window
 and is capped at 200 items for the whole feed, while a sift is arithmetic over
-however many batches the backlog takes. 997 items, ten seconds, under a cent.
+however many items the backlog holds. A thousand of them takes about forty
+seconds and costs a couple of cents.
+
+One item to a request, each asked on its own. Batching twenty-five to a request
+was the obvious saving and it was a false one: Jev reads the state once per
+request either way, so a batch shares the reading of twenty-five items rather
+than the reading of one, and it pays for that in every answer. Measured against
+the same backlog, the drift is not subtle. A two-word 「牛逼啊！」 scored 0.57
+among its neighbours and 0.04 alone; a sideloading tutorial 0.30 among them and
+0.85 alone; one rung in four moved. Every judgment made alone was the better
+one.
 
 The button counts its way through (`400/997`) and the run is the server's, not
 the request's: closing the tab does not stop it, and a second tab watching sees
@@ -470,25 +477,13 @@ is much in this particular piece of it. **save** only saves: it drops every
 judgment in the backlog, because they were answers about the old list, and the
 header's **sift** is what asks them all again.
 
-That question took two goes to get right, and both mistakes are worth knowing
-about if you build anything like it. It began as a yes/no per item — *is this
-about one of your subjects?* — and a Cantonese post about robotaxis in Singapore
-came back at 0.81, as sure as the immigration paperwork it was supposed to be
-finding. A yes/no has nothing to weigh against. Asked instead as a **choice**
-between the subjects and an explicit *none of them*, the same post is *none* at
-1.00: a probability only means something against the alternatives, and "none" is
-the alternative that is true nearly every time.
-
-The second mistake was batching it. The cut and the ladder are comparative
-judgments and ride happily twenty-five to a request, but "is this about a
-subject you named" is a rare-event question, and a rare-event question is not
-safe in company. In a batch of twenty-five Cantonese posts with no immigration
-item among them, that same Waymo post came back as *Japan permanent residency*
-at 0.90 — while the actual residency thread, in a batch of its own, came back as
-*none*. Asked one at a time, alone in the state, each is right: 1.00 and 0.98.
-So the sift asks that one question per item, a couple in the air per batch
-worker, which costs a minute over a thousand items rather than ten seconds. The
-other two stay batched.
+That question is a **choice**, not a yes/no, and the difference is the whole
+reason it works. Asked as *is this about one of your subjects?* a Cantonese post
+about robotaxis in Singapore came back at 0.81 — as sure as the immigration
+paperwork it was supposed to be finding — because a yes/no has nothing to weigh
+against. Asked as a choice between the subjects and an explicit *none of them*,
+the same post is *none* at 1.00. A probability only means something against the
+alternatives, and "none" is the alternative that is true nearly every time.
 
 The **skipped** view is where the judgment gets checked, and it is read exactly
 the way the feed is read: full cards, the deck, the sort toggle, the chips,

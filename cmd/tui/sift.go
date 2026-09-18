@@ -52,22 +52,13 @@ const (
 	// What an item no run has reached counts as in the best-first order:
 	// neither good nor bad. Missing is not the same answer as low.
 	siftUnknown = 0.5
-	// How many items ride in one request. Jev reads the batch once and answers
-	// every question against it, so bigger batches are cheaper per item — but
-	// its context is 64k and its accuracy drifts as the state grows, and a batch
-	// this size is a few thousand tokens with room to spare.
-	siftBatch = 25
-	// How many batches are in flight at once. The rate limits are far above
-	// this; it is the feed's own courtesy, and it puts a few hundred items
-	// through in under a minute.
-	siftWorkers = 4
-	// ...and how many of the per-item questions each of those has in the air.
-	// Four times this is what the rate limit sees, and the limit is 1,200
-	// requests a minute against a round trip of about half a second.
-	siftMatchWorkers = 2
+	// How many items are in the air at once. One request an item means a
+	// thousand of them in a run, so this is what decides whether that is a
+	// minute or twenty — and it is bounded by TypeSafe's 1,200 requests a
+	// minute against a round trip of about half a second, not by anything here.
+	siftWorkers = 8
 	// Per-item text budget. A judgment of whether something is worth reading is
-	// made on the opening of it, the way yours is — and half the point of the
-	// exercise is that a backlog's worth of bodies stays small.
+	// made on the opening of it, the way yours is.
 	siftBodyRunes = 400
 	// One request's patience, and the run's. A batch is a second or two; a
 	// minute means something is wrong with the network, not with the batch.
@@ -194,10 +185,7 @@ type siftJob struct {
 // judge is the call to the model, swapped out in tests, which have no business
 // spending an API key to find out whether a handler validates its form.
 type sifter struct {
-	judge func(ctx context.Context, items []core.Item) (map[string]siftVerdict, error)
-	// match is the same call for the one question that cannot travel in a
-	// batch, asked of one item at a time (see siftInterestQuestion).
-	match func(ctx context.Context, it core.Item, interests []string) (float64, string, error)
+	judge func(ctx context.Context, it core.Item, interests []string) (siftVerdict, error)
 	cache *feedCache
 	// What the reader is following at the moment, read once when a run starts:
 	// the list is the same for every batch in that run, and one edited halfway
@@ -209,10 +197,7 @@ type sifter struct {
 }
 
 func newSifter(cache *feedCache, interests *interestStore) *sifter {
-	return &sifter{
-		judge: typesafeJudge, match: typesafeMatch,
-		cache: cache, interests: interests, queue: make(chan struct{}, 1),
-	}
+	return &sifter{judge: typesafeJudge, cache: cache, interests: interests, queue: make(chan struct{}, 1)}
 }
 
 // serve is the one worker, taking a run at a time until the server stops.
@@ -274,12 +259,11 @@ func (s *sifter) run(parent context.Context) {
 	ctx, cancel := context.WithTimeout(parent, siftRunTimeout)
 	defer cancel()
 
-	items := s.cache.unjudged(time.Now())
 	var interests []string
 	if s.interests != nil {
 		interests = s.interests.list()
 	}
-	batches := make(chan []core.Item)
+	queue := make(chan core.Item)
 	var (
 		wg       sync.WaitGroup
 		mu       sync.Mutex
@@ -289,11 +273,8 @@ func (s *sifter) run(parent context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for batch := range batches {
-				verdicts, err := s.judge(ctx, batch)
-				if err == nil {
-					err = s.matchAll(ctx, batch, interests, verdicts)
-				}
+			for it := range queue {
+				v, err := s.judge(ctx, it, interests)
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
@@ -303,23 +284,19 @@ func (s *sifter) run(parent context.Context) {
 					mu.Unlock()
 					return
 				}
-				s.landed(verdicts)
+				s.landed(core.Key(it.App, it.ID), v)
 			}
 		}()
 	}
 feeding:
-	for start := 0; start < len(items); start += siftBatch {
-		end := start + siftBatch
-		if end > len(items) {
-			end = len(items)
-		}
+	for _, it := range s.cache.unjudged(time.Now()) {
 		select {
-		case batches <- items[start:end]:
+		case queue <- it:
 		case <-ctx.Done():
 			break feeding
 		}
 	}
-	close(batches)
+	close(queue)
 	wg.Wait()
 
 	// Whatever landed is worth keeping, failure or not.
@@ -339,61 +316,10 @@ feeding:
 	}
 }
 
-// matchAll fills in the one judgment that is asked per item rather than per
-// batch, a couple at a time: four batch workers doing two of these each is
-// eight requests in the air, which is what the rate limit has room for. An item
-// the batch itself said nothing about is skipped — there is no verdict to hang
-// a subject on.
-func (s *sifter) matchAll(ctx context.Context, batch []core.Item, interests []string, verdicts map[string]siftVerdict) error {
-	if len(interests) == 0 || s.match == nil {
-		return nil
-	}
-	var (
-		wg    sync.WaitGroup
-		mu    sync.Mutex
-		bad   error
-		gate  = make(chan struct{}, siftMatchWorkers)
-		stamp = func(key string, p float64, subject string) {
-			mu.Lock()
-			defer mu.Unlock()
-			v, ok := verdicts[key]
-			if !ok {
-				return
-			}
-			v.Interest, v.InterestFor = p, subject
-			verdicts[key] = v
-		}
-	)
-	for _, it := range batch {
-		key := core.Key(it.App, it.ID)
-		if _, ok := verdicts[key]; !ok {
-			continue
-		}
-		wg.Add(1)
-		go func(it core.Item, key string) {
-			defer wg.Done()
-			gate <- struct{}{}
-			defer func() { <-gate }()
-			p, subject, err := s.match(ctx, it, interests)
-			if err != nil {
-				mu.Lock()
-				if bad == nil {
-					bad = err
-				}
-				mu.Unlock()
-				return
-			}
-			stamp(key, p, subject)
-		}(it, key)
-	}
-	wg.Wait()
-	return bad
-}
-
-func (s *sifter) landed(verdicts map[string]siftVerdict) {
-	aside := s.cache.judge(verdicts, time.Now())
+func (s *sifter) landed(key string, v siftVerdict) {
+	aside := s.cache.judge(map[string]siftVerdict{key: v}, time.Now())
 	s.mu.Lock()
-	s.job.Done += len(verdicts)
+	s.job.Done++
 	s.job.Aside += aside
 	s.mu.Unlock()
 }
@@ -416,108 +342,58 @@ type siftVerdict struct {
 	InterestFor string
 }
 
-// typesafeJudge asks Jev about one batch and returns what it made of each item,
-// by feed key. An item the answer says nothing about is left out rather than
-// guessed at: unjudged is a state this whole thing is built to survive, and a
-// made-up number is not.
-func typesafeJudge(ctx context.Context, items []core.Item) (map[string]siftVerdict, error) {
+// typesafeJudge asks Jev about one item: the cut, the ladder, and — when the
+// reader has a list — which of their subjects it is about. One item to a
+// request, which is the whole lesson of this file. Every one of the three
+// questions was tried in batches of twenty-five first, and every one of them
+// came back differently depending on the company the item kept: a two-word
+// "牛逼啊！" was worth 0.57 among its neighbours and 0.04 on its own, a
+// sideloading tutorial 0.30 among them and 0.85 alone. The state is read once
+// per request either way, so a batch was never the saving it looked like: it
+// shared the reading of twenty-five items rather than the reading of one, and
+// paid for it in every answer.
+func typesafeJudge(ctx context.Context, it core.Item, interests []string) (siftVerdict, error) {
+	v := siftVerdict{Interest: -1}
 	key := strings.TrimSpace(os.Getenv(typesafeKey))
 	if key == "" {
-		return nil, errors.New(typesafeKey + " is not set")
+		return v, errors.New(typesafeKey + " is not set")
 	}
-	body, err := json.Marshal(siftRequest(items))
+	body, err := json.Marshal(siftRequest(it, interests))
 	if err != nil {
-		return nil, err
+		return v, err
 	}
-
 	raw, err := askTypesafe(ctx, key, body)
 	if err != nil {
-		return nil, err
+		return v, err
 	}
 	var answer struct {
 		Answers map[string]struct {
-			Noul  float64 `json:"noul"`
-			Score float64 `json:"score"`
-		} `json:"answers"`
-	}
-	if err := json.Unmarshal(raw, &answer); err != nil {
-		return nil, fmt.Errorf("typesafe returned something that is not an answer: %w", err)
-	}
-
-	out := make(map[string]siftVerdict, len(items))
-	for i, it := range items {
-		worth, ok := answer.Answers[siftAskID(i)]
-		if !ok {
-			continue
-		}
-		// A batch that came back with the cut but not the ladder is half an
-		// answer, and half an answer is not a judgment: leave the item for the
-		// next run rather than filing it on a rung nobody picked.
-		rank, ok := answer.Answers[siftRankID(i)]
-		if !ok {
-			continue
-		}
-		out[core.Key(it.App, it.ID)] = siftVerdict{
-			Worth: worth.Noul, Rank: siftRankOf(rank.Score), Interest: -1,
-		}
-	}
-	if len(out) == 0 {
-		return nil, errors.New("typesafe answered none of the batch")
-	}
-	return out, nil
-}
-
-// typesafeMatch asks which of the reader's subjects one item is about, with
-// that item alone in the state — see siftInterestQuestion for why alone.
-// Answers 0 and "" for none of them, which is the ordinary answer.
-func typesafeMatch(ctx context.Context, it core.Item, interests []string) (float64, string, error) {
-	if len(interests) == 0 {
-		return -1, "", nil
-	}
-	key := strings.TrimSpace(os.Getenv(typesafeKey))
-	if key == "" {
-		return 0, "", errors.New(typesafeKey + " is not set")
-	}
-	body, err := json.Marshal(siftMatchRequest(it, interests))
-	if err != nil {
-		return 0, "", err
-	}
-	var answer struct {
-		Answers map[string]struct {
+			Noul          float64            `json:"noul"`
+			Score         float64            `json:"score"`
 			Choice        string             `json:"choice"`
 			Probabilities map[string]float64 `json:"probabilities"`
 		} `json:"answers"`
 	}
-	raw, err := askTypesafe(ctx, key, body)
-	if err != nil {
-		return 0, "", err
-	}
 	if err := json.Unmarshal(raw, &answer); err != nil {
-		return 0, "", fmt.Errorf("typesafe returned something that is not an answer: %w", err)
+		return v, fmt.Errorf("typesafe returned something that is not an answer: %w", err)
 	}
-	a, ok := answer.Answers[siftInterestID]
+	worth, ok := answer.Answers[siftAskID]
 	if !ok {
-		return 0, "", errors.New("typesafe did not answer which subject that is about")
+		return v, errors.New("typesafe did not say whether that is worth reading")
 	}
-	p, subject := siftMatch(a.Choice, a.Probabilities, interests)
-	return p, subject, nil
-}
-
-// siftMatchRequest is one item on its own: no index, no neighbours, and the
-// subjects as the options rather than as state — the question is which of them
-// this is about, and the options are the only place that needs to say.
-func siftMatchRequest(it core.Item, interests []string) siftBody {
-	return siftBody{
-		Model: typesafeModel,
-		State: siftOne(it),
-		Questions: map[string]siftAsk{siftInterestID: {
-			Type: "choice",
-			Instructions: siftInterestQuestion + " Pick a subject only if the item is plainly " +
-				"about it — not the field it sits in, not the country it happens in, not " +
-				"something that would merely interest the same person.",
-			Criteria: siftSubjects(interests),
-		}},
+	// Half an answer is not a judgment: leave the item for the next run rather
+	// than filing it on a rung nobody picked.
+	rank, ok := answer.Answers[siftRankID]
+	if !ok {
+		return v, errors.New("typesafe did not say how much that repays opening")
 	}
+	v.Worth, v.Rank = worth.Noul, siftRankOf(rank.Score)
+	// No list means no question, which leaves the item unasked rather than
+	// asked and unmatched — and those are different states (see feedEntry).
+	if match, ok := answer.Answers[siftInterestID]; ok {
+		v.Interest, v.InterestFor = siftMatch(match.Choice, match.Probabilities, interests)
+	}
+	return v, nil
 }
 
 // siftRetryable reports whether an answer is worth asking again. Busy (429) and
@@ -595,11 +471,13 @@ func typesafeTrouble(raw []byte) string {
 	return "no reason given"
 }
 
-func siftAskID(i int) string  { return "w" + strconv.Itoa(i) }
-func siftRankID(i int) string { return "r" + strconv.Itoa(i) }
-
-// The one question a match request carries, which is the whole of it.
-const siftInterestID = "m"
+// What the three questions are called. Fixed rather than numbered: a request
+// carries one item, so there is one of each.
+const (
+	siftAskID      = "worth"
+	siftRankID     = "rung"
+	siftInterestID = "subject"
+)
 
 // siftSubjectID is what one subject is called in the question: its place on the
 // list rather than its text, so a subject written as "none" or as an empty line
@@ -634,16 +512,18 @@ func siftMatch(choice string, probabilities map[string]float64, interests []stri
 	return 0, ""
 }
 
+// siftState is what one request carries: who is reading, and the one item being
+// judged. One item, because every judgment here came back sharper alone than in
+// company — see typesafeJudge.
 type siftState struct {
-	Reader string      `json:"reader"`
-	Items  []siftEntry `json:"items"`
+	Reader string    `json:"reader"`
+	Item   siftEntry `json:"item"`
 }
 
 // siftEntry is one item as the model sees it: what it is, where it came from
 // and how it opens. No URL and no id — neither is anything to judge, and both
 // are tokens spent on every item in the batch.
 type siftEntry struct {
-	N      int    `json:"n,omitempty"`
 	Source string `json:"source,omitempty"`
 	Author string `json:"author,omitempty"`
 	Age    string `json:"age,omitempty"`
@@ -667,45 +547,44 @@ type siftBody struct {
 	Questions map[string]siftAsk `json:"questions"`
 }
 
-// siftOne is one item as the state of its own request: the same block a batch
-// carries, without the index that only means something among neighbours.
-func siftOne(it core.Item) siftEntry {
-	e := siftEntryOf(it)
-	e.N = 0
-	return e
-}
-
-// siftRequest builds one batch: the items as state, and two questions per item
-// pointing at its place in that state — the yes/no the cut is drawn on and the
-// ladder the chips group by. Every question in the batch is asked together
-// rather than one request each because Jev reads the state once either way, so
-// the second question costs a fraction of the first item it is asked about —
-// which is the whole reason a backlog this deep is affordable at all.
-func siftRequest(items []core.Item) siftBody {
-	state := siftState{Reader: siftReader, Items: make([]siftEntry, 0, len(items))}
-	b := siftBody{Model: typesafeModel, Questions: make(map[string]siftAsk, len(items))}
-	for i, it := range items {
-		e := siftEntryOf(it)
-		e.N = i
-		state.Items = append(state.Items, e)
-		b.Questions[siftAskID(i)] = siftAsk{
-			Type:         "noul",
-			Instructions: fmt.Sprintf("%s The item is `items[%d]`.", siftQuestion, i),
-			Criteria: map[string]string{
-				"true": "It carries something: information, an argument, a result, news, a " +
-					"thing made or a thing explained. Worth the minute even if it is short.",
-				"false": "Filler: a greeting or a mood, engagement bait, a meme, an ad or a " +
-					"promotion, a giveaway, a repost of a thing everyone has seen, small talk, " +
-					"or a headline with nothing behind it.",
+// siftRequest is one item's request: the item alone as the state, and the three
+// questions asked of it. The subjects ride as the options of the choice rather
+// than as state — the question is which of them this is about, and the options
+// are the only place that needs to say.
+func siftRequest(it core.Item, interests []string) siftBody {
+	b := siftBody{
+		Model: typesafeModel,
+		State: siftState{Reader: siftReader, Item: siftEntryOf(it)},
+		Questions: map[string]siftAsk{
+			siftAskID: {
+				Type:         "noul",
+				Instructions: siftQuestion,
+				Criteria: map[string]string{
+					"true": "It carries something: information, an argument, a result, news, a " +
+						"thing made or a thing explained. Worth the minute even if it is short.",
+					"false": "Filler: a greeting or a mood, engagement bait, a meme, an ad or a " +
+						"promotion, a giveaway, a repost of a thing everyone has seen, small talk, " +
+						"or a headline with nothing behind it.",
+				},
 			},
-		}
-		b.Questions[siftRankID(i)] = siftAsk{
-			Type:         "score",
-			Instructions: fmt.Sprintf("%s The item is `items[%d]`.", siftRankQuestion, i),
-			Criteria:     siftRungs(),
+			siftRankID: {
+				Type:         "score",
+				Instructions: siftRankQuestion,
+				Criteria:     siftRungs(),
+			},
+		},
+	}
+	// Only when there is a list. An empty one would be a question whose only
+	// possible answer is "none", asked of every item in the backlog.
+	if len(interests) > 0 {
+		b.Questions[siftInterestID] = siftAsk{
+			Type: "choice",
+			Instructions: siftInterestQuestion + " Pick a subject only if the item is plainly " +
+				"about it — not the field it sits in, not the country it happens in, not " +
+				"something that would merely interest the same person.",
+			Criteria: siftSubjects(interests),
 		}
 	}
-	b.State = state
 	return b
 }
 
