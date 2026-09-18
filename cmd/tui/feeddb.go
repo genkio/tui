@@ -181,7 +181,7 @@ WHERE NOT EXISTS (SELECT 1 FROM feed_items WHERE feed_items.app=items.app AND fe
 
 func (s *feedDB) loadFeed() (feedFile, error) {
 	f := feedFile{Status: map[string]appStatus{}}
-	rows, err := s.db.Query(`SELECT ` + itemColumns + `,f.first_seen,f.read,f.read_at,f.synced
+	rows, err := s.db.Query(`SELECT ` + itemColumns + `,f.first_seen,f.read,f.read_at,f.synced,f.judged_at,f.worth,f.rank
 FROM feed_items f JOIN items i ON i.app=f.app AND i.id=f.id ORDER BY f.ordinal`)
 	if err != nil {
 		return f, err
@@ -189,7 +189,7 @@ FROM feed_items f JOIN items i ON i.app=f.app AND i.id=f.id ORDER BY f.ordinal`)
 	defer rows.Close()
 	for rows.Next() {
 		var e feedEntry
-		if err := scanWire(rows, &e.Wire, &e.FirstSeen, &e.Read, &e.ReadAt, &e.Synced); err != nil {
+		if err := scanWire(rows, &e.Wire, &e.FirstSeen, &e.Read, &e.ReadAt, &e.Synced, &e.JudgedAt, &e.Worth, &e.Rank); err != nil {
 			return f, err
 		}
 		f.Items = append(f.Items, &e)
@@ -233,7 +233,8 @@ func (s *feedDB) replaceFeed(f feedFile) error {
 		if err := writeItem(tx, e.Wire, true); err != nil {
 			return err
 		}
-		_, err = tx.Exec(`INSERT INTO feed_items(app,id,first_seen,read,read_at,synced,ordinal) VALUES(?,?,?,?,?,?,?)`, e.App, e.ID, e.FirstSeen, e.Read, e.ReadAt, e.Synced, i)
+		_, err = tx.Exec(`INSERT INTO feed_items(app,id,first_seen,read,read_at,synced,judged_at,worth,rank,ordinal) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			e.App, e.ID, e.FirstSeen, e.Read, e.ReadAt, e.Synced, e.JudgedAt, e.Worth, e.Rank, i)
 		if err != nil {
 			return err
 		}

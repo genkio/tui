@@ -40,8 +40,11 @@
     // at the top, where what is left of the list begins.
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
     var order = u.searchParams.get('order');
-    if (order === 'asc' || order === 'desc') localStorage.setItem('tui:order', order);
-    else if (localStorage.getItem('tui:order') === 'desc'){ u.searchParams.set('order', 'desc'); moved = true; }
+    if (order === 'asc' || order === 'desc' || order === 'best') localStorage.setItem('tui:order', order);
+    else {
+      var keptOrder = localStorage.getItem('tui:order');
+      if (keptOrder === 'desc' || keptOrder === 'best'){ u.searchParams.set('order', keptOrder); moved = true; }
+    }
     var deck = u.searchParams.get('deck');
     if (deck === '1' || deck === '0') localStorage.setItem('tui:deck', deck);
     else {
@@ -305,6 +308,10 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .itemtag[data-on="1"]{border-color:var(--accent);color:var(--accent);background:rgba(74,158,255,.08)}
 .itemtag:disabled{opacity:.5;cursor:default}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
+/* The row is four names and no numbers: the counts are what pushed the last of
+   them off the edge of a phone, and the chips under it already say how deep the
+   backlog is. The view you are on wears the accent instead of a count. */
+.viewon{color:var(--accent);border-bottom-color:var(--accent)}
 /* which way the feed runs and which shape it is in, at the far end of the
    header: each word is what the page already is, and the tap turns it around.
    They keep their width while the counts beside them are free to ellipsis,
@@ -317,6 +324,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 }
 .sortlink .sarrow,.decklink .dmark{font-size:12px;opacity:.7}
 button.headbutton{padding:0;background:none;border:0;border-bottom:1px dotted var(--line);font-family:inherit;font-size:13px;cursor:pointer}
+button.headbutton:disabled{opacity:.5;cursor:default}
 /* the keywords link is a button (it opens a dialog, it doesn't go anywhere),
    so it has to be talked back into looking like the links beside it */
 button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);padding:0;font:inherit;cursor:pointer}
@@ -483,21 +491,23 @@ video.ffs{object-fit:cover !important}
 }
 </style>
 </head><body>
-<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" hidden></div>
+<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-skippedview="{{if .SkippedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" hidden></div>
 <div class="wrap">
 <header>
-  <div class="sub" id="sub">{{if .BlockedView}}<a class="viewlink" href="/">unread</a> <span id="blockedn">{{.Blocked}}</span> blocked <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{else if .SavedView}}<a class="viewlink" href="/">unread</a> <span id="savedn">{{.Saved}}</span> saved{{else if .ItemView}}<a class="viewlink" href="/">unread</a> one item <a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a>{{else}}{{if .HasApps}}<button class="settings" id="settingsOpen" type="button" title="settings"><span id="unreadn">{{.Unread}}</span>{{if .Capped}}+{{end}} unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button> {{end}}<a class="viewlink" href="/?saved=1"><span id="savedn">{{.Saved}}</span> saved</a> <a class="viewlink" href="/?blocked=1"><span id="blockedn">{{.Blocked}}</span> blocked</a>{{end}}</div>
+  <div class="sub" id="sub">{{if .ItemView}}<a class="viewlink" href="/">unread</a> <span class="viewon">one item</span> <a class="viewlink" href="/?saved=1">saved</a>{{else}}{{if .FeedView}}<button class="settings viewon" id="settingsOpen" type="button" title="{{if .Capped}}settings — a service's backlog runs deeper than the sweep reached{{else}}settings{{end}}">unread{{if .Updated}} <span class="upd" id="upd">{{if .Fetching}}fetching…{{else}}{{.Updated}}{{end}}</span>{{end}}</button>{{else}}<a class="viewlink" href="/">unread</a>{{end}} <a class="viewlink{{if .SavedView}} viewon{{end}}" href="/?saved=1">saved</a> <a class="viewlink{{if .SkippedView}} viewon{{end}}" href="/?skipped=1" title="what the sift skipped for you — read them here to check it">skipped</a> <a class="viewlink{{if .BlockedView}} viewon{{end}}" href="/?blocked=1">blocked</a>{{if .BlockedView}} <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}{{end}}</div>
   {{if .SavedModeHref}}<a class="decklink" id="savedmode" href="{{.SavedModeHref}}" title="{{if .SavedCompact}}title-only saved items — tap for full cards{{else}}full saved cards — tap for titles only{{end}}"><span class="dmark">{{if .SavedCompact}}≡{{else}}▤{{end}}</span>{{if .SavedCompact}}compact{{else}}full{{end}}</a>
   {{end}}{{if .ClearBlocked}}<button class="sortlink headbutton" id="clearBlocked" type="button" data-total="{{.Blocked}}" title="delete all stored blocked items">clear</button>
+  {{end}}{{if and .HasApps (not .SkippedView)}}<button class="sortlink headbutton" id="siftBtn" type="button" title="have typesafe read the backlog and set aside what is not worth your time"><span class="sarrow">⚟</span><span id="siftlabel">sift</span></button>
   {{end}}{{if .DeckHref}}<a class="decklink" id="decklink" href="{{.DeckHref}}" title="{{if .Swipe}}a deck, one card at a time — tap for the scrolling list{{else}}a scrolling list — tap for the swipe deck{{end}}"><span class="dmark">{{if .Swipe}}▭{{else}}▤{{end}}</span>{{if .Swipe}}deck{{else}}list{{end}}</a>
-  {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{if .Asc}}oldest first — tap for newest first{{else}}newest first — tap for oldest first{{end}}"><span class="sarrow">{{if .Asc}}↑{{else}}↓{{end}}</span>{{if .Asc}}oldest{{else}}newest{{end}}</a>
+  {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{.SortTitle}}"><span class="sarrow">{{.SortMark}}</span>{{.SortWord}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
+{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
+{{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Tap <b>sift</b> on the feed and what the model thinks you can skip lands here, to be read anyway or cleared in one go.{{end}}</div>
 {{end}}{{else if .ItemView}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
@@ -530,6 +540,10 @@ var SAVED_VIEW = document.getElementById('state').getAttribute('data-savedview')
 // The blocked list: rows the feed never carried, so nothing here is unread, and
 // each one is a title alone rather than a card to play or expand.
 var BLOCKED_VIEW = document.getElementById('state').getAttribute('data-blockedview') === 'true';
+// The skipped pile: a feed like any other as far as this page is concerned —
+// cards, the deck, mark-all — except that what put the items here was a model
+// rather than a keyword, and reading one is how that gets checked.
+var SKIPPED_VIEW = document.getElementById('state').getAttribute('data-skippedview') === 'true';
 // One item on its own URL: a card with no list around it. Reached by being sent
 // the link rather than by working through the feed, so nothing on it is read by
 // having been looked at.
@@ -630,6 +644,8 @@ function resync(){
 // Takes n off the header's unread count; a negative n hands them back, which is
 // what a mark that failed after the count already moved has to do.
 function decCount(n){
+  // The skipped view has no count of its own to take down — you are in the
+  // pile, and mark-all's own label is what says how deep it is.
   var s = document.getElementById('unreadn'); if(!s) return;
   var c = (parseInt(s.textContent, 10) || 0) - n; if(c < 0) c = 0;
   s.textContent = c;
@@ -639,6 +655,7 @@ function decCount(n){
 // rather than the vaguer "this feed" — clearing it must not read as clearing
 // everything unread.
 function markAllScope(){
+  if (SKIPPED_VIEW) return ' the sift set aside';
   var app = new URLSearchParams(location.search).get('app') || '';
   return SUMMARY_ON && app ? ' in ' + app : ' in this feed';
 }
@@ -1419,7 +1436,7 @@ if(markAllBtn) markAllBtn.addEventListener('click', function(){
   // the server holds the latest run, and clearing what a later one read is not
   // clearing what you were told.
   if(BRIEF){ fd.append('brief', BRIEF.key); if(BRIEF.gen) fd.append('gen', BRIEF.gen); }
-  else ['app', 'type', 'x', 'sub'].forEach(function(k){ if(q.has(k)) fd.append(k, q.get(k)); });
+  else ['app', 'type', 'x', 'sub', 'skipped'].forEach(function(k){ if(q.has(k)) fd.append(k, q.get(k)); });
   markFlights.then(function(){ return fetch('/mark-all', {method:'POST', body:fd}); })
     .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
     .then(function(d){ if(!d.ok) throw new Error(''); location.reload(); })
@@ -1573,6 +1590,61 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     .then(function(d){ if(!d.ok) throw 0; location.reload(); })
     .catch(function(){ clearBlockedBtn.disabled = false; toast('could not clear blocked items'); });
 });
+
+// Sift: TypeSafe reads every unread item nothing has judged yet and says, one
+// by one, whether there is anything in it. What it says no to leaves the feed
+// for the skipped view rather than being marked read or deleted.
+//
+// The run belongs to the server, so this only starts it and then watches: a few
+// hundred items is a minute of round trips, closing the tab does not stop it,
+// and a second tab watching the same run sees the same numbers. The reload at
+// the end is because the feed under it is a different feed by then.
+var siftBtn = document.getElementById('siftBtn');
+if(siftBtn) (function(){
+  var label = document.getElementById('siftlabel');
+  var poll = null;
+  function say(t){ if(label) label.textContent = t; }
+  // How far through, on the button itself: a bare spinner over a minute of
+  // work says nothing about whether it is moving.
+  function running(j){
+    if(!j || j.state !== 'running') return false;
+    siftBtn.disabled = true;
+    say(j.total ? j.done + '/' + j.total : 'sifting…');
+    return true;
+  }
+  function ended(j){
+    if(poll){ clearInterval(poll); poll = null; }
+    siftBtn.disabled = false;
+    say('sift');
+    if(j && j.state === 'failed'){ toast(j.error || 'the sift failed'); return; }
+    if(j && j.aside){ location.reload(); return; }
+    toast('nothing was set aside');
+  }
+  function watch(){
+    if(poll) return;
+    poll = setInterval(function(){
+      fetch('/sift').then(function(res){ return res.json(); })
+        .then(function(j){ if(!running(j)) ended(j); })
+        .catch(function(){});
+    }, 2000);
+  }
+  siftBtn.addEventListener('click', function(){
+    siftBtn.disabled = true;
+    say('sifting…');
+    fetch('/sift', {method:'POST'})
+      .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
+      .then(function(j){ running(j); watch(); })
+      .catch(function(err){
+        siftBtn.disabled = false;
+        say('sift');
+        toast((err && err.message || '').trim() || 'could not sift');
+      });
+  });
+  // A run started in another tab, or one still going from before this page
+  // loaded, is this button's to report on too.
+  fetch('/sift').then(function(res){ return res.json(); })
+    .then(function(j){ if(running(j)) watch(); }).catch(function(){});
+})();
 
 // Summarize: a briefing over one source's whole unread backlog, asked for from
 // that source's own chip. A run costs minutes, so nothing here waits on one —
@@ -2285,4 +2357,4 @@ document.addEventListener('click', function(e){
 });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}{{if .Worth}}<span class="kw" title="how likely the sift thought you would want this, from 0 to 1">{{.Worth}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

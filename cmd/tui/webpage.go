@@ -96,6 +96,9 @@ func (s feedSel) String() string {
 type feedTally struct {
 	apps  map[string]int
 	types map[string]int
+	// The sift's ladder: rung -> how many items sit on it. Empty on a list
+	// nothing has judged, which is how the row knows not to draw the group.
+	ranks map[int]int
 	// app -> subcategory -> count, for the services that have one (see subApps).
 	// Nested rather than flat because two services can name a stream the same
 	// thing, and a subcategory only ever narrows its own source.
@@ -111,7 +114,7 @@ type subCount struct {
 }
 
 func newTally() feedTally {
-	return feedTally{apps: map[string]int{}, types: map[string]int{}, subs: map[string]map[string]subCount{}}
+	return feedTally{apps: map[string]int{}, types: map[string]int{}, ranks: map[int]int{}, subs: map[string]map[string]subCount{}}
 }
 
 func (t feedTally) addSub(app, source, author string) {
@@ -137,6 +140,9 @@ func tallyItems(items []core.Item) feedTally {
 	for _, it := range items {
 		t.apps[it.App]++
 		t.types[itemType(it)]++
+		if it.Rank > 0 {
+			t.ranks[it.Rank]++
+		}
 		t.addSub(it.App, it.Source, it.Author)
 	}
 	return t
@@ -157,6 +163,9 @@ func tallyCards(cards []cardData) feedTally {
 	for _, c := range cards {
 		t.apps[c.App]++
 		t.types[c.Type]++
+		if c.Rank > 0 {
+			t.ranks[c.Rank]++
+		}
 		t.addSub(c.App, c.Source, c.Author)
 	}
 	return t
@@ -183,13 +192,18 @@ type pageInput struct {
 	// saved list, and the blocked view renders it.
 	block       *blocker
 	blockedView bool
+	// What the sift set aside: skippedView is that pile being the page, and
+	// worth is what each item on the page was given, by feed key, which is what
+	// the best-first order sorts on and what a card wears.
+	skippedView bool
+	worth       map[string]float64
 	// One item on a page of its own, reached by its own URL (see itemHref).
 	itemView bool
 	// ?summary=1: open this source's briefing rather than its cards, which is
 	// where a finished icon on another page sends you.
 	summaryOpen bool
-	swipe       bool // this request's layout: one card at a time instead of the scrolling feed
-	asc         bool // oldest first, which the header's toggle flips
+	swipe       bool   // this request's layout: one card at a time instead of the scrolling feed
+	order       string // "asc", "desc" or "best", which the header's toggle cycles
 	updated     time.Time
 	fetching    bool // a sweep is in flight, so the count is about to move
 	capped      bool // a service's backlog runs deeper than the sweep reached
@@ -217,8 +231,15 @@ type pageData struct {
 	// The block list. Blocked is its size, in the header and its link on every
 	// view; Keywords is how many words fill it, and KeywordText is those words
 	// as the modal's textarea shows them — one per line, blocked view only.
-	Blocked      int
-	BlockedView  bool
+	Blocked     int
+	BlockedView bool
+	// The live feed itself, with a service logged in: the one view whose
+	// "unread" is the settings button rather than a way back to it.
+	FeedView bool
+	// The skipped pile: its size, in the header and its link on every feed view,
+	// and whether it is what this page is showing.
+	Skipped      int
+	SkippedView  bool
 	ItemView     bool // one item, on its own URL
 	ClearBlocked bool
 	Keywords     int
@@ -228,14 +249,18 @@ type pageData struct {
 	// Where to go for the other layout, blank on the views that have no say
 	// (saved, blocked, nothing logged in).
 	DeckHref string
-	// Which way the feed runs, and the page that turns it around. SortHref is
+	// Which way the feed runs, and the page for the next way round. SortHref is
 	// blank on the views the toggle has no say over (saved, blocked), which is
-	// how the template knows not to draw it.
-	Asc      bool
-	SortHref string
-	Warn     string
-	HasApps  bool
-	Sel      string // the chip that is on ("app:x"), blank for the whole list
+	// how the template knows not to draw it; the other three are the word, the
+	// glyph and the hover for the order the page is in now.
+	Asc       bool // not newest first, which is all the deck and the briefing ask
+	SortHref  string
+	SortWord  string
+	SortMark  string
+	SortTitle string
+	Warn      string
+	HasApps   bool
+	Sel       string // the chip that is on ("app:x"), blank for the whole list
 	// Whose briefing this page has room for — a source, or "all" for the whole
 	// feed — and whether to open it on arrival (?summary=1, which is where a done
 	// icon on another page sends you). A briefing goes in place of the cards it is
@@ -276,6 +301,9 @@ type filterChip struct {
 	// backlog, which is only a thing a source with a backlog has. It makes the
 	// chip a pair rather than a link: the label picks, the icon summarizes.
 	Summarize bool
+	// The whole feed's chip, over a backlog a sweep could not reach the end of:
+	// its count is short of the truth and is drawn "812+" to say so.
+	Capped bool
 	// A source chip is also that service's status light: its count is drawn
 	// green when the last sweep worked and red when it didn't, which is the job
 	// the header's separate row of dots used to do. Empty for a chip that isn't
@@ -318,6 +346,12 @@ type cardData struct {
 	// is the part you asked not to see, and the keyword that caught it.
 	Compact bool
 	Keyword string
+	// In the skipped view, what the model gave this item, as "0.08". The card
+	// wears it so a judgment can be argued with rather than just obeyed. Rank is
+	// the rung it landed on, which the chips count when nothing else counted
+	// them for this page.
+	Worth string
+	Rank  int
 
 	ShowActions bool
 }
@@ -395,6 +429,12 @@ func buildPageData(in pageInput) pageData {
 		if in.saved != nil {
 			card.Pos, card.PosSrc = in.saved.pos(it.App, it.ID)
 		}
+		// The number, wherever it is the reason the card is where it is: in the
+		// skipped pile, and in the best-first order it put the page in.
+		if in.skippedView || in.order == orderBest {
+			card.Worth = fmt.Sprintf("%.2f", itemWorth(it, in.worth))
+		}
+		card.Rank = it.Rank
 		cards = append(cards, card)
 	}
 
@@ -417,6 +457,15 @@ func buildPageData(in pageInput) pageData {
 		tally = *in.tally
 	}
 	filters := chipRow(tally, in.apps, bad, in.sel, in.query)
+	// The whole feed's chip carries the "+" the header used to: with a service's
+	// backlog deeper than the sweep reached, even that number is short.
+	for i := range filters {
+		for j := range filters[i].Chips {
+			if filters[i].Chips[j].Kind == allApp {
+				filters[i].Chips[j].Capped = in.capped
+			}
+		}
+	}
 	subs := subChips(tally, in.sel, in.query)
 
 	// Only on the feed, and only where the cards on the page are the ones a
@@ -427,6 +476,9 @@ func buildPageData(in pageInput) pageData {
 	summaryApp := ""
 	switch {
 	case len(in.apps) == 0:
+	// The skipped pile is not the backlog a briefing reads, and a briefing of it
+	// would be a summary of what you have already been told to skip.
+	case in.skippedView:
 	case in.sel.Kind == "app":
 		summaryApp = in.sel.Key
 	case !in.sel.on():
@@ -447,7 +499,7 @@ func buildPageData(in pageInput) pageData {
 	deck := ""
 	savedMode := ""
 	if !in.savedView && !in.blockedView && len(in.apps) > 0 {
-		flip = orderHref(in.query, in.asc)
+		flip = orderHref(in.query, in.order)
 		deck = deckHref(in.query, swipe)
 	} else if in.savedView && len(in.items) > 0 {
 		savedMode = savedModeHref(in.query, in.savedCompact)
@@ -484,6 +536,8 @@ func buildPageData(in pageInput) pageData {
 		TagSelected:   tagSelected,
 		Blocked:       in.block.count(),
 		BlockedView:   in.blockedView,
+		FeedView:      len(in.apps) > 0 && !in.savedView && !in.blockedView && !in.skippedView && !in.itemView,
+		SkippedView:   in.skippedView,
 		ItemView:      in.itemView,
 		ClearBlocked:  in.blockedView && in.block.count() > 0,
 		Keywords:      in.block.keywordCount(),
@@ -493,7 +547,10 @@ func buildPageData(in pageInput) pageData {
 		Sel:           in.sel.String(),
 		SummaryApp:    summaryApp,
 		SummaryOpen:   summaryApp != "" && in.summaryOpen,
-		Asc:           in.asc,
+		Asc:           in.order != orderDesc,
+		SortWord:      sortWord(in.order),
+		SortMark:      sortMark(in.order),
+		SortTitle:     sortTitle(in.order),
 		SortHref:      flip,
 		Swipe:         swipe,
 		BulkMark:      !in.savedView && !in.blockedView && !in.itemView,
@@ -886,6 +943,25 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 		out = append(out, filterGroup{Chips: appChips})
 	}
 
+	// The ladder, after the sources and before the content types: what a sift
+	// made of the backlog, as three chips you can stand in. Drawn highest first
+	// — "must read" is the one you came for — and only where a run has actually
+	// judged something, since a row of three zeroes is a row of nothing.
+	if len(t.ranks) > 0 {
+		var g filterGroup
+		for rank := len(siftLevels); rank >= 1; rank-- {
+			n := t.ranks[rank]
+			l, ok := siftLevelOf(rank)
+			if !ok || n == 0 {
+				continue
+			}
+			g.Chips = append(g.Chips, filterChip{Kind: "rank", Key: l.Key, Label: l.Label, Count: n})
+		}
+		if len(g.Chips) > 0 {
+			out = append(out, g)
+		}
+	}
+
 	if len(t.types) > 1 {
 		var g filterGroup
 		for _, ty := range []string{"text", "video", "short", "audio"} { // always this order, whatever the counts
@@ -996,17 +1072,23 @@ func chipHref(q url.Values, sel feedSel) string {
 		// The filter params this replaces, one no page carries, and the briefing
 		// flag: a pick is a page of cards, whatever the page it was tapped from
 		// happened to be showing.
-		case "app", "type", "x", "sub", "json", "summary":
+		case "app", "type", "rank", "x", "sub", "json", "summary":
 		default:
 			out[k] = v
 		}
 	}
 	switch sel.Kind {
-	case "app", "type":
+	case "app", "type", "rank":
 		out.Set(sel.Kind, sel.Key)
 	}
 	if sel.Kind == "app" && sel.Sub != "" {
 		out.Set("sub", sel.Sub)
+	}
+	// A rung is a shortlist, and a shortlist is read best first: a dozen items
+	// the sift thought highly of are not a sequence to work through in the
+	// order they happened. The toggle can still turn it around from there.
+	if sel.Kind == "rank" {
+		out.Set("order", orderBest)
 	}
 	if len(out) == 0 {
 		return "/"
@@ -1019,7 +1101,7 @@ func chipHref(q url.Values, sel feedSel) string {
 // left where it was. The order it lands on is always spelled out, even when it
 // is the default one, so the page it opens states which way it runs whether or
 // not the browser got as far as remembering.
-func orderHref(q url.Values, asc bool) string {
+func orderHref(q url.Values, order string) string {
 	out := url.Values{}
 	for k, v := range q {
 		switch k {
@@ -1029,12 +1111,48 @@ func orderHref(q url.Values, asc bool) string {
 			out[k] = v
 		}
 	}
-	if asc {
-		out.Set("order", "desc")
-	} else {
-		out.Set("order", "asc")
-	}
+	out.Set("order", nextOrder(order))
 	return "/?" + out.Encode()
+}
+
+// The toggle is one link cycling three orders, oldest → newest → best → oldest.
+// Best comes last because it is the one that needs a sift behind it to mean
+// anything; the two clock orders are what the feed is without one.
+func nextOrder(order string) string {
+	switch order {
+	case orderAsc:
+		return orderDesc
+	case orderDesc:
+		return orderBest
+	default:
+		return orderAsc
+	}
+}
+
+func sortWord(order string) string {
+	switch order {
+	case orderDesc:
+		return "newest"
+	case orderBest:
+		return "best"
+	default:
+		return "oldest"
+	}
+}
+
+func sortMark(order string) string {
+	switch order {
+	case orderDesc:
+		return "↓"
+	case orderBest:
+		return "✦"
+	default:
+		return "↑"
+	}
+}
+
+func sortTitle(order string) string {
+	return sortWord(order) + " first — tap for " + sortWord(nextOrder(order)) + " first"
 }
 
 // deckHref is where the header's layout toggle goes: this page as the other
@@ -1108,6 +1226,13 @@ func parseSel(q url.Values) feedSel {
 	case "text", "video", "short", "audio":
 		return feedSel{Kind: "type", Key: ty}
 	}
+	if r := q.Get("rank"); r != "" {
+		for _, l := range siftLevels {
+			if l.Key == r {
+				return feedSel{Kind: "rank", Key: r}
+			}
+		}
+	}
 	return feedSel{}
 }
 
@@ -1125,6 +1250,10 @@ func selectItems(items []core.Item, sel feedSel) []core.Item {
 			}
 		case "type":
 			if itemType(it) == sel.Key {
+				out = append(out, it)
+			}
+		case "rank":
+			if l, ok := siftLevelOf(it.Rank); ok && l.Key == sel.Key {
 				out = append(out, it)
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -39,7 +40,23 @@ func OpenFeedDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	for _, stmt := range feedColumns {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, err
+		}
+	}
 	return db, nil
+}
+
+// feedColumns are the columns added to a table that already existed. The schema
+// above only ever creates one that is absent, and SQLite has no "add column if
+// not exists", so the duplicate error is the ordinary outcome from the second
+// run onward and the only one worth swallowing.
+var feedColumns = []string{
+	`ALTER TABLE feed_items ADD COLUMN judged_at TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE feed_items ADD COLUMN worth REAL NOT NULL DEFAULT 0`,
+	`ALTER TABLE feed_items ADD COLUMN rank INTEGER NOT NULL DEFAULT 0`,
 }
 
 const feedSchema = `

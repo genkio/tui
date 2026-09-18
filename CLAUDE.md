@@ -2,15 +2,24 @@
 
 ## Restarting the dev server after a change
 
-The server runs in tmux pane `tmp:1.0` (find it with
-`tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command}"`).
+The server runs in the foreground of a [Herdr](https://herdr.dev) pane, usually
+the one below this agent's. Find it rather than guessing the id, which changes
+between sessions:
+
+```sh
+herdr pane list --workspace "$HERDR_WORKSPACE_ID"   # the one whose cwd is this repo
+herdr pane layout --pane "$HERDR_PANE_ID"           # which of them is below
+```
+
 Rebuild and restart it there, not in a fresh shell, so it keeps the terminal the
 user is watching:
 
 ```sh
-tmux send-keys -t tmp:1.0 C-c
-tmux send-keys -t tmp:1.0 'make' Enter          # waits for the build to finish
-tmux send-keys -t tmp:1.0 './tui serve --sync-dir ~/box/tui' Enter
+herdr pane send-keys <pane-id> ctrl+c
+herdr pane run <pane-id> 'make'
+herdr pane wait-output <pane-id> --match 'bilibili-tui' --timeout 180000   # the last thing make builds
+herdr pane run <pane-id> './tui serve --sync-dir ~/box/tui'
+herdr pane read <pane-id> --source recent-unwrapped --lines 20
 ```
 
 `make` builds `./tui` plus every plugin binary. The `--sync-dir` flag is what

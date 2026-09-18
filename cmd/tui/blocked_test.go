@@ -391,8 +391,10 @@ func TestBlockedPageIsTitlesOnly(t *testing.T) {
 	if !strings.Contains(page, `href="https://old.reddit.com/comments/1/"`) {
 		t.Errorf("the row should still open the original: %s", page)
 	}
-	if !strings.Contains(page, `<span id="blockedn">1</span> blocked`) {
-		t.Errorf("the header should count the list: %s", page)
+	// The header is names alone now; the list's own size is on its chip, and the
+	// name it is under wears the accent.
+	if !strings.Contains(page, `class="viewlink viewon" href="/?blocked=1"`) {
+		t.Errorf("the blocked view should light its own name in the header: %s", page)
 	}
 }
 

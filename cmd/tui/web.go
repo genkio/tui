@@ -102,6 +102,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	sum.find = func(app, id string, now time.Time) (core.Item, bool) {
 		return findItem(app, id, now, cache, saved, rendered)
 	}
+	sift := newSifter(cache)
 	flusher := newMarkFlusher(root, cache)
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
 	if syncPath != "" {
@@ -110,7 +111,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	var workers sync.WaitGroup
-	workers.Add(3)
+	workers.Add(4)
 	defer func() {
 		stop()
 		workers.Wait()
@@ -129,6 +130,12 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		defer workers.Done()
 		sum.serve(ctx)
 	}()
+	// A sift is minutes of round trips over the whole backlog, so it runs out
+	// here for the same reason a briefing does.
+	go func() {
+		defer workers.Done()
+		sift.serve(ctx)
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +144,20 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			return
 		}
 		handleAll(w, r, root, loader, cache, sweep, saved, tags, block, rendered)
+	})
+	// POST puts the unjudged backlog through TypeSafe and GET reports on the
+	// run. A POST because it spends an API key's tokens, so nothing should be
+	// able to prefetch or replay it.
+	mux.HandleFunc("/sift", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			startSift(w, sift)
+		case http.MethodGet:
+			showSift(w, sift)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 	mux.HandleFunc("/item", func(w http.ResponseWriter, r *http.Request) {
 		handleItem(w, r, loader, cache, saved, block, rendered)
@@ -354,7 +375,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	now := time.Now()
 	q := r.URL.Query()
-	asc := q.Get("order") != "desc" // oldest first by default
+	order := feedOrder(q.Get("order")) // oldest first by default
 	// Which layout this client wants: one server serves a phone and a desktop at
 	// once, and they don't want the same shape.
 	deck := deckWanted(q)
@@ -410,6 +431,37 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	apps := authedFeedApps(root)
 
+	// The skipped view: what the sift set aside, read the way the feed is read.
+	// Not a list to look back over like the saved and blocked ones — it is the
+	// backlog minus the part a model thinks you can skip, and the only way to
+	// find out whether it was right is to go through it. So: cards in full, the
+	// deck, the sort toggle, mark-all, and reading one marks it read for real.
+	if q.Get("skipped") == "1" {
+		all, worth := cache.skipped(now)
+		tally := tallyItems(all)
+		items := selectItems(all, sel)
+		// Best first here is the borderline ones first, which are exactly the
+		// judgments most likely to have been wrong.
+		sortFeed(items, order, worth)
+		if q.Get("json") == "1" {
+			rendered.put(items)
+			w.Header().Set("Content-Type", "application/json")
+			writeJSONItems(w, items, nil, feedAPIResponse{Apps: apps})
+			return
+		}
+		total := len(items)
+		if window := clientWindow(deck); len(items) > window {
+			items = items[:window]
+		}
+		rendered.put(items)
+		writePage(w, tmpl, pageInput{
+			items: items, total: total, apps: apps, now: now, sel: sel, tally: &tally,
+			query: q, saved: saved, block: block, swipe: deck, order: order,
+			skippedView: true, worth: worth,
+		})
+		return
+	}
+
 	// The whole backlog, whichever chip is on: it is what the chips count, so
 	// every one of them still says what picking it would bring.
 	backlog := cache.unread(now, "")
@@ -417,7 +469,12 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 
 	items := selectItems(backlog, sel)
 	failed, warn, capped := cache.trouble(apps)
-	sortItems(items, asc)
+	// Only the best-first order needs the numbers; the other two are a clock.
+	var worth map[string]float64
+	if order == orderBest {
+		worth = cache.worths()
+	}
+	sortFeed(items, order, worth)
 
 	if q.Get("json") == "1" {
 		rendered.put(items)
@@ -445,7 +502,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	writePage(w, tmpl, pageInput{
 		items: items, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
-		swipe: deck, asc: asc, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
+		swipe: deck, order: order, worth: worth, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 		summaryOpen: q.Get("summary") == "1",
 	})
 }
@@ -658,6 +715,67 @@ func handlePos(w http.ResponseWriter, r *http.Request, saved *savedStore) {
 	fmt.Fprintf(w, `{"ok":%t}`, kept)
 }
 
+// The three ways the feed can run. Oldest first is the default and the way a
+// backlog is worked through; newest first is the other half of that toggle; best
+// is the sift's own order — what it thought most worth your time at the top,
+// which is how you read the good half of a backlog and stop wherever you like.
+const (
+	orderAsc  = "asc"
+	orderDesc = "desc"
+	orderBest = "best"
+)
+
+func feedOrder(want string) string {
+	switch want {
+	case orderDesc, orderBest:
+		return want
+	default:
+		return orderAsc
+	}
+}
+
+// sortFeed puts a page in the order the header asks for.
+func sortFeed(items []core.Item, order string, worth map[string]float64) {
+	if order != orderBest {
+		sortItems(items, order != orderDesc)
+		return
+	}
+	// By time first, so items the sift thought equally of keep the feed's own
+	// order among themselves rather than whatever the map iterated in.
+	sortItems(items, true)
+	sort.SliceStable(items, func(i, j int) bool {
+		return itemWorth(items[i], worth) > itemWorth(items[j], worth)
+	})
+	// Then by rung, which is the coarser and better-founded of the two signals:
+	// a ladder with described rungs says more about what to read next than a
+	// yes/no probability does, and the yes/no is what orders a rung's own items
+	// among themselves. An item nothing has judged sits with the middle rung
+	// rather than under everything.
+	sort.SliceStable(items, func(i, j int) bool {
+		return itemRank(items[i]) > itemRank(items[j])
+	})
+}
+
+// itemRank is the rung an item sits on, with one nothing has judged put in the
+// middle of the ladder: unknown is not the bottom of it.
+func itemRank(it core.Item) int {
+	if it.Rank < 1 {
+		return (len(siftLevels) + 1) / 2
+	}
+	return it.Rank
+}
+
+// itemWorth is what the sift gave an item, with one it has never reached
+// counted as neither good nor bad: an item that arrived after the last run is
+// unknown, and sinking it under everything that has been judged would be reading
+// a missing answer as a low one.
+func itemWorth(it core.Item, worth map[string]float64) float64 {
+	if w, ok := worth[core.Key(it.App, it.ID)]; ok {
+		return w
+	}
+	return siftUnknown
+}
+
 // sortItems orders the feed by publish time: oldest first when asc is true,
 // newest first otherwise. Items without a resolvable time sink to the bottom.
 func sortItems(items []core.Item, asc bool) {
@@ -755,6 +873,12 @@ func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flu
 				items = append(items, it)
 			}
 		}
+	} else if r.FormValue("skipped") == "1" {
+		// In the skipped view "all" is that pile, not the feed behind it. The two
+		// are disjoint by construction, and clearing the wrong one of them is
+		// exactly the mistake worth being careful about here.
+		aside, _ := cache.skipped(time.Now())
+		items = selectItems(aside, parseSel(r.Form))
 	} else {
 		items = selectItems(cache.unread(time.Now(), ""), parseSel(r.Form))
 	}

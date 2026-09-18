@@ -635,7 +635,7 @@ func TestSummaryKeepsMarkAllScopedToTheSource(t *testing.T) {
 	// The request itself is unchanged: it carries the app filter already in the
 	// URL, which is the only reason this is one source's backlog and not all of
 	// them. A briefing only ever exists under a source pick.
-	if !strings.Contains(page, `['app', 'type', 'x', 'sub'].forEach`) {
+	if !strings.Contains(page, `['app', 'type', 'x', 'sub', 'skipped'].forEach`) {
 		t.Error("mark-all should still clear the picked source's backlog only")
 	}
 }
@@ -649,7 +649,7 @@ func TestSummaryFlagDoesNotRideAlong(t *testing.T) {
 	}{
 		{"chip", chipHref(q, feedSel{Kind: "app", Key: "folo"})},
 		{"clear", chipHref(q, feedSel{})},
-		{"order", orderHref(q, false)},
+		{"order", orderHref(q, orderDesc)},
 		{"deck", deckHref(q, false)},
 	} {
 		if strings.Contains(tc.got, "summary") {

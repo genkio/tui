@@ -58,7 +58,27 @@ type feedEntry struct {
 	// service (see drainApps) is told at fetch time, so its entries arrive
 	// synced and a later read costs no second call.
 	Synced bool `json:"synced,omitempty"`
+	// What a sift made of the item: when a run judged it, how likely it is worth
+	// reading at all (0 to 1), and which rung of the ladder it landed on (1 to
+	// len(siftLevels); 0 is "no run has said"). Every item a run reaches carries
+	// all three, the ones it kept as well as the ones it set aside, so a second
+	// run spends nothing on what has already been judged and the cut can be
+	// moved without asking again. Judged and set aside are not the same thing:
+	// see skipped.
+	JudgedAt string  `json:"judged_at,omitempty"`
+	Worth    float64 `json:"worth,omitempty"`
+	Rank     int     `json:"rank,omitempty"`
 }
+
+// judged reports whether a run has answered for this item. Both halves are
+// required: a row from before the ladder existed carries a worth and no rung,
+// and half a judgment is one the next run should ask again rather than file.
+func (e *feedEntry) judged() bool { return e.JudgedAt != "" && e.Rank > 0 }
+
+// skipped reports whether the sift set this item aside: judged, and judged not
+// worth the reading. It stays in the backlog table either way — this is a
+// bucket to go through and disagree with, not a delete.
+func (e *feedEntry) skipped() bool { return e.judged() && e.Worth < siftCut }
 
 // appStatus is the last thing a sweep learned about one service: enough for the
 // header's health dot, the stale-session warning, and whether its backlog is
@@ -148,46 +168,135 @@ func (c *feedCache) upsert(items []core.Item, now time.Time) int {
 // unread returns the whole unread backlog as feed items, unsorted (the caller
 // orders it). Ages are recomputed from the publish time so an item cached
 // yesterday doesn't still read "2h".
+//
+// What a sift set aside is not in here, and that is the whole of what a sift
+// does: the feed, the chip counts, the header, the briefings and mark-all all
+// read the backlog through this, so one judgment takes an item out of every one
+// of them at once. It is still in the cache, in the skipped view, waiting to be
+// disagreed with.
 func (c *feedCache) unread(now time.Time, skipApp string) []core.Item {
+	return c.pick(now, func(e *feedEntry) bool {
+		return !e.Read && !e.skipped() && e.App != skipApp
+	})
+}
+
+// skipped is the pile the sift set aside, newest judgment first: read like the
+// feed is read, which is how a judgment gets checked rather than trusted. The
+// worth it was given comes back with it, keyed by feed key, for the chip the
+// card wears there.
+func (c *feedCache) skipped(now time.Time) ([]core.Item, map[string]float64) {
+	worth := map[string]float64{}
+	items := c.pick(now, func(e *feedEntry) bool {
+		if e.Read || !e.skipped() {
+			return false
+		}
+		worth[core.Key(e.App, e.ID)] = e.Worth
+		return true
+	})
+	return items, worth
+}
+
+// worths is what the sift made of everything it has judged, by feed key: what
+// the best-first order is sorted on. An item it has never reached is absent
+// rather than zero, which is not the same thing (see itemWorth).
+func (c *feedCache) worths() map[string]float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]float64, len(c.entries))
+	for _, e := range c.entries {
+		if !e.judged() {
+			continue
+		}
+		out[core.Key(e.App, e.ID)] = e.Worth
+	}
+	return out
+}
+
+// unjudged is what a sift run has left to do: the unread backlog no run has
+// reached yet, oldest first, so a run interrupted halfway is resumed by asking
+// again rather than started over.
+func (c *feedCache) unjudged(now time.Time) []core.Item {
+	items := c.pick(now, func(e *feedEntry) bool { return !e.Read && !e.judged() })
+	sortItems(items, true)
+	return items
+}
+
+func (c *feedCache) pick(now time.Time, want func(*feedEntry) bool) []core.Item {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make([]core.Item, 0, len(c.entries))
 	for _, e := range c.entries {
-		if e.Read || e.App == skipApp {
+		if !want(e) {
 			continue
 		}
 		it := e.Wire.Item(now)
 		if !it.At.IsZero() {
 			it.Age = humanAgo(it.At)
 		}
+		// The rung rides on the item, the way the age does: it is what the chips
+		// group by and what narrows a page to one of them, and both of those are
+		// done over items long after the entry they came from is out of reach.
+		it.Rank = e.Rank
 		out = append(out, it)
 	}
 	return out
 }
 
-// unreadCount is the whole backlog; unreadApp is one service's share of it,
-// with whether that service's own count is known to be short.
-func (c *feedCache) unreadCount() int {
+// judge records what a sift made of these items, by feed key, and returns how
+// many of them it set aside. An item read while the run was in flight keeps the
+// judgment: it costs nothing to hold, and it is the answer to "why was this one
+// not in the feed" long after the fact.
+func (c *feedCache) judge(verdicts map[string]siftVerdict, now time.Time) int {
+	stamp := now.UTC().Format(time.RFC3339)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	aside := 0
+	for k, v := range verdicts {
+		e, ok := c.byKey[k]
+		if !ok {
+			continue
+		}
+		e.JudgedAt, e.Worth, e.Rank = stamp, v.Worth, v.Rank
+		if e.skipped() {
+			aside++
+		}
+		c.rev++
+	}
+	return aside
+}
+
+// skippedCount is the size of the pile, for the header's link to it, and
+// unjudgedCount is what a run would have to get through.
+func (c *feedCache) skippedCount() int {
+	return c.count(func(e *feedEntry) bool { return !e.Read && e.skipped() })
+}
+
+func (c *feedCache) unjudgedCount() int {
+	return c.count(func(e *feedEntry) bool { return !e.Read && !e.judged() })
+}
+
+func (c *feedCache) count(want func(*feedEntry) bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := 0
 	for _, e := range c.entries {
-		if !e.Read {
+		if want(e) {
 			n++
 		}
 	}
 	return n
 }
 
+// unreadCount is the whole backlog; unreadApp is one service's share of it,
+// with whether that service's own count is known to be short.
+func (c *feedCache) unreadCount() int {
+	return c.count(func(e *feedEntry) bool { return !e.Read && !e.skipped() })
+}
+
 func (c *feedCache) unreadApp(app string) (int, bool) {
+	n := c.count(func(e *feedEntry) bool { return !e.Read && !e.skipped() && e.App == app })
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := 0
-	for _, e := range c.entries {
-		if !e.Read && e.App == app {
-			n++
-		}
-	}
 	return n, c.status[app].Capped
 }
 
@@ -197,15 +306,9 @@ func (c *feedCache) unreadApp(app string) (int, bool) {
 // holds the feed keys the briefing was written from, and an empty app is every
 // source at once, for the briefing that read the whole feed.
 func (c *feedCache) unreadNew(app string, seen map[string]bool) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	n := 0
-	for _, e := range c.entries {
-		if !e.Read && (app == "" || e.App == app) && !seen[core.Key(e.App, e.ID)] {
-			n++
-		}
-	}
-	return n
+	return c.count(func(e *feedEntry) bool {
+		return !e.Read && !e.skipped() && (app == "" || e.App == app) && !seen[core.Key(e.App, e.ID)]
+	})
 }
 
 // drop removes these entries outright and reports how many it found. It is for

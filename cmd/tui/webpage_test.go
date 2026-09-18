@@ -724,7 +724,7 @@ func TestRenderPageWindowedBacklog(t *testing.T) {
 	deep := feedTally{apps: map[string]int{"x": 812}, types: map[string]int{"text": 812}}
 	in := pageInput{items: items, total: 812, apps: []string{"x"}, now: time.Now(), tally: &deep, updated: time.Now()}
 	p := renderInput(t, in)
-	if !strings.Contains(p, `<span id="unreadn">812</span>`) {
+	if !strings.Contains(p, `<span>all</span><span class="fn">812</span>`) {
 		t.Fatal("the count is the whole backlog, not the window: " + p)
 	}
 	if !strings.Contains(p, `data-more="true"`) || !strings.Contains(p, `data-total="812"`) || !strings.Contains(p, `mark all 812 read`) {
@@ -765,7 +765,7 @@ func TestRenderPageCappedCount(t *testing.T) {
 		apps: []string{"inoreader"}, now: time.Now(), tally: &deep,
 		updated: time.Now(), capped: true,
 	}
-	if got := renderInput(t, in); !strings.Contains(got, `<span id="unreadn">400</span>+ unread`) {
+	if got := renderInput(t, in); !strings.Contains(got, `<span class="fn">400+</span>`) {
 		t.Fatal("expected a capped count: " + got)
 	}
 }
@@ -1428,8 +1428,9 @@ func TestSavedPageAndButton(t *testing.T) {
 	if !strings.Contains(feed, `href="/?saved=1"`) {
 		t.Fatalf("expected a saved link in the header: %s", feed)
 	}
-	if !strings.Contains(feed, `<span id="unreadn">`) {
-		t.Fatal("unread count needs its own span so the saved link survives updates")
+	// Names, not numbers: the row has to fit four of them on a phone.
+	if strings.Contains(feed, `<span id="unreadn">`) {
+		t.Fatal("the header counts belong on the chips, which have room for them")
 	}
 }
 
@@ -1648,8 +1649,8 @@ func TestPickIsServedNotHidden(t *testing.T) {
 	}
 	// The header counts every source, or it would just repeat the picked chip
 	// and nothing on the page would state the whole.
-	if !strings.Contains(p, `<span id="unreadn">3</span>`) {
-		t.Errorf("the header should count all three, not the two picked: %s", p)
+	if !strings.Contains(p, `<span>all</span><span class="fn">3</span>`) {
+		t.Errorf("the whole feed's chip should count all three, not the two picked: %s", p)
 	}
 	// The chip that is on links back to everything, as does the all chip, which
 	// is the way back now that "clear" is gone.
@@ -1730,43 +1731,48 @@ func TestChipQueryIsOnePick(t *testing.T) {
 
 // The header's far end says which way the feed runs and turns it around, over
 // the whole backlog rather than the window of it this page carries — so it is a
-// link the server answers, and the order it lands on is always spelled out.
+// link the server answers, and the order it lands on is always spelled out. One
+// link, three orders: oldest, newest, then the sift's own best-first.
 func TestOrderToggle(t *testing.T) {
 	hrefs := []struct {
-		q    string
-		asc  bool
-		want string
+		q     string
+		order string
+		want  string
 	}{
-		{"", true, "/?order=desc"},
-		{"", false, "/?order=asc"},
-		{"order=asc", true, "/?order=desc"},
-		{"order=desc", false, "/?order=asc"},
+		{"", orderAsc, "/?order=desc"},
+		{"", orderDesc, "/?order=best"},
+		{"", orderBest, "/?order=asc"},
+		{"order=asc", orderAsc, "/?order=desc"},
+		{"order=desc", orderDesc, "/?order=best"},
 		// A pick rides along: turning the feed around should not clear the chip.
-		{"order=desc&app=reddit", false, "/?app=reddit&order=asc"},
-		{"x=foryou", true, "/?order=desc&x=foryou"},
+		{"order=desc&app=reddit", orderDesc, "/?app=reddit&order=best"},
+		{"x=foryou", orderAsc, "/?order=desc&x=foryou"},
 	}
 	for _, c := range hrefs {
 		q, err := url.ParseQuery(c.q)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := orderHref(q, c.asc); got != c.want {
-			t.Errorf("orderHref(%q, asc=%t) = %q, want %q", c.q, c.asc, got, c.want)
+		if got := orderHref(q, c.order); got != c.want {
+			t.Errorf("orderHref(%q, %s) = %q, want %q", c.q, c.order, got, c.want)
 		}
 	}
 
-	feed := func(asc bool) string {
+	feed := func(order string) string {
 		return renderInput(t, pageInput{
 			items: []core.Item{{App: "x", ID: "1", Title: "a"}}, total: 1,
-			apps: []string{"x"}, now: time.Now(), asc: asc, query: url.Values{},
+			apps: []string{"x"}, now: time.Now(), order: order, query: url.Values{},
 		})
 	}
 	// The word is the order the page is already in, not the one a tap would bring.
-	if p := feed(true); !strings.Contains(p, `href="/?order=desc"`) || !strings.Contains(p, `>oldest</a>`) {
+	if p := feed(orderAsc); !strings.Contains(p, `href="/?order=desc"`) || !strings.Contains(p, `>oldest</a>`) {
 		t.Errorf("oldest-first should say so and offer newest: %s", p)
 	}
-	if p := feed(false); !strings.Contains(p, `href="/?order=asc"`) || !strings.Contains(p, `>newest</a>`) {
-		t.Errorf("newest-first should say so and offer oldest: %s", p)
+	if p := feed(orderDesc); !strings.Contains(p, `href="/?order=best"`) || !strings.Contains(p, `>newest</a>`) {
+		t.Errorf("newest-first should say so and offer best: %s", p)
+	}
+	if p := feed(orderBest); !strings.Contains(p, `href="/?order=asc"`) || !strings.Contains(p, `>best</a>`) {
+		t.Errorf("best-first should say so and offer oldest: %s", p)
 	}
 	// The saved and blocked lists are ordered by when you saved or blocked
 	// something, which the toggle has no say over, so it isn't drawn there.
@@ -1967,7 +1973,7 @@ func TestMarkAllClearsTheServerSelection(t *testing.T) {
 	if !strings.Contains(page, `fetch('/mark-all', {method:'POST', body:fd})`) {
 		t.Error("mark-all should ask the server to clear the full selection")
 	}
-	if !strings.Contains(page, `['app', 'type', 'x', 'sub'].forEach`) {
+	if !strings.Contains(page, `['app', 'type', 'x', 'sub', 'skipped'].forEach`) {
 		t.Error("mark-all should carry the active filter to the server")
 	}
 	if strings.Contains(page, `var groups = {};`) || strings.Contains(page, `groups[app]`) {
@@ -2444,7 +2450,7 @@ func TestSubcategoryQuery(t *testing.T) {
 		t.Errorf("clear should clear both layers: %s", got)
 	}
 	// ...but turning the feed around keeps it, the way it keeps the source.
-	if got := orderHref(q, true); got != "/?app=reddit&order=desc&sub=r%2Fgolang" {
+	if got := orderHref(q, orderAsc); got != "/?app=reddit&order=desc&sub=r%2Fgolang" {
 		t.Errorf("the order toggle is not a pick: %s", got)
 	}
 

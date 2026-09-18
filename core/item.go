@@ -30,6 +30,12 @@ type Item struct {
 	Audio   string    // direct audio file of an attached episode (a podcast enclosure)
 	Images  []string  // attached still images; the web card reveals them on demand
 	Quote   *Quote    // the post this one embeds (an x quote), if any
+	// Which rung of the feed service's read-me ladder a sift put this on: 1 up,
+	// with 0 meaning nothing has judged it. Filled in by the feed cache when it
+	// hands an item out, never by the app the item came from, and never stored
+	// with the item itself — an app has no opinion about this and a judgment
+	// belongs to the reader, not to the post.
+	Rank int
 }
 
 // Quote is the post an item embeds. It stays structured rather than folded into

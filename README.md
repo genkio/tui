@@ -43,7 +43,7 @@ tui serve                           # or: tui serve --sync-dir ~/Dropbox/tui
 
 ```
 $TUI_SYNC_DIR/
-  env                          credentials for every app (chmod 600)
+  env                          credentials for every app, and TYPESAFE_API_KEY (chmod 600)
   feed.db                      snapshot of the feed database
   config/<app>-tui/config.toml per-app settings
 ```
@@ -391,6 +391,85 @@ it the way they narrow the saved list, and nothing on it can be marked read,
 because none of it was ever unread. **clear** in the header asks for
 confirmation, then deletes the stored blocked history without changing the
 keywords that continue screening later sweeps.
+
+### Sifting a backlog
+
+A keyword block is for what you know you never want. **sift**, at the end of the
+header, is for the rest: a thousand unread items, most of which are fine and
+perhaps two hundred of which are a greeting, a meme, an invite-code thread or a
+headline with nothing behind it. Tapping it hands every unread item no run has
+judged yet to [TypeSafe](https://typesafe.ai)'s `jev-latest`, one yes/no
+question per item — *is this worth the reader's time?* — and files what it says
+no to under **skipped** in the header, out of the feed and out of every count.
+
+It runs on TypeSafe rather than on a chat model because of what it is: a few
+hundred judgments and no prose anywhere in the answer. Jev reads a batch once
+and answers every question against it in parallel, so the cost is 25 items to a
+request, four requests in flight, and the whole backlog in a few seconds rather
+than the minute a briefing spends on one source. That is the difference that
+matters here — a briefing is one prompt that has to fit in one context window
+and is capped at 200 items for the whole feed, while a sift is arithmetic over
+however many batches the backlog takes. 997 items, ten seconds, under a cent.
+
+The button counts its way through (`400/997`) and the run is the server's, not
+the request's: closing the tab does not stop it, and a second tab watching sees
+the same numbers. Each batch is recorded as it lands, so a run that dies halfway
+has done the half it did and tapping **sift** again picks up exactly where it
+stopped. The first failure stops the rest — a key that is wrong is the same
+answer for every batch behind it. Needs `TYPESAFE_API_KEY` in the env file; the
+button says so if it isn't there.
+
+**Nothing is marked read and nothing is deleted.** The line is drawn at 0.2 —
+an item is skipped when the model puts its chance of being worth anything below
+that — and it is deliberately low and deliberately not a setting: a sift that
+takes something you wanted costs you the item, one that leaves filler in the
+feed costs you a scroll, and those are not the same price. Every item a run
+reaches keeps its number, the ones it kept as well as the ones it skipped, so a
+second run spends nothing asking again about what it has already seen.
+
+Each item is asked about twice, in the same request: a yes/no — *is there
+anything in this?* — which is what the cut is drawn on, and a **ladder** — *how
+much does this repay opening?* — against three described rungs, **skim**,
+**worth a click** and **must read**. Two questions rather than one because they
+are different questions. A yes/no returns the probability that the answer is
+yes, which separates junk from not-junk beautifully and then saturates: in one
+run of a thousand items, ninety distinct values overall but only seven above
+0.85, so "best first" by that number alone is a heap of ties broken by the
+clock. A ladder with rungs you describe is the primitive built for grading, and
+it is the one that found the two items in that backlog worth dropping things
+for — one of which the yes/no had put at 0.78, below dozens of 0.90s.
+
+The rungs are **chips**, in the row beside the sources and the content types:
+`must read 2 · worth a click 406 · skim 432`. Tapping one is a page of that rung
+and nothing else, ordered best to worst within it, which is the shortlist the
+whole exercise is for — a dozen items the sift thought highly of are not a
+sequence to work through in the order they happened. A rung with nothing on it
+is not drawn.
+
+Judging the backlog is only half of it. The header's sort toggle gains a third
+order, **✦ best**, which runs the feed by what the sift made of it instead of by
+the clock — the ladder leading, the yes/no ordering each rung's own items, and
+each card wearing its number so the order explains itself. Items that arrived
+after the last run sit on the middle rung rather than sinking to the bottom: a
+missing answer is not a low one. The toggle cycles **↑ oldest → ↓ newest → ✦
+best**, and the choice sticks in the browser like the other two.
+
+The **skipped** view is where the judgment gets checked, and it is read exactly
+the way the feed is read: full cards, the deck, the sort toggle, the chips,
+mark-all — and scrolling past one marks it read for real, which is the whole
+point. Each card wears the number that put it there (`0.08`), so a run that is
+being too keen is visible rather than something you have to take on trust; in
+**best** order there it is the borderline ones first, which are the judgments
+most likely to have been wrong. It gets no briefing of its own: summarizing what
+you have been told to skip is a strange thing to want. When you have seen
+enough, **mark all read** clears that pile and nothing else — the feed behind it
+is untouched.
+
+The header row that carries all this is four names and no numbers — **unread**,
+**saved**, **skipped**, **blocked**, with the one you are on in the accent
+colour. The counts live on the chips under it, where there is room for them and
+where they already count down as you read; a phone has room for four words and
+not for four words and four numbers.
 
 ### One item, one URL
 
