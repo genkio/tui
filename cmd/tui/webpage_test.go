@@ -937,14 +937,18 @@ func TestRenderCardAudio(t *testing.T) {
 	if !strings.Contains(out, `<audio class="aud" controls preload="metadata" src="https://dts.podtrac.com/redirect.mp3/x/default.mp3?aid=rss_feed"`) {
 		t.Fatalf("expected an inline audio player: %s", out)
 	}
-	// An episode plays at the shared 2× like any other player, but sound is the
-	// whole point of it, so it gets no mute toggle — nor rotate, nor /dl, which
-	// only x's video CDN is allowed through.
+	// An episode plays at the shared 2× like any other player, and carries the
+	// mute toggle for the same reason a video does: the setting starts every
+	// player silent, and this is how one of them is given its voice back. No
+	// rotate, though, and no /dl, which only x's video CDN is allowed through.
 	if !strings.Contains(out, `class="speed"`) {
 		t.Fatalf("expected the speed control: %s", out)
 	}
-	if strings.Contains(out, `class="mute"`) || strings.Contains(out, `class="rot"`) || strings.Contains(out, "/dl?") {
-		t.Fatalf("audio should carry no mute, rotate, or download: %s", out)
+	if !strings.Contains(out, `class="mute"`) {
+		t.Fatalf("expected the mute toggle: %s", out)
+	}
+	if strings.Contains(out, `class="rot"`) || strings.Contains(out, "/dl?") {
+		t.Fatalf("audio should carry no rotate or download: %s", out)
 	}
 	if strings.Contains(out, `class="loop"`) {
 		t.Fatalf("an episode is not something to repeat: %s", out)
@@ -2723,5 +2727,37 @@ func TestMarkAllUnderABriefingOutlivesALaterRun(t *testing.T) {
 	handleMarkAll(rec, req, cache, flusher, sum)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("got %d %s, want a run the server never wrote refused", rec.Code, rec.Body.String())
+	}
+}
+
+// Sound is the one preference that is not the page's: the setting is the
+// default every player starts at, and a card's own mute button overrides it for
+// that card alone, so the next card is silent again.
+func TestMuteDefaultAndPerCardOverride(t *testing.T) {
+	page := renderPage(t, []core.Item{
+		{App: "x", ID: "1", Title: "a clip", Video: "https://video.twimg.com/a.mp4"},
+	}, []string{"x"}, nil, "following", "")
+	if !strings.Contains(page, `<span>start every player muted</span><input id="muteDefault" type="checkbox">`) {
+		t.Error("settings should carry the default")
+	}
+	if !strings.Contains(page, `localStorage.setItem('tui:muted', MUTED ? '1' : '0')`) {
+		t.Error("the default should outlive the tab")
+	}
+	// The card's button says "this item", and what it writes is on the card.
+	if !strings.Contains(page, `title="sound for this item"`) {
+		t.Error("the card's mute is about the card")
+	}
+	if !strings.Contains(page, `if (card) card.dataset.mute = mutedFor(card) ? '0' : '1';`) {
+		t.Error("the override should live on the card it is about")
+	}
+	// ...and every player asks the card it is in, not the page.
+	for _, line := range []string{
+		`v.muted = mutedFor(cardOf(v));`,
+		`a.muted = mutedFor(cardOf(a));`,
+		`if (p.mute && p.unMute){ if (mutedFor(p._posCard)) p.mute(); else p.unMute(); }`,
+	} {
+		if !strings.Contains(page, line) {
+			t.Errorf("expected %q", line)
+		}
 	}
 }

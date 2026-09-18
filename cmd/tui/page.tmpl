@@ -530,7 +530,7 @@ video.ffs{object-fit:cover !important}
 {{else}}{{range .Cards}}{{template "card" .}}
 {{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5L8 12L15 19"/></svg></button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5L16 12L9 19"/></svg></button></div>
 {{end}}{{if and .Cards .BulkMark}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-total="{{.Total}}"{{if .Swipe}} title="mark all {{.Total}} items in this feed read"{{end}}>{{if .Swipe}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg>{{else}}✓ mark all {{.Total}} read{{end}}</button>
-{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on left</span><input id="controlsLeft" type="checkbox"></label><div class="settingrow"><span>summarize in</span><span class="radios" id="sumLang"><label><input type="radio" name="sumlang" value="en"><span>English</span></label><label><input type="radio" name="sumlang" value="zh"><span>中文</span></label></span></div><div class="settingcol"><span>what you are following right now</span><textarea id="intext" rows="6" placeholder="one subject per line, in your own words&#10;the Fed&#39;s rate path&#10;anything about Zig" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.Interests}}</textarea><div class="settingfoot"><button id="insave" type="button">save</button></div></div>{{if .Updated}}<div class="settingnote">last fetch: <span id="upd">{{if .Fetching}}happening now{{else}}{{.Updated}}{{end}}</span>{{if .Capped}} · a service's backlog runs deeper than the sweep reached, so the count is short of the truth{{end}}</div>{{end}}<menu><button value="done">done</button></menu></form></dialog>
+{{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on left</span><input id="controlsLeft" type="checkbox"></label><label class="settingrow"><span>start every player muted</span><input id="muteDefault" type="checkbox"></label><div class="settingrow"><span>summarize in</span><span class="radios" id="sumLang"><label><input type="radio" name="sumlang" value="en"><span>English</span></label><label><input type="radio" name="sumlang" value="zh"><span>中文</span></label></span></div><div class="settingcol"><span>what you are following right now</span><textarea id="intext" rows="6" placeholder="one subject per line, in your own words&#10;the Fed&#39;s rate path&#10;anything about Zig" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.Interests}}</textarea><div class="settingfoot"><button id="insave" type="button">save</button></div></div>{{if .Updated}}<div class="settingnote">last fetch: <span id="upd">{{if .Fetching}}happening now{{else}}{{.Updated}}{{end}}</span>{{if .Capped}} · a service's backlog runs deeper than the sweep reached, so the count is short of the truth{{end}}</div>{{end}}<menu><button value="done">done</button></menu></form></dialog>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
 {{end}}<div id="toast" class="toast"></div>
 <div id="loading" class="loading hid"><span>loading…</span></div>
@@ -986,7 +986,7 @@ function addPlayerControls(foot){
     foot.insertBefore(sp, ex);
   }
   if (!foot.querySelector('button.rot')){
-    var mu = document.createElement('button'); mu.type = 'button'; mu.className = 'mute'; mu.title = 'sound for all videos';
+    var mu = document.createElement('button'); mu.type = 'button'; mu.className = 'mute'; mu.title = 'sound for this item';
     var ro = document.createElement('button'); ro.type = 'button'; ro.className = 'rot'; ro.title = 'rotated fullscreen'; ro.textContent = 'rotate';
     foot.insertBefore(mu, ex); foot.insertBefore(ro, ex);
   }
@@ -1175,23 +1175,39 @@ var SPEEDS = [2, 2.5, 3, 1];
 var SPEED = SPEEDS[0];
 // the IFrame API caps at 2× and ignores anything higher
 function ytRate(){ return Math.min(SPEED, 2); }
+// Sound is the one preference that is not the page's: the speed you read at is
+// the same on every card, but whether a thing should be making noise is about
+// that thing. So MUTED is only the default every player starts at — settings
+// keeps it, and a card's own mute button overrides it for that card alone. The
+// next card is back to the default, which is the whole point: you turn the
+// sound on for the one clip worth hearing, not for the rest of the evening.
 var MUTED = true;
+try { MUTED = localStorage.getItem('tui:muted') !== '0'; } catch(e){}
 var LOOP = false;
+function mutedFor(card){
+  var own = card && card.dataset ? card.dataset.mute : '';
+  if (own === '1') return true;
+  if (own === '0') return false;
+  return MUTED;
+}
+function cardOf(el){ return el && el.closest ? el.closest('article.card') : null; }
 function applyMediaPrefs(){
   document.querySelectorAll('video.vid').forEach(function(v){
-    v.defaultPlaybackRate = SPEED; v.playbackRate = SPEED; v.muted = MUTED; v.loop = LOOP;
+    v.defaultPlaybackRate = SPEED; v.playbackRate = SPEED; v.loop = LOOP;
+    v.muted = mutedFor(cardOf(v));
   });
-  // Audio is the content, not a moving picture with a soundtrack: mute never
-  // applies to it, so only the speed carries over.
   document.querySelectorAll('audio.aud').forEach(function(a){
     a.defaultPlaybackRate = SPEED; a.playbackRate = SPEED;
+    a.muted = mutedFor(cardOf(a));
   });
   ytPlayers.forEach(function(p){
     if (p.setPlaybackRate) p.setPlaybackRate(ytRate());
-    if (p.mute && p.unMute){ if (MUTED) p.mute(); else p.unMute(); }
+    if (p.mute && p.unMute){ if (mutedFor(p._posCard)) p.mute(); else p.unMute(); }
   });
   document.querySelectorAll('button.speed').forEach(function(b){ b.textContent = SPEED + '×'; });
-  document.querySelectorAll('button.mute').forEach(function(b){ b.textContent = MUTED ? 'unmute' : 'mute'; });
+  document.querySelectorAll('button.mute').forEach(function(b){
+    b.textContent = mutedFor(cardOf(b)) ? 'unmute' : 'mute';
+  });
   document.querySelectorAll('button.loop').forEach(function(b){
     b.dataset.on = LOOP ? '1' : '0';
     b.textContent = LOOP ? 'looping' : 'loop';
@@ -1202,7 +1218,12 @@ document.addEventListener('click', function(e){
   if (!b) return;
   if (b.classList.contains('speed')) SPEED = SPEEDS[(SPEEDS.indexOf(SPEED) + 1) % SPEEDS.length];
   else if (b.classList.contains('loop')) LOOP = !LOOP;
-  else MUTED = !MUTED;
+  else {
+    // This card only, and left on the card so it survives whatever else
+    // re-applies the preferences.
+    var card = cardOf(b);
+    if (card) card.dataset.mute = mutedFor(card) ? '0' : '1';
+  }
   applyMediaPrefs();
 });
 document.querySelectorAll('video.vid, audio.aud').forEach(function(m){
@@ -1480,6 +1501,17 @@ if(settingsDlg && settingsOpen && controlsLeft){
     CONTROLS_LEFT = controlsLeft.checked;
     try { localStorage.setItem('tui:deck-controls-left', CONTROLS_LEFT ? '1' : '0'); } catch(e){}
     positionDeckControls();
+  });
+}
+// The default every player starts at. Cards you have already given a say of
+// their own keep it — the setting is what the next one takes.
+var muteDefault = document.getElementById('muteDefault');
+if (muteDefault){
+  muteDefault.checked = MUTED;
+  muteDefault.addEventListener('change', function(){
+    MUTED = muteDefault.checked;
+    try { localStorage.setItem('tui:muted', MUTED ? '1' : '0'); } catch(e){}
+    applyMediaPrefs();
   });
 }
 // The interest list: what you are following at the moment, in your own words,
@@ -2416,4 +2448,4 @@ document.addEventListener('click', function(e){
 });
 </script>
 </div></body></html>
-{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}{{if .Worth}}<span class="kw" title="how likely the sift thought you would want this, from 0 to 1">{{.Worth}}</span>{{end}}{{if .MatchedFor}}<span class="kw" title="the subject on your list this answers">{{.MatchedFor}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for all videos">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}{{if .Worth}}<span class="kw" title="how likely the sift thought you would want this, from 0 to 1">{{.Worth}}</span>{{end}}{{if .MatchedFor}}<span class="kw" title="the subject on your list this answers">{{.MatchedFor}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

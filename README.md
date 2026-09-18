@@ -673,6 +673,15 @@ counts only what is finished — a run still going has nothing to point at — a
 the gists belong to the running server, so a restart empties the chip rather
 than offering prose it no longer holds.
 
+Sound is the one media preference that is not the page's. The speed you read at
+is the same on every card, but whether a thing should be making noise is about
+that thing, so **start every player muted** in settings is only the default a
+player takes, and a card's own **mute** button overrides it for that card alone
+— the next card is silent again. That is the shape the behaviour wants: you
+turn the sound on for the one clip worth hearing, not for the rest of the
+evening. The default is kept in the browser, and a podcast episode carries the
+toggle for the same reason a video does.
+
 ### Swipe mode
 
 The same feed can be dealt as a deck instead of scrolled: one card at a time,
