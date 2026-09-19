@@ -344,16 +344,21 @@ func (s *sweeper) measureBacklog(ctx context.Context) {
 	}
 	now := time.Now()
 	items := s.cache.unmeasured(now)
+	if s.saved != nil {
+		items = append(items, s.saved.unmeasured(now)...)
+	}
 	s.ylen.fill(ctx, items)
 	for _, it := range items {
+		if it.VidSecs == 0 {
+			continue
+		}
+		// Both stores hear it, whichever list the item came off. They share one
+		// row on disk, and a length known to one copy and not the other is
+		// written back over by whichever saves last.
 		s.cache.setVidSecs(it.App, it.ID, it.VidSecs)
-	}
-	if s.saved == nil {
-		return
-	}
-	kept := s.saved.unmeasured(now)
-	s.ylen.fill(ctx, kept)
-	for _, it := range kept {
+		if s.saved == nil {
+			continue
+		}
 		if _, err := s.saved.setVidSecs(it.App, it.ID, it.VidSecs); err != nil {
 			logf("saved: record clip length: %v", err)
 		}

@@ -463,31 +463,27 @@ func TestSweepMeasuresLinkedClips(t *testing.T) {
 		t.Fatalf("fetched item types = %v, want one short", types(items))
 	}
 
-	cached := core.Item{
+	// An item read and kept: out of the feed, still on the saved list, and still
+	// wearing a chip there. Only the saved list has it to measure, and both
+	// copies have to hear the answer — they share one row on disk, and the one
+	// that still said nothing would write the length back off.
+	kept := core.Item{
 		App: "inoreader", ID: "2", Title: "a demo", URL: "https://www.youtube.com/watch?v=GzCsKuDgr6Q",
 	}
-	c.upsert([]core.Item{cached}, time.Now())
-	// Read and kept: out of the feed, still on the saved list, and still wearing
-	// a chip.
+	c.upsert([]core.Item{kept}, time.Now())
+	c.markRead("inoreader", []string{"2"}, time.Now())
 	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
-	if err := store.add(cached, time.Now()); err != nil {
+	if err := store.add(kept, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	s.saved = store
 
 	s.measureBacklog(context.Background())
-	items = c.unread(time.Now(), "")
-	if len(items) != 2 {
-		t.Fatalf("backlog = %d items, want 2", len(items))
+	if list := store.list(time.Now()); len(list) != 1 || itemType(list[0]) != "short" {
+		t.Fatalf("saved item types = %v, want one short", types(list))
 	}
-	for _, it := range items {
-		if got := itemType(it); got != "short" {
-			t.Errorf("%s is a %s after the backlog pass, want short", it.ID, got)
-		}
-	}
-	kept := store.list(time.Now())
-	if len(kept) != 1 || itemType(kept[0]) != "short" {
-		t.Fatalf("saved item types = %v, want one short", types(kept))
+	if it, ok := c.item("inoreader", "2", time.Now()); !ok || itemType(it) != "short" {
+		t.Fatalf("the backlog's copy is a %s, want short like the kept one", itemType(it))
 	}
 }
 

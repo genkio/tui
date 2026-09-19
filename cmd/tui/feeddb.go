@@ -159,6 +159,15 @@ ON CONFLICT(app,id) DO UPDATE SET title=excluded.title,body=excluded.body,source
 	return err
 }
 
+// setVidSecs records a clip length learned after the item was stored. One
+// column on purpose: a saved item's copy is never written over the shared row
+// (see replaceSaved, which inserts and leaves an existing row alone), and a
+// length nobody stated at fetch time is no reason to start.
+func (s *feedDB) setVidSecs(app, id string, secs int) error {
+	_, err := s.db.Exec(`UPDATE items SET video_seconds=? WHERE app=? AND id=? AND video_seconds=0`, secs, app, id)
+	return err
+}
+
 func (s *feedDB) putItem(wire core.Wire) error {
 	tx, err := s.db.Begin()
 	if err != nil {

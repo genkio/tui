@@ -286,7 +286,6 @@ func TestFeedDBKeepsItemReferencedBySavedList(t *testing.T) {
 	}
 }
 
-
 func TestSavedItemTagsPersistUntilUnsave(t *testing.T) {
 	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
 	if err != nil {
@@ -389,5 +388,48 @@ func TestPrepareFeedDBRestoresSyncedSnapshot(t *testing.T) {
 				t.Fatalf("restored unread count = %d, want 1", cache.unreadCount())
 			}
 		})
+	}
+}
+
+// A length learned after the item was kept has to reach the row. The saved list
+// persists by inserting its items and leaving any row the feed already wrote
+// alone, so a save is not enough on its own.
+func TestSavedClipLengthReachesTheRow(t *testing.T) {
+	db, err := openFeedDB(filepath.Join(t.TempDir(), "feed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	cache, err := loadFeedCacheDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := loadSavedDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	it := core.Item{App: "inoreader", ID: "1", Title: "a demo", URL: "https://youtu.be/aqz-KE-bpKQ"}
+	cache.upsert([]core.Item{it}, now)
+	if err := cache.save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := saved.add(it, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, err := saved.setVidSecs("inoreader", "1", 42); !ok || err != nil {
+		t.Fatalf("setVidSecs = %v, %v", ok, err)
+	}
+	if ok, _ := saved.setVidSecs("inoreader", "1", 95); ok {
+		t.Error("a second answer overwrote a length already known")
+	}
+	reloaded, err := loadSavedDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := reloaded.list(now)
+	if len(items) != 1 || items[0].VidSecs != 42 {
+		t.Fatalf("length after reload = %+v, want 42 seconds", items)
 	}
 }

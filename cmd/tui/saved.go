@@ -154,6 +154,11 @@ func (s *savedStore) unmeasured(now time.Time) []core.Item {
 
 // setVidSecs records a length learned after the item was kept. False means
 // there is nothing to record it on, or the length was already known.
+//
+// The row is written directly rather than through save(), which persists the
+// saved list by inserting its items and leaving any row the feed already wrote
+// alone — a stale copy must not overwrite fresher content, and the length would
+// go with it.
 func (s *savedStore) setVidSecs(app, id string, secs int) (bool, error) {
 	s.mu.Lock()
 	i := s.index(app, id)
@@ -162,7 +167,11 @@ func (s *savedStore) setVidSecs(app, id string, secs int) (bool, error) {
 		return false, nil
 	}
 	s.items[i].VidSecs = secs
+	db := s.db
 	s.mu.Unlock()
+	if db != nil {
+		return true, db.setVidSecs(app, id, secs)
+	}
 	return true, s.save()
 }
 
