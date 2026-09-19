@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -76,6 +77,10 @@ type feedEntry struct {
 	// Which subject on the list the item answers, as the reader wrote it: the
 	// chip on the card in the "for me" pick, so a match can be argued with.
 	InterestFor string `json:"interest_for,omitempty"`
+	// When the discussion under this item was asked for. Non-empty sets the item
+	// aside: out of the feed, into the gist chip, where it waits with its thread
+	// read rather than coming round again before the reading is finished.
+	GistAt string `json:"gist_at,omitempty"`
 }
 
 // matched reports whether the item answers something on the reader's own list.
@@ -93,6 +98,11 @@ func (e *feedEntry) judged() bool { return e.JudgedAt != "" && e.Rank > 0 }
 // subject themselves, which outranks a model's opinion about whether there is
 // anything in this particular piece of it.
 func (e *feedEntry) skipped() bool { return e.judged() && e.Worth < siftCut && !e.matched() }
+
+// gisting reports whether the item is set aside for its discussion: you asked
+// for the thread under it and moved on, so it is out of the feed and in the gist
+// chip until you read it there.
+func (e *feedEntry) gisting() bool { return e.GistAt != "" }
 
 // appStatus is the last thing a sweep learned about one service: enough for the
 // header's health dot, the stale-session warning, and whether its backlog is
@@ -188,10 +198,57 @@ func (c *feedCache) upsert(items []core.Item, now time.Time) int {
 // read the backlog through this, so one judgment takes an item out of every one
 // of them at once. It is still in the cache, in the skipped view, waiting to be
 // disagreed with.
+// An item set aside for its discussion is not in here either, for the same
+// reason: you asked for the thread under it rather than read it, and meeting it
+// again before the reading is finished is exactly what asking was meant to
+// avoid. It is in the gist chip instead.
 func (c *feedCache) unread(now time.Time, skipApp string) []core.Item {
 	return c.pick(now, func(e *feedEntry) bool {
-		return !e.Read && !e.skipped() && e.App != skipApp
+		return !e.Read && !e.skipped() && !e.gisting() && e.App != skipApp
 	})
+}
+
+// gisting is the pile waiting on their discussions: asked for, set aside, and
+// unread. Whether the thread has actually been read yet is the summarizer's to
+// say (see gisted) — the chip holds the item either way, so nothing asked for
+// can go missing between the asking and the answer.
+func (c *feedCache) gisting(now time.Time) []core.Item {
+	return c.pick(now, func(e *feedEntry) bool { return !e.Read && e.gisting() })
+}
+
+func (c *feedCache) gistingCount() int {
+	return c.count(func(e *feedEntry) bool { return !e.Read && e.gisting() })
+}
+
+// setGisting sets one item aside for its discussion. False means there was
+// nothing in the feed to take out: an item the cache has never heard of, which
+// is a gist asked for from the saved list or from an item's own page, or one
+// already read, which is past being set aside for later.
+func (c *feedCache) setGisting(app, id string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.byKey[core.Key(app, id)]
+	if !ok || e.Read || e.gisting() {
+		return false
+	}
+	e.GistAt = now.UTC().Format(time.RFC3339)
+	c.rev++
+	return true
+}
+
+// clearGisting puts one back in the feed, which is what a failed reading has to
+// do: an item set aside for a discussion that was never read would otherwise sit
+// in the chip with nothing to show.
+func (c *feedCache) clearGisting(app, id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.byKey[core.Key(app, id)]
+	if !ok || !e.gisting() {
+		return false
+	}
+	e.GistAt = ""
+	c.rev++
+	return true
 }
 
 // skipped is the pile the sift set aside, newest judgment first: read like the
@@ -201,7 +258,9 @@ func (c *feedCache) unread(now time.Time, skipApp string) []core.Item {
 func (c *feedCache) skipped(now time.Time) ([]core.Item, map[string]float64) {
 	worth := map[string]float64{}
 	items := c.pick(now, func(e *feedEntry) bool {
-		if e.Read || !e.skipped() {
+		// Asking for the discussion under something the sift set aside is
+		// disagreeing with the sift, so the gist chip has it from then on.
+		if e.Read || !e.skipped() || e.gisting() {
 			return false
 		}
 		worth[core.Key(e.App, e.ID)] = e.Worth
@@ -230,7 +289,7 @@ func (c *feedCache) worths() map[string]float64 {
 // reached yet, oldest first, so a run interrupted halfway is resumed by asking
 // again rather than started over.
 func (c *feedCache) unjudged(now time.Time) []core.Item {
-	items := c.pick(now, func(e *feedEntry) bool { return !e.Read && !e.judged() })
+	items := c.pick(now, func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() })
 	sortItems(items, true)
 	return items
 }
@@ -243,18 +302,46 @@ func (c *feedCache) pick(now time.Time, want func(*feedEntry) bool) []core.Item 
 		if !want(e) {
 			continue
 		}
-		it := e.Wire.Item(now)
-		if !it.At.IsZero() {
-			it.Age = humanAgo(it.At)
+		out = append(out, itemOf(e, now))
+	}
+	return out
+}
+
+func itemOf(e *feedEntry, now time.Time) core.Item {
+	it := e.Wire.Item(now)
+	if !it.At.IsZero() {
+		it.Age = humanAgo(it.At)
+	}
+	// The rung rides on the item, the way the age does: it is what the chips
+	// group by and what narrows a page to one of them, and both of those are
+	// done over items long after the entry they came from is out of reach.
+	it.Rank, it.Matched = e.Rank, e.matched()
+	if it.Matched {
+		it.MatchedFor = e.InterestFor
+	}
+	return it
+}
+
+// lastRead is what has already been gone through, oldest read first, the last
+// of them the one read most recently. The deck renders a tail of these behind
+// the first unread card so that turning the page - a deck running out and
+// reloading for the next window - does not take the way back with it.
+func (c *feedCache) lastRead(now time.Time, want func(*feedEntry) bool) []core.Item {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var got []*feedEntry
+	for _, e := range c.entries {
+		// An entry read before the timestamp existed has no place in the order,
+		// and one without it can only be the oldest kind of read anyway.
+		if e.Read && e.ReadAt != "" && want(e) {
+			got = append(got, e)
 		}
-		// The rung rides on the item, the way the age does: it is what the chips
-		// group by and what narrows a page to one of them, and both of those are
-		// done over items long after the entry they came from is out of reach.
-		it.Rank, it.Matched = e.Rank, e.matched()
-		if it.Matched {
-			it.MatchedFor = e.InterestFor
-		}
-		out = append(out, it)
+	}
+	// Every stamp is UTC RFC3339, so string order is time order.
+	sort.SliceStable(got, func(i, j int) bool { return got[i].ReadAt < got[j].ReadAt })
+	out := make([]core.Item, 0, len(got))
+	for _, e := range got {
+		out = append(out, itemOf(e, now))
 	}
 	return out
 }
@@ -307,17 +394,17 @@ func (c *feedCache) forget() int {
 // matchedCount is how many items answer the reader's own list, which is what
 // its chip counts.
 func (c *feedCache) matchedCount() int {
-	return c.count(func(e *feedEntry) bool { return !e.Read && e.matched() })
+	return c.count(func(e *feedEntry) bool { return !e.Read && e.matched() && !e.gisting() })
 }
 
 // skippedCount is the size of the pile, for the header's link to it, and
 // unjudgedCount is what a run would have to get through.
 func (c *feedCache) skippedCount() int {
-	return c.count(func(e *feedEntry) bool { return !e.Read && e.skipped() })
+	return c.count(func(e *feedEntry) bool { return !e.Read && e.skipped() && !e.gisting() })
 }
 
 func (c *feedCache) unjudgedCount() int {
-	return c.count(func(e *feedEntry) bool { return !e.Read && !e.judged() })
+	return c.count(func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() })
 }
 
 func (c *feedCache) count(want func(*feedEntry) bool) int {
@@ -335,11 +422,11 @@ func (c *feedCache) count(want func(*feedEntry) bool) int {
 // unreadCount is the whole backlog; unreadApp is one service's share of it,
 // with whether that service's own count is known to be short.
 func (c *feedCache) unreadCount() int {
-	return c.count(func(e *feedEntry) bool { return !e.Read && !e.skipped() })
+	return c.count(func(e *feedEntry) bool { return !e.Read && !e.skipped() && !e.gisting() })
 }
 
 func (c *feedCache) unreadApp(app string) (int, bool) {
-	n := c.count(func(e *feedEntry) bool { return !e.Read && !e.skipped() && e.App == app })
+	n := c.count(func(e *feedEntry) bool { return !e.Read && !e.skipped() && !e.gisting() && e.App == app })
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return n, c.status[app].Capped
@@ -352,7 +439,7 @@ func (c *feedCache) unreadApp(app string) (int, bool) {
 // source at once, for the briefing that read the whole feed.
 func (c *feedCache) unreadNew(app string, seen map[string]bool) int {
 	return c.count(func(e *feedEntry) bool {
-		return !e.Read && !e.skipped() && (app == "" || e.App == app) && !seen[core.Key(e.App, e.ID)]
+		return !e.Read && !e.skipped() && !e.gisting() && (app == "" || e.App == app) && !seen[core.Key(e.App, e.ID)]
 	})
 }
 

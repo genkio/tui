@@ -190,7 +190,11 @@ func tallyCards(cards []cardData) feedTally {
 // pageInput is everything a render needs; a struct because the feed view and
 // the saved view fill in different halves of it.
 type pageInput struct {
-	items        []core.Item
+	items []core.Item
+	// The deck's history tail: items already read, rendered behind the first
+	// unread card so the back arrow still reaches them (see deckBehind). Never
+	// part of the counts — they left those when they were read.
+	behind       []core.Item
 	total        int // everything the pick matched, of which items is at most a window
 	apps         []string
 	failed       []string
@@ -265,6 +269,9 @@ type pageData struct {
 	// The reader's own list of subjects, in the settings dialog's textarea.
 	Interests string
 	Swipe     bool // deck of one card at a time, swiped through
+	// How many of the deck's cards are history: the ones already read, which the
+	// deck starts past. Zero everywhere else.
+	DeckStart int
 	BulkMark  bool // the cached backlog can clear the whole pick server-side
 	// Where to go for the other layout, blank on the views that have no say
 	// (saved, blocked, nothing logged in).
@@ -366,13 +373,22 @@ type cardData struct {
 	// is the part you asked not to see, and the keyword that caught it.
 	Compact bool
 	Keyword string
+	// Already read: the deck's history tail. The card is rendered marked so
+	// walking back onto it and forward again is the ordinary unread/read pair,
+	// and flagged so the chip counts leave it alone (it left them when it was
+	// first read).
+	Read bool
 	// In the skipped view, what the model gave this item, as "0.08". The card
 	// wears it so a judgment can be argued with rather than just obeyed. Rank is
 	// the rung it landed on and Gisted whether its discussion is read and
 	// waiting, which the chips count when nothing else counted them for this
 	// page.
-	Worth      string
-	Rank       int
+	Worth string
+	Rank  int
+	// The rung's key ("click"), which is what its chip is keyed by: the card
+	// wears it so reading the item takes it off that chip's count the way it
+	// comes off the source's.
+	RankKey    string
 	Gisted     bool
 	Matched    bool
 	MatchedFor string
@@ -429,15 +445,12 @@ func buildPageData(in pageInput) pageData {
 	if swipe {
 		cl = swipeClips
 	}
-	cards := make([]cardData, 0, len(in.items))
-	for _, it := range in.items {
+	build := func(it core.Item) cardData {
 		if in.blockedView {
-			cards = append(cards, buildBlockedCard(it, in.block.caughtBy(it.App, it.ID)))
-			continue
+			return buildBlockedCard(it, in.block.caughtBy(it.App, it.ID))
 		}
 		if in.savedView && in.savedCompact {
-			cards = append(cards, buildSavedCompactCard(it, cl))
-			continue
+			return buildSavedCompactCard(it, cl)
 		}
 		// In the saved view every card is saved by definition; in the feed ask
 		// the store.
@@ -459,13 +472,20 @@ func buildPageData(in pageInput) pageData {
 			card.Worth = fmt.Sprintf("%.2f", itemWorth(it, in.worth))
 		}
 		card.Rank, card.Gisted, card.Matched = it.Rank, it.Gisted, it.Matched
+		if l, ok := siftLevelOf(it.Rank); ok {
+			card.RankKey = l.Key
+		}
 		// Which of your subjects caught it, on the card in the pick that is of
 		// them: a match you cannot ask "why is this here" of is a match you end
 		// up ignoring.
 		if in.sel.Kind == "mine" {
 			card.MatchedFor = it.MatchedFor
 		}
-		cards = append(cards, card)
+		return card
+	}
+	cards := make([]cardData, 0, len(in.items))
+	for _, it := range in.items {
+		cards = append(cards, build(it))
 	}
 
 	savedCount := 0
@@ -551,6 +571,21 @@ func buildPageData(in pageInput) pageData {
 		head = headTitle(in.items[0])
 	}
 
+	// The history tail goes in front of the cards, after everything that counts
+	// them: these items are read, they are off the header and the chips already,
+	// and a page that counted them again would report the backlog twice.
+	deckStart := 0
+	if swipe {
+		behind := make([]cardData, 0, len(in.behind))
+		for _, it := range in.behind {
+			card := build(it)
+			card.Read = true
+			behind = append(behind, card)
+		}
+		deckStart = len(behind)
+		cards = append(behind, cards...)
+	}
+
 	return pageData{
 		HeadTitle:     head,
 		Unread:        tally.unread(),
@@ -584,6 +619,7 @@ func buildPageData(in pageInput) pageData {
 		SortTitle:     sortTitle(in.order),
 		SortHref:      flip,
 		Swipe:         swipe,
+		DeckStart:     deckStart,
 		BulkMark:      !in.savedView && !in.blockedView && !in.itemView,
 		DeckHref:      deck,
 		Warn:          in.warn,
@@ -920,7 +956,8 @@ func shortClip(it core.Item) bool {
 func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url.Values) []filterGroup {
 	var out []filterGroup
 	var appChips []filterChip
-	if len(apps) > 0 {
+	feed := len(apps) > 0 // the live feed, as against the saved and blocked lists
+	if feed {
 		// Every logged-in service, plus anything the list carries from one that
 		// isn't (items cached before a logout are still items to filter by).
 		live := map[string]bool{}
@@ -1006,9 +1043,13 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 	// row. A gist is a minute of waiting, so you fire off a handful from the
 	// cards and carry on; this is where they turn up when they are done, to be
 	// read one after another like any other page of the feed.
-	if t.gists > 0 {
+	// Drawn empty rather than left out, and hidden until it holds something: the
+	// chip has to be able to appear the moment you tap gist on a card, and a page
+	// that only grew the chip on its next load is a page where asking for a
+	// discussion looks like it did nothing.
+	if feed {
 		out = append(out, filterGroup{Chips: []filterChip{{
-			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists,
+			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists, Hidden: t.gists == 0,
 		}}})
 	}
 

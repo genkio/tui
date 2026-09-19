@@ -297,3 +297,29 @@ func TestFeedCacheFileShape(t *testing.T) {
 		t.Error("the file should record when it was last swept")
 	}
 }
+
+// The deck's way back: what has already been read, oldest read first, so the
+// last thing you read is the card immediately behind the first unread one.
+func TestFeedCacheLastRead(t *testing.T) {
+	c := newTestCache(t)
+	now := time.Now()
+	c.upsert([]core.Item{item("x", "1", "a"), item("x", "2", "b"), item("x", "3", "c")}, now)
+	c.markRead("x", []string{"2"}, now.Add(-2*time.Minute))
+	c.markRead("x", []string{"1"}, now.Add(-time.Minute))
+
+	got := c.lastRead(now, func(e *feedEntry) bool { return !e.skipped() })
+	if len(got) != 2 || got[0].ID != "2" || got[1].ID != "1" {
+		t.Fatalf("lastRead = %+v, want 2 then 1", got)
+	}
+	// An unread item is not history, whatever else is true of it.
+	for _, it := range got {
+		if it.ID == "3" {
+			t.Fatal("an unread item should never be history")
+		}
+	}
+	// Walking back onto one takes it out again: it is unread now, not behind you.
+	c.markUnread("x", "1")
+	if got := c.lastRead(now, func(e *feedEntry) bool { return !e.skipped() }); len(got) != 1 || got[0].ID != "2" {
+		t.Fatalf("after unmarking, lastRead = %+v, want just 2", got)
+	}
+}

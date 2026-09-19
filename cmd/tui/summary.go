@@ -168,13 +168,14 @@ type summarizer struct {
 	kept []string // read's keys, oldest first, for eviction
 	// The items whose discussion has been read and is waiting, by feed key. A
 	// gist is a minute of somebody else's time, so they are fired off in a
-	// handful and collected later rather than waited on one at a time — and
-	// this is what the gist chip counts, so "later" is a place you can go.
+	// handful and collected later rather than waited on one at a time — and the
+	// gist chip is what makes "later" a place you can go. Restored from the
+	// database at startup, so a restart does not empty it.
 	gists map[string]bool
 }
 
 func newSummarizer(cache *feedCache) *summarizer {
-	return &summarizer{
+	s := &summarizer{
 		ask:     piSummary,
 		thread:  fetchDiscussion,
 		story:   fetchHNStory,
@@ -187,6 +188,43 @@ func newSummarizer(cache *feedCache) *summarizer {
 		jobs:  map[string]summaryJob{},
 		read:  map[string]map[string]bool{},
 		gists: map[string]bool{},
+	}
+	s.restore()
+	return s
+}
+
+// restore reads the gists the last run of the server wrote back into the jobs,
+// so the chip and the prose behind it are where they were left. Best effort: a
+// database that will not answer costs the chip its contents, not the server its
+// start.
+func (s *summarizer) restore() {
+	if s.cache == nil || s.cache.db == nil {
+		return
+	}
+	stored, err := s.cache.db.loadGists()
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	for _, g := range stored {
+		key := summaryKey(g.App, g.ID)
+		// One job per item, whichever language was written last: the other is
+		// still on disk and comes back when the setting goes back to it.
+		if held, ok := s.jobs[key]; ok && held.Generated > g.Generated {
+			continue
+		}
+		s.jobs[key] = summaryJob{
+			State: "done", Lang: g.Lang, Count: g.Count, HTML: g.HTML, Generated: g.Generated,
+		}
+		s.gists[core.Key(g.App, g.ID)] = true
+	}
+	s.mu.Unlock()
+	// A read discussion the feed has let go of puts its item back in the pile.
+	// The pile is written out with the rest of the backlog, so a server that
+	// stopped between the reading landing and the next write would come back
+	// holding prose for an item that had wandered back into the feed.
+	for _, g := range stored {
+		s.cache.setGisting(g.App, g.ID, time.Now())
 	}
 }
 
@@ -202,15 +240,47 @@ func (s *summarizer) serve(ctx context.Context) {
 		case ask := <-s.queue:
 			job := s.brief(ctx, ask)
 			s.put(ask.key(), job)
-			// An item's own briefing that came to something is one the feed can
-			// now point you at, which is the whole of the gist chip.
-			if ask.id != "" && job.State == "done" && job.HTML != "" {
-				s.mu.Lock()
-				s.gists[core.Key(ask.app, ask.id)] = true
-				s.mu.Unlock()
+			if ask.id != "" {
+				s.settle(ask, job)
 			}
 		}
 	}
+}
+
+// settle is what becomes of the item a discussion was read for. A reading that
+// came to something is one the gist chip can now point you at, and the prose
+// goes to disk so it is still there after a restart. A reading that failed hands
+// the item back to the feed: set aside for a discussion nobody could read, it
+// would otherwise sit in the chip with nothing to show and no way out.
+func (s *summarizer) settle(ask summaryAsk, job summaryJob) {
+	// Either way the pile has moved, and the worker is the place to write it out:
+	// off the request that asked, which answers in a millisecond and should not
+	// wait on a rewrite of the backlog.
+	defer func() {
+		if s.cache != nil {
+			_ = s.cache.save()
+		}
+	}()
+	if job.State != "done" || job.HTML == "" {
+		if s.cache != nil {
+			s.cache.clearGisting(ask.app, ask.id)
+		}
+		return
+	}
+	s.mu.Lock()
+	s.gists[core.Key(ask.app, ask.id)] = true
+	s.mu.Unlock()
+	if s.cache == nil || s.cache.db == nil {
+		return
+	}
+	g := storedGist{
+		App: ask.app, ID: ask.id, Lang: job.Lang,
+		HTML: job.HTML, Count: job.Count, Generated: job.Generated,
+	}
+	if it, ok := s.find(ask.app, ask.id, time.Now()); ok {
+		g.Item = it.Wire()
+	}
+	_ = s.cache.db.putGist(g)
 }
 
 // start puts an ask in the queue, unless one is already going for it. The
@@ -228,6 +298,14 @@ func (s *summarizer) start(ask summaryAsk) error {
 	s.mu.Unlock()
 	select {
 	case s.queue <- ask:
+		// The ask is real now, so the item goes with it: out of the feed and into
+		// the gist chip, where it waits rather than coming round again while its
+		// thread is still being read. Asking is the whole of the gesture — you
+		// carry on down the deck without waiting, and this is what makes that
+		// safe. A source's briefing sets nothing aside; see startSummary.
+		if ask.id != "" && s.cache != nil {
+			s.cache.setGisting(ask.app, ask.id, time.Now())
+		}
 		return nil
 	default:
 		s.mu.Lock()
@@ -406,9 +484,10 @@ func (s *summarizer) overtaken(key string, j summaryJob) int {
 	return s.cache.unreadNew(key, j.seen)
 }
 
-// gisted is every item with a discussion read and waiting, by feed key. The
-// jobs themselves are this process's and go with it: a restart empties the chip
-// rather than pointing at prose the server no longer holds.
+// gisted is every item with a discussion read and waiting, by feed key: which
+// of the gist chip's items have prose behind them, as against the ones whose
+// thread is still being read. Both are in the chip (see feedCache.gisting) —
+// this only decides whether the card opens on arrival or says "reading…".
 func (s *summarizer) gisted() map[string]bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

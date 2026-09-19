@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -638,7 +639,7 @@ func TestALostReadResyncs(t *testing.T) {
 		t.Error("a second failure should reload")
 	}
 	// Marking read again after a recovery gets its own retry.
-	if !strings.Contains(p, "decCount(ids.length); decBulkCount(ids.length); retried = false;") {
+	if !strings.Contains(p, "decFeedCount(ids.length); decBulkCount(ids.length); retried = false;") {
 		t.Error("a landed mark should clear the retry, so the next blip gets one too")
 	}
 	// A page that reloads under you should say why, once, in passing.
@@ -2759,5 +2760,105 @@ func TestMuteDefaultAndPerCardOverride(t *testing.T) {
 		if !strings.Contains(page, line) {
 			t.Errorf("expected %q", line)
 		}
+	}
+}
+
+// A deck that runs out reloads for the next window. Without a tail of what you
+// have already read, that reload would take the way back with it: the card you
+// just dealt would be gone from the page and the back arrow dead on arrival.
+func TestDeckCarriesWhatYouAlreadyRead(t *testing.T) {
+	behind := []core.Item{{App: "x", ID: "old1", Title: "read one"}, {App: "x", ID: "old2", Title: "read two"}}
+	items := []core.Item{{App: "x", ID: "1", Title: "unread one"}}
+	p := renderInput(t, pageInput{
+		items: items, behind: behind, total: 3, apps: []string{"x"}, now: time.Now(), swipe: true,
+	})
+	if !strings.Contains(p, `data-deckstart="2"`) {
+		t.Fatalf("the deck should start past its history: %s", p)
+	}
+	if !strings.Contains(p, `var at = Math.min(DECK_START, cards.length);`) {
+		t.Error("the deck should open on the first unread card, not the first card")
+	}
+	// Read, and marked as history so nothing recounts them.
+	if !strings.Contains(p, `<article class="card read" data-app="x" data-id="old1"`) ||
+		!strings.Contains(p, `data-id="old1" data-type="text" data-sub="" data-history="1"`) {
+		t.Errorf("history cards should render read and flagged: %s", p)
+	}
+	// In front of the unread ones, in the order they were read.
+	one, two, unread := strings.Index(p, `data-id="old1"`), strings.Index(p, `data-id="old2"`), strings.Index(p, `data-id="1"`)
+	if !(one < two && two < unread) {
+		t.Errorf("history should lead the deck oldest read first: %d %d %d", one, two, unread)
+	}
+}
+
+// The history is behind you, not in the backlog: it left the counts when it was
+// read, and a page that counted it again would report the backlog twice.
+func TestDeckHistoryStaysOutOfTheCounts(t *testing.T) {
+	behind := []core.Item{{App: "x", ID: "old1", Title: "read one"}}
+	items := []core.Item{{App: "x", ID: "1", Title: "unread one"}}
+	d := buildPageData(pageInput{
+		items: items, behind: behind, total: 1, apps: []string{"x"}, now: time.Now(), swipe: true,
+	})
+	if d.Unread != 1 {
+		t.Fatalf("unread = %d, want 1: a read card is not backlog", d.Unread)
+	}
+	if d.More {
+		t.Error("history is not another window of the backlog")
+	}
+	p := renderInput(t, pageInput{
+		items: items, behind: behind, total: 1, apps: []string{"x"}, now: time.Now(), swipe: true,
+	})
+	if !strings.Contains(p, `document.querySelectorAll('article.card.read:not([data-history])')`) {
+		t.Error("the chip recount should skip history cards for good, not just while they are read")
+	}
+}
+
+// The list has no need of a history tail: a read card stays in place there,
+// greyed, and scrolling up is the way back.
+func TestDeckBehindOnlyFillsTheDeck(t *testing.T) {
+	c := newTestCache(t)
+	now := time.Now()
+	var all []core.Item
+	for i := 0; i < deckHistory+5; i++ {
+		all = append(all, item("x", fmt.Sprint(i), "x"))
+	}
+	all = append(all, item("reddit", "r1", "r"))
+	c.upsert(all, now)
+	for i := 0; i < deckHistory+5; i++ {
+		c.markRead("x", []string{fmt.Sprint(i)}, now.Add(time.Duration(i)*time.Second))
+	}
+	c.markRead("reddit", []string{"r1"}, now.Add(time.Hour))
+
+	unread := func(e *feedEntry) bool { return !e.skipped() }
+	if got := deckBehind(c, now, false, feedSel{}, unread); got != nil {
+		t.Fatalf("the list asked for %d history cards, want none", len(got))
+	}
+	got := deckBehind(c, now, true, feedSel{}, unread)
+	if len(got) != deckHistory {
+		t.Fatalf("history = %d cards, want the cap of %d", len(got), deckHistory)
+	}
+	// The cap keeps the most recent, and reddit's read is the last of them.
+	if got[len(got)-1].ID != "r1" {
+		t.Errorf("history should end on the last thing read, got %q", got[len(got)-1].ID)
+	}
+	// A chip's page carries that chip's history and nobody else's.
+	got = deckBehind(c, now, true, feedSel{Kind: "app", Key: "reddit"}, unread)
+	if len(got) != 1 || got[0].ID != "r1" {
+		t.Fatalf("a narrowed deck = %+v, want reddit's read alone", got)
+	}
+}
+
+// The sift's rungs, "for me" and "gist" count the same cards the source and type
+// chips do, so reading an item has to come off all of them at once.
+func TestSiftChipsCountDownWhileReading(t *testing.T) {
+	it := core.Item{App: "hn", ID: "1", Title: "a", Rank: 2, Gisted: true, Matched: true}
+	p := renderInput(t, pageInput{
+		items: []core.Item{it}, total: 1, apps: []string{"hn"}, now: time.Now(),
+	})
+	if !strings.Contains(p, `data-rank="click" data-gistready="1" data-mine="mine"`) {
+		t.Fatalf("a card should wear the chips it is counted by: %s", p)
+	}
+	if !strings.Contains(p, `var gone = {app:{}, type:{}, sub:{}, rank:{}, mine:{}, gist:{}, all:0};`) ||
+		!strings.Contains(p, `['rank','mine'].forEach(function(k){`) {
+		t.Error("the recount should have a bucket per chip axis")
 	}
 }

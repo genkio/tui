@@ -181,7 +181,7 @@ WHERE NOT EXISTS (SELECT 1 FROM feed_items WHERE feed_items.app=items.app AND fe
 
 func (s *feedDB) loadFeed() (feedFile, error) {
 	f := feedFile{Status: map[string]appStatus{}}
-	rows, err := s.db.Query(`SELECT ` + itemColumns + `,f.first_seen,f.read,f.read_at,f.synced,f.judged_at,f.worth,f.rank,f.interest,f.interest_for
+	rows, err := s.db.Query(`SELECT ` + itemColumns + `,f.first_seen,f.read,f.read_at,f.synced,f.judged_at,f.worth,f.rank,f.interest,f.interest_for,f.gist_at
 FROM feed_items f JOIN items i ON i.app=f.app AND i.id=f.id ORDER BY f.ordinal`)
 	if err != nil {
 		return f, err
@@ -189,7 +189,7 @@ FROM feed_items f JOIN items i ON i.app=f.app AND i.id=f.id ORDER BY f.ordinal`)
 	defer rows.Close()
 	for rows.Next() {
 		var e feedEntry
-		if err := scanWire(rows, &e.Wire, &e.FirstSeen, &e.Read, &e.ReadAt, &e.Synced, &e.JudgedAt, &e.Worth, &e.Rank, &e.Interest, &e.InterestFor); err != nil {
+		if err := scanWire(rows, &e.Wire, &e.FirstSeen, &e.Read, &e.ReadAt, &e.Synced, &e.JudgedAt, &e.Worth, &e.Rank, &e.Interest, &e.InterestFor, &e.GistAt); err != nil {
 			return f, err
 		}
 		f.Items = append(f.Items, &e)
@@ -233,8 +233,8 @@ func (s *feedDB) replaceFeed(f feedFile) error {
 		if err := writeItem(tx, e.Wire, true); err != nil {
 			return err
 		}
-		_, err = tx.Exec(`INSERT INTO feed_items(app,id,first_seen,read,read_at,synced,judged_at,worth,rank,interest,interest_for,ordinal) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-			e.App, e.ID, e.FirstSeen, e.Read, e.ReadAt, e.Synced, e.JudgedAt, e.Worth, e.Rank, e.Interest, e.InterestFor, i)
+		_, err = tx.Exec(`INSERT INTO feed_items(app,id,first_seen,read,read_at,synced,judged_at,worth,rank,interest,interest_for,gist_at,ordinal) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			e.App, e.ID, e.FirstSeen, e.Read, e.ReadAt, e.Synced, e.JudgedAt, e.Worth, e.Rank, e.Interest, e.InterestFor, e.GistAt, i)
 		if err != nil {
 			return err
 		}
@@ -298,6 +298,60 @@ WHERE NOT EXISTS (SELECT 1 FROM saved_items WHERE saved_items.app=item_tags.app 
 		return err
 	}
 	if err := deleteUnreferencedItems(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// storedGist is one read discussion on disk. The prose outlives the process
+// that wrote it: a gist is a minute of somebody else's time, asked for so it can
+// be come back to, and a restart that emptied the chip would have set the item
+// aside for nothing.
+type storedGist struct {
+	App, ID   string
+	Lang      string
+	HTML      string
+	Count     int
+	Generated string
+	// The item itself, written alongside. A gist can land before the cache has
+	// next saved itself — the ask is a minute old and a sweep may not have been
+	// — and the row the gist hangs off has to exist by then or the write is
+	// refused and the reading lost.
+	Item core.Wire
+}
+
+func (s *feedDB) loadGists() ([]storedGist, error) {
+	rows, err := s.db.Query(`SELECT app,id,lang,html,comments,generated FROM gists`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []storedGist
+	for rows.Next() {
+		var g storedGist
+		if err := rows.Scan(&g.App, &g.ID, &g.Lang, &g.HTML, &g.Count, &g.Generated); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (s *feedDB) putGist(g storedGist) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if g.Item.App != "" && g.Item.ID != "" {
+		if err := writeItem(tx, g.Item, false); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`INSERT INTO gists(app,id,lang,html,comments,generated) VALUES(?,?,?,?,?,?)
+ON CONFLICT(app,id,lang) DO UPDATE SET html=excluded.html,comments=excluded.comments,generated=excluded.generated`,
+		g.App, g.ID, g.Lang, g.HTML, g.Count, g.Generated)
+	if err != nil {
 		return err
 	}
 	return tx.Commit()

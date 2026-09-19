@@ -61,6 +61,9 @@ var feedColumns = []string{
 	// different answers and only one of them keeps an item out of the chip.
 	`ALTER TABLE feed_items ADD COLUMN interest REAL NOT NULL DEFAULT -1`,
 	`ALTER TABLE feed_items ADD COLUMN interest_for TEXT NOT NULL DEFAULT ''`,
+	// When the discussion under the item was asked for, which is what sets the
+	// item aside into the gist chip. Empty is the ordinary state: in the feed.
+	`ALTER TABLE feed_items ADD COLUMN gist_at TEXT NOT NULL DEFAULT ''`,
 }
 
 const feedSchema = `
@@ -152,6 +155,21 @@ CREATE TABLE IF NOT EXISTS chart_cache (
 CREATE TABLE IF NOT EXISTS metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+-- A read discussion, kept rather than held in the server that wrote it: the
+-- point of asking for one is that you come back to it later, and "later" has to
+-- survive a restart or the item was set aside for nothing. One per language,
+-- since a summary is in the language it was written in and switching back should
+-- find the earlier one still there.
+CREATE TABLE IF NOT EXISTS gists (
+  app TEXT NOT NULL,
+  id TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  html TEXT NOT NULL,
+  comments INTEGER NOT NULL DEFAULT 0,
+  generated TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (app, id, lang),
+  FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
 );
 DROP TABLE IF EXISTS item_feedback;
 PRAGMA user_version = 1;`

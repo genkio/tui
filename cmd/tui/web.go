@@ -358,6 +358,14 @@ func authedFeedApps(root string) []string {
 const (
 	listWindow = 100
 	deckWindow = 20
+	// How much of what you have already read the deck carries behind the first
+	// unread card. A deck that runs out reloads for the next window, and without
+	// this the reload would throw away every card you could walk back to: one
+	// window's worth of history makes the back arrow reach the last thing you
+	// read, whichever side of the page turn it fell on. The list has no need for
+	// it — a read card stays in place there, greyed, and scrolling up is the way
+	// back.
+	deckHistory = deckWindow
 )
 
 func clientWindow(deck bool) int {
@@ -365,6 +373,27 @@ func clientWindow(deck bool) int {
 		return deckWindow
 	}
 	return listWindow
+}
+
+// deckBehind is the deck's history tail for this page: the last items read out
+// of the same pick the page is showing, oldest read first. Empty for the list,
+// which does not need it.
+func deckBehind(cache *feedCache, now time.Time, deck bool, sel feedSel, want func(*feedEntry) bool) []core.Item {
+	if !deck {
+		return nil
+	}
+	// Narrowed after the fact rather than inside the pick: the cap is on what the
+	// page carries, so a chip's history has to be counted in that chip's items.
+	items := cache.lastRead(now, want)
+	// The gist pile is picked by want, not by anything on the item: what put it
+	// there is a request you made, which selectItems has no way to see.
+	if sel.Kind != "gist" {
+		items = selectItems(items, sel)
+	}
+	if len(items) > deckHistory {
+		items = items[len(items)-deckHistory:]
+	}
+	return items
 }
 
 // handleAll renders the all timeline as a mobile-friendly HTML page (or JSON
@@ -467,9 +496,11 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		if window := clientWindow(deck); len(items) > window {
 			items = items[:window]
 		}
+		behind := deckBehind(cache, now, deck, sel, func(e *feedEntry) bool { return e.skipped() })
 		rendered.put(items)
+		rendered.put(behind)
 		writePage(w, tmpl, pageInput{
-			items: items, total: total, apps: apps, now: now, sel: sel, tally: &tally,
+			items: items, behind: behind, total: total, apps: apps, now: now, sel: sel, tally: &tally,
 			query: q, saved: saved, block: block, swipe: deck, order: order,
 			skippedView: true, worth: worth,
 		})
@@ -479,17 +510,28 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// The whole backlog, whichever chip is on: it is what the chips count, so
 	// every one of them still says what picking it would bring.
 	backlog := cache.unread(now, "")
-	// Which of them have a discussion read and waiting. Marked here rather than
-	// in the cache because the gists are the summarizer's and live only as long
-	// as this process does, while the backlog outlives it.
+	tally := tallyItems(backlog)
+	// The gist pile is a pick of its own rather than a flag over the backlog:
+	// asking for a discussion takes the item out of the feed, so the chip counts
+	// a pile the other chips no longer hold. Its items carry whether the thread
+	// has actually been read yet, which is what decides whether a card opens on
+	// arrival there or says it is still reading.
+	gisting := cache.gisting(now)
 	if gists := sum.gisted(); len(gists) > 0 {
-		for i := range backlog {
-			backlog[i].Gisted = gists[core.Key(backlog[i].App, backlog[i].ID)]
+		for i := range gisting {
+			gisting[i].Gisted = gists[core.Key(gisting[i].App, gisting[i].ID)]
 		}
 	}
-	tally := tallyItems(backlog)
+	tally.gists = len(gisting)
 
 	items := selectItems(backlog, sel)
+	// What the deck's back arrow can reach: the last items read out of whichever
+	// pile this page is, since the two are read separately.
+	behindWant := func(e *feedEntry) bool { return !e.skipped() && !e.gisting() }
+	if sel.Kind == "gist" {
+		items = gisting
+		behindWant = func(e *feedEntry) bool { return e.gisting() }
+	}
 	failed, warn, capped := cache.trouble(apps)
 	// Only the best-first order needs the numbers; the other two are a clock.
 	var worth map[string]float64
@@ -516,13 +558,15 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	if len(items) > window {
 		items = items[:window]
 	}
+	behind := deckBehind(cache, now, deck, sel, behindWant)
 	// Remember what this page showed so a save button can post back just an
 	// app+id and still persist the whole item, even one the cache has since
 	// pruned out from under the page it is on.
 	rendered.put(items)
+	rendered.put(behind)
 
 	writePage(w, tmpl, pageInput{
-		items: items, total: total, apps: apps, failed: failed, now: now,
+		items: items, behind: behind, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
 		swipe: deck, order: order, worth: worth, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 		summaryOpen: q.Get("summary") == "1", interests: interests.words(),
@@ -901,8 +945,12 @@ func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flu
 		// exactly the mistake worth being careful about here.
 		aside, _ := cache.skipped(time.Now())
 		items = selectItems(aside, parseSel(r.Form))
+	} else if sel := parseSel(r.Form); sel.Kind == "gist" {
+		// Likewise the gist pile: it is out of the feed, so clearing it here must
+		// not reach the feed and clearing the feed must not reach it.
+		items = cache.gisting(time.Now())
 	} else {
-		items = selectItems(cache.unread(time.Now(), ""), parseSel(r.Form))
+		items = selectItems(cache.unread(time.Now(), ""), sel)
 	}
 	byApp := map[string][]string{}
 	for _, it := range items {
