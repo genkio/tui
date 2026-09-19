@@ -111,6 +111,9 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	ylen := newYTLens()
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
 	sweep.ylen, sweep.saved = ylen, saved
+	// Every fetch is followed by a sift of what it brought in, so the button is
+	// a way of asking early rather than the only way of asking.
+	sweep.sift = sift.auto
 	if syncPath != "" {
 		sweep.after = func() error { return db.snapshot(syncPath) }
 	}

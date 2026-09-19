@@ -99,6 +99,53 @@ func TestSiftTakesTheJudgedOutOfTheFeed(t *testing.T) {
 	}
 }
 
+// A fetch sifts itself. Nobody taps anything here: the sweeper asks at the end
+// of a sweep, so the feed that comes out of a fetch is already judged.
+func TestASweepSiftsWhatItBrought(t *testing.T) {
+	c := newTestCache(t)
+	now := time.Now()
+	c.upsert([]core.Item{item("x", "1", "worth it"), item("x", "2", "gm")}, now)
+	s := testSifter(t, c, worthOf(map[string]float64{"1": 0.9, "2": 0.02}))
+
+	sw := newSweeper(t.TempDir(), c, nil, nil, false, 0)
+	sw.mark = (&fakeMark{}).fn
+	sw.fetch = func(context.Context, string, int, time.Time) ([]core.Item, bool, error) {
+		return nil, false, nil
+	}
+	sw.sift = s.auto
+	sw.sweep(context.Background(), true)
+
+	if job := settledSift(t, s); job.State != "done" || job.Done != 2 || job.Aside != 1 {
+		t.Fatalf("job = %+v, want a run of 2 with 1 set aside", job)
+	}
+	if got := c.unreadCount(); got != 1 {
+		t.Fatalf("unread is %d, want the one the sweep's own sift left", got)
+	}
+	// And the next sweep has nothing to spend tokens on.
+	sw.sweep(context.Background(), true)
+	if job := settledSift(t, s); job.Done != 2 {
+		t.Fatalf("job = %+v, want the second sweep to judge nothing again", job)
+	}
+}
+
+// A sweep with no key is silent rather than a failed run on the button: the
+// sweeper asks every quarter of an hour, and an answer nobody asked for should
+// not be the first thing a page load reports.
+func TestAutoSiftWithoutAKeyStaysQuiet(t *testing.T) {
+	c := newTestCache(t)
+	c.upsert([]core.Item{item("x", "1", "one")}, time.Now())
+	s := testSifter(t, c, worthOf(nil))
+	t.Setenv(typesafeKey, "")
+
+	s.auto()
+	if job := s.state(); job.State != "" {
+		t.Fatalf("job = %+v, want no run at all", job)
+	}
+	if got := c.unjudgedCount(); got != 1 {
+		t.Fatalf("unjudged is %d, want the item left for a run that can happen", got)
+	}
+}
+
 // A second run is for what has arrived since, not for what has already been
 // judged: the judgment is kept per item, so the tokens are spent once.
 func TestSiftJudgesOnlyWhatIsUnjudged(t *testing.T) {

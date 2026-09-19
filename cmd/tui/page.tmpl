@@ -511,7 +511,7 @@ video.ffs{object-fit:cover !important}
   <div class="sub" id="sub">{{if .ItemView}}<a class="viewlink" href="/">unread</a> <span class="viewon">one item</span> <a class="viewlink" href="/?saved=1">saved</a>{{else}}{{if .FeedView}}<button class="settings viewon" id="settingsOpen" type="button" title="{{if .Capped}}settings — a service's backlog runs deeper than the sweep reached{{else}}settings{{end}}">unread</button>{{else}}<a class="viewlink" href="/">unread</a>{{end}} <a class="viewlink{{if .SavedView}} viewon{{end}}" href="/?saved=1">saved</a> <a class="viewlink{{if .SkippedView}} viewon{{end}}" href="/?skipped=1" title="what the sift skipped for you — read them here to check it">skipped</a> <a class="viewlink{{if .BlockedView}} viewon{{end}}" href="/?blocked=1">blocked</a>{{if .BlockedView}} <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}{{end}}</div>
   {{if .SavedModeHref}}<a class="decklink" id="savedmode" href="{{.SavedModeHref}}" title="{{if .SavedCompact}}title-only saved items — tap for full cards{{else}}full saved cards — tap for titles only{{end}}"><span class="dmark">{{if .SavedCompact}}≡{{else}}▤{{end}}</span>{{if .SavedCompact}}compact{{else}}full{{end}}</a>
   {{end}}{{if .ClearBlocked}}<button class="sortlink headbutton" id="clearBlocked" type="button" data-total="{{.Blocked}}" title="delete all stored blocked items">clear</button>
-  {{end}}{{if and .HasApps (not .SkippedView)}}<button class="sortlink headbutton" id="siftBtn" type="button" title="have typesafe read the backlog and set aside what is not worth your time"><span class="sarrow">⚟</span><span id="siftlabel">sift</span></button>
+  {{end}}{{if and .HasApps (not .SkippedView)}}<button class="sortlink headbutton" id="siftBtn" type="button" title="every fetch is sifted on its own — this asks typesafe to read whatever is left unjudged now"><span class="sarrow">⚟</span><span id="siftlabel">sift</span></button>
   {{end}}{{if .DeckHref}}<a class="decklink" id="decklink" href="{{.DeckHref}}" title="{{if .Swipe}}a deck, one card at a time — tap for the scrolling list{{else}}a scrolling list — tap for the swipe deck{{end}}"><span class="dmark">{{if .Swipe}}▭{{else}}▤{{end}}</span>{{if .Swipe}}deck{{else}}list{{end}}</a>
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{.SortTitle}}"><span class="sarrow">{{.SortMark}}</span>{{.SortWord}}</a>
   {{end}}</header>
@@ -521,7 +521,7 @@ video.ffs{object-fit:cover !important}
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
-{{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Tap <b>sift</b> on the feed and what the model thinks you can skip lands here, to be read anyway or cleared in one go.{{end}}</div>
+{{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Every fetch is sifted as it lands, and what the model thinks you can skip shows up here, to be read anyway or cleared in one go.{{end}}</div>
 {{end}}{{else if .ItemView}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
@@ -1724,14 +1724,20 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
 // by one, whether there is anything in it. What it says no to leaves the feed
 // for the skipped view rather than being marked read or deleted.
 //
-// The run belongs to the server, so this only starts it and then watches: a few
-// hundred items is a minute of round trips, closing the tab does not stop it,
-// and a second tab watching the same run sees the same numbers. The reload at
-// the end is because the feed under it is a different feed by then.
+// The server sifts every fetch by itself, so this button is the early ask and
+// the progress readout rather than the way it happens. The run belongs to the
+// server either way: this starts it and then watches — a few hundred items is a
+// minute of round trips, closing the tab does not stop it, and a second tab
+// watching the same run sees the same numbers. The reload at the end is because
+// the feed under it is a different feed by then.
+//
+// Only a run this tab asked for gets an answer in words. One that was already
+// going when the page loaded is the server's own work, and "nothing was set
+// aside" is a reply to a tap, not news.
 var siftBtn = document.getElementById('siftBtn');
 if(siftBtn) (function(){
   var label = document.getElementById('siftlabel');
-  var poll = null;
+  var poll = null, asked = false;
   function say(t){ if(label) label.textContent = t; }
   // How far through, on the button itself: a bare spinner over a minute of
   // work says nothing about whether it is moving.
@@ -1747,7 +1753,7 @@ if(siftBtn) (function(){
     say('sift');
     if(j && j.state === 'failed'){ toast(j.error || 'the sift failed'); return; }
     if(j && j.aside){ location.reload(); return; }
-    toast('nothing was set aside');
+    if(asked) toast('nothing was set aside');
   }
   function watch(){
     if(poll) return;
@@ -1759,6 +1765,7 @@ if(siftBtn) (function(){
   }
   siftBtn.addEventListener('click', function(){
     siftBtn.disabled = true;
+    asked = true;
     say('sifting…');
     fetch('/sift', {method:'POST'})
       .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
@@ -1769,10 +1776,15 @@ if(siftBtn) (function(){
         toast((err && err.message || '').trim() || 'could not sift');
       });
   });
-  // A run started in another tab, or one still going from before this page
-  // loaded, is this button's to report on too.
+  // A run the last fetch started, one from another tab, or one still going from
+  // before this page loaded, is this button's to report on too. A run that died
+  // is worth saying on hover: nothing else on the page would ever mention it,
+  // and an unsifted feed looks exactly like a feed with nothing to set aside.
   fetch('/sift').then(function(res){ return res.json(); })
-    .then(function(j){ if(running(j)) watch(); }).catch(function(){});
+    .then(function(j){
+      if(running(j)) { watch(); return; }
+      if(j && j.state === 'failed' && j.error) siftBtn.title = 'the last sift failed: ' + j.error;
+    }).catch(function(){});
 })();
 
 // Summarize: a briefing over one source's whole unread backlog, asked for from

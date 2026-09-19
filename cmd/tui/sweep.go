@@ -98,6 +98,11 @@ type sweeper struct {
 	// resolves warm one another. Nil in tests, which have no YouTube to ask.
 	ylen  *ytLens
 	saved *savedStore // measured alongside the backlog; see measureBacklog
+	// Asked for at the end of every sweep: what a fetch brings in is judged
+	// without anyone asking, so a feed is sifted by the time it is read. It
+	// returns at once — the run itself is the sifter's own goroutine, and it is
+	// minutes long. Nil in tests, and when there is no sifter to ask.
+	sift func()
 
 	busy atomic.Bool
 	wake chan struct{}
@@ -198,6 +203,12 @@ func (s *sweeper) sweep(ctx context.Context, first bool) {
 	// app: whatever was down for the flush may well be up again by now.
 	if s.flush != nil {
 		s.flush.kick()
+	}
+	// ...and the moment to judge what it just brought in. After the save rather
+	// than before it, so the run reads a backlog that is on disk, and after the
+	// whole sweep rather than after each app, so one run covers the fetch.
+	if s.sift != nil {
+		s.sift()
 	}
 	if s.after != nil {
 		if err := s.after(); err != nil {

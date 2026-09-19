@@ -33,6 +33,12 @@ import (
 // aside leaves the feed for the skipped view, which is read exactly the way the
 // feed is read: a judgment you disagree with is one scroll away from being read
 // anyway, and only your reading of it ever marks it read.
+//
+// A sift follows every fetch rather than a tap (see sifter.auto): judging what
+// a sweep brought in is the same work whenever it is done, and done then it is
+// done before the feed is looked at. The button is still there, for the times
+// something else has left the backlog unjudged — an edited interest list, a run
+// that failed on a key — but a feed nobody touches is sifted anyway.
 const (
 	typesafeURL   = "https://api.typesafe.ai/v1/systemone"
 	typesafeModel = "jev-latest"
@@ -178,6 +184,11 @@ type siftJob struct {
 	Finished string `json:"finished,omitempty"`
 }
 
+// errNoKey is a sift that cannot happen at all, told apart from the ordinary
+// refusals because a fetch asks for a sift every time now: the reason the feed
+// is never sifted is worth hearing once, and hearing once is enough.
+var errNoKey = errors.New(typesafeKey + " is not set: put a TypeSafe API key in the env file to sift")
+
 // sifter runs the sift. One run at a time, on the server's own clock rather
 // than inside a request: a few hundred items is a minute of round trips, and
 // the tap that asked for it is long gone by then.
@@ -192,6 +203,7 @@ type sifter struct {
 	// through would leave a backlog judged against two different lists.
 	interests *interestStore
 	queue     chan struct{}
+	said      sync.Once
 	mu        sync.Mutex
 	job       siftJob
 }
@@ -212,11 +224,22 @@ func (s *sifter) serve(ctx context.Context) {
 	}
 }
 
+// auto is the sift a fetch asks for, which is nearly every sift there is: the
+// sweeper calls it at the end of a sweep, so what a fetch brought in is judged
+// before anyone looks at it. A backlog that is already judged, or a run still
+// going, is the ordinary answer here and not worth a word — the sweeper asks
+// every quarter of an hour whether there is anything to do.
+func (s *sifter) auto() {
+	if err := s.start(); errors.Is(err, errNoKey) {
+		s.said.Do(func() { logf("sift: %v", err) })
+	}
+}
+
 // start queues a run unless one is already going. The running state is written
 // before the queueing, so a button that has just been tapped reads as busy.
 func (s *sifter) start() error {
 	if strings.TrimSpace(os.Getenv(typesafeKey)) == "" {
-		return errors.New(typesafeKey + " is not set: put a TypeSafe API key in the env file to sift")
+		return errNoKey
 	}
 	total := s.cache.unjudgedCount()
 	if total == 0 {
