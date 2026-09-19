@@ -94,6 +94,10 @@ type sweeper struct {
 	after func() error
 	fetch fetchFunc
 	mark  markFunc
+	// Shared with /ytlen, so the lengths a page asks for and the ones a sweep
+	// resolves warm one another. Nil in tests, which have no YouTube to ask.
+	ylen  *ytLens
+	saved *savedStore // measured alongside the backlog; see measureBacklog
 
 	busy atomic.Bool
 	wake chan struct{}
@@ -185,6 +189,7 @@ func (s *sweeper) sweep(ctx context.Context, first bool) {
 		}(group)
 	}
 	wg.Wait()
+	s.measureBacklog(ctx)
 	s.cache.setSwept(time.Now())
 	if err := s.cache.save(); err != nil {
 		logf("save cache: %v", err)
@@ -220,7 +225,7 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 		return
 	}
 	kept, _ := s.screen(items, now)
-	s.cache.upsert(s.dropTwins(app, kept), now)
+	s.cache.upsert(s.measure(ctx, s.dropTwins(app, kept)), now)
 	if err := s.cache.save(); err != nil {
 		logf("%s: save cache: %v", app, err)
 		s.cache.setStatus(app, appStatus{At: s.cache.statusOf(app).At, Err: "cache write failed"})
@@ -263,7 +268,7 @@ func (s *sweeper) sweepApp(ctx context.Context, app string) {
 			break
 		}
 		kept, blocked := s.screen(items, now)
-		fresh := s.cache.upsert(s.dropTwins(app, kept), now) + blocked
+		fresh := s.cache.upsert(s.measure(ctx, s.dropTwins(app, kept)), now) + blocked
 		if err := s.cache.save(); err != nil {
 			logf("%s: save cache: %v", app, err)
 			break
@@ -317,6 +322,42 @@ func (s *sweeper) dropTwins(app string, items []core.Item) []core.Item {
 		out = append(out, it)
 	}
 	return out
+}
+
+// measure states the length of a linked YouTube clip before the cache takes the
+// item, so the feed can tell a 40-second clip from an hour-long talk. An app
+// that attached its own video already said, and nothing here asks twice.
+func (s *sweeper) measure(ctx context.Context, items []core.Item) []core.Item {
+	if s.ylen != nil {
+		s.ylen.fill(ctx, items)
+	}
+	return items
+}
+
+// measureBacklog asks the same question of what is already held: an item
+// arrives once and is read days later, so one whose length nothing ever stated
+// would wear the wrong chip for as long as it sat there. The saved list is
+// asked too — what is kept to watch later is kept longest of all.
+func (s *sweeper) measureBacklog(ctx context.Context) {
+	if s.ylen == nil {
+		return
+	}
+	now := time.Now()
+	items := s.cache.unmeasured(now)
+	s.ylen.fill(ctx, items)
+	for _, it := range items {
+		s.cache.setVidSecs(it.App, it.ID, it.VidSecs)
+	}
+	if s.saved == nil {
+		return
+	}
+	kept := s.saved.unmeasured(now)
+	s.ylen.fill(ctx, kept)
+	for _, it := range kept {
+		if _, err := s.saved.setVidSecs(it.App, it.ID, it.VidSecs); err != nil {
+			logf("saved: record clip length: %v", err)
+		}
+	}
 }
 
 func itemIDs(items []core.Item) []string {

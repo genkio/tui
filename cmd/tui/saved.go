@@ -136,6 +136,36 @@ func (s *savedStore) setPos(app, id, src string, secs float64) (bool, error) {
 	return true, s.save()
 }
 
+// unmeasured is the kept items that link a YouTube clip whose length nobody
+// stated. The saved list splits video from short the way the feed does, and a
+// kept item is the one that sits there longest with the wrong chip on it.
+func (s *savedStore) unmeasured(now time.Time) []core.Item {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []core.Item
+	for _, e := range s.items {
+		if e.VidSecs > 0 || !ytLinkRe.MatchString(e.URL+" "+e.Title+" "+e.Body) {
+			continue
+		}
+		out = append(out, e.Wire.Item(now))
+	}
+	return out
+}
+
+// setVidSecs records a length learned after the item was kept. False means
+// there is nothing to record it on, or the length was already known.
+func (s *savedStore) setVidSecs(app, id string, secs int) (bool, error) {
+	s.mu.Lock()
+	i := s.index(app, id)
+	if i < 0 || secs <= 0 || s.items[i].VidSecs > 0 {
+		s.mu.Unlock()
+		return false, nil
+	}
+	s.items[i].VidSecs = secs
+	s.mu.Unlock()
+	return true, s.save()
+}
+
 // pos returns where the item was left off and in which player, zeroes when
 // there is nothing to resume.
 func (s *savedStore) pos(app, id string) (float64, string) {

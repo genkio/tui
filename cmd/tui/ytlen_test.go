@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/genkio/tui/core"
 )
 
 func TestYTSecsFromPlayer(t *testing.T) {
@@ -109,5 +111,45 @@ func TestYTLenHandler(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("v=%q gave %d, want 400", bad, rec.Code)
 		}
+	}
+}
+
+// An app that hands over a link and nothing else says nothing about how long
+// the clip runs, and the video/short split is decided over the whole backlog
+// long before a browser asks. So the length is looked up as the item arrives.
+func TestYTLensFillsLinkedLengths(t *testing.T) {
+	asked := 0
+	y := newYTLens()
+	y.fetch = func(_ context.Context, id string) (int, error) {
+		asked++
+		switch id {
+		case "aqz-KE-bpKQ":
+			return 42, nil
+		case "GzCsKuDgr6Q":
+			return 1800, nil
+		}
+		return 0, nil
+	}
+	items := []core.Item{
+		{App: "reddit", ID: "1", URL: "https://youtu.be/aqz-KE-bpKQ"},
+		{App: "inoreader", ID: "2", Body: "watch: https://www.youtube.com/watch?v=GzCsKuDgr6Q"},
+		// The app already said, and a link post that names no video has nothing
+		// to ask about: neither costs a lookup.
+		{App: "x", ID: "3", Video: "https://video.twimg.com/a.mp4", VidSecs: 15},
+		{App: "reddit", ID: "4", Title: "a post about nothing"},
+	}
+	y.fill(context.Background(), items)
+
+	if got := itemType(items[0]); got != "short" {
+		t.Errorf("a 42-second clip is a %s, want short", got)
+	}
+	if got := itemType(items[1]); got != "video" {
+		t.Errorf("a half-hour clip is a %s, want video", got)
+	}
+	if items[2].VidSecs != 15 || items[3].VidSecs != 0 {
+		t.Errorf("lengths = %d, %d; want them left alone", items[2].VidSecs, items[3].VidSecs)
+	}
+	if asked != 2 {
+		t.Errorf("asked YouTube %d times, want 2", asked)
 	}
 }

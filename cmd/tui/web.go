@@ -108,7 +108,9 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	}
 	sift := newSifter(cache, interests)
 	flusher := newMarkFlusher(root, cache)
+	ylen := newYTLens()
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
+	sweep.ylen, sweep.saved = ylen, saved
 	if syncPath != "" {
 		sweep.after = func() error { return db.snapshot(syncPath) }
 	}
@@ -263,7 +265,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	})
 	mux.HandleFunc("/dl", handleDownload)
 	mux.HandleFunc("/img", handleImage)
-	mux.HandleFunc("/ytlen", newYTLens().handle)
+	mux.HandleFunc("/ytlen", ylen.handle)
 	mux.HandleFunc("/redgif", newRedgifLens().handle)
 	mux.HandleFunc(biliPath, newBiliLens().handle)
 

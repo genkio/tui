@@ -1552,6 +1552,9 @@ func TestCardType(t *testing.T) {
 		// short: a YouTube link's length is looked up from the browser, and a
 		// redgifs clip is not resolved until you ask for it.
 		{"length unreported", core.Item{App: "reddit", Video: "https://ex.com/v.mp4"}, "video"},
+		// Once a length is known — an app that stated one, or a lookup that filled
+		// it in after the fetch — a linked YouTube clip is judged like any other.
+		{"short youtube link", core.Item{App: "reddit", URL: "https://youtu.be/aqz-KE-bpKQ", VidSecs: 42}, "short"},
 	}
 	for _, c := range cases {
 		if got := buildCard(c.it, false, listClips).Type; got != c.want {
@@ -1560,6 +1563,30 @@ func TestCardType(t *testing.T) {
 		if out := renderCard(t, c.it); !strings.Contains(out, `data-type="`+c.want+`"`) {
 			t.Errorf("%s: card should carry its type: %s", c.name, out)
 		}
+	}
+}
+
+// A link post carries its video in the one field the card never draws: the
+// open link goes to the discussion, the body is the poster's own words, and the
+// page has nothing to grow a player from unless the card names the video.
+func TestCardNamesTheVideoItLinks(t *testing.T) {
+	it := core.Item{
+		App: "reddit", ID: "1wkewor", Title: "a record shop tour",
+		URL: "https://youtu.be/aqz-KE-bpKQ", Body: "I filmed a visit to Asakusa.",
+	}
+	if got := buildCard(it, false, listClips).YouTube; got != "aqz-KE-bpKQ" {
+		t.Errorf("card's youtube id = %q, want the linked video", got)
+	}
+	out := renderCard(t, it)
+	if !strings.Contains(out, `data-yt="aqz-KE-bpKQ"`) {
+		t.Errorf("card should name the video it links: %s", out)
+	}
+	// The open link still goes to the discussion, which is why the id is needed.
+	if !strings.Contains(out, "old.reddit.com/comments/1wkewor/") {
+		t.Errorf("card should still open the post itself: %s", out)
+	}
+	if got := buildCard(core.Item{App: "reddit", Title: "no video here"}, false, listClips).YouTube; got != "" {
+		t.Errorf("a post about nothing named %q", got)
 	}
 }
 

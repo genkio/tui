@@ -358,6 +358,7 @@ type cardData struct {
 	HasVideo    bool   // this card or its quote has a player, so show the shared controls
 	Audio       string // attached episode file; the card shows an inline audio player
 	RedGif      string // redgifs clip id; the footer offers to fetch and play it
+	YouTube     string // YouTube video this item is about; the page grows a player for it
 	Type        string // what the card carries: "video", "short", "audio" or "text"
 	Images      []string
 	HasImage    bool // this card or its quote has stills, so offer the image toggle
@@ -836,6 +837,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 			c.RedGif = redgifID(it.URL, it.Title, it.Body)
 		}
 	}
+	c.YouTube = ytLinkID(it)
 	c.Keep = keepURL(it.App, it.ID, c.Video)
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
@@ -887,7 +889,20 @@ func keepURL(app, id, video string) string {
 // ytLinkRe is the client's ytId() as a test: a card linking a YouTube video
 // grows a player in the browser, so the saved list should call it a video even
 // though nothing was attached to the item.
-var ytLinkRe = regexp.MustCompile(`(?:youtube\.com/watch\?[^#]*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)[\w-]{11}`)
+var ytLinkRe = regexp.MustCompile(`(?:youtube\.com/watch\?[^#]*v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/embed/)([\w-]{11})`)
+
+// ytLinkID is the first YouTube video an item names, blank when it names none.
+// The browser grows a player from the links it can see in the card, and a link
+// post carries its link nowhere the card draws it — a reddit post to YouTube
+// reads as a title and a thumbnail, and its open link goes to the comments —
+// so the id is picked out here and handed to the page.
+func ytLinkID(it core.Item) string {
+	m := ytLinkRe.FindStringSubmatch(it.URL + " " + it.Title + " " + it.Body)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
 
 // videoFloor separates a video from a short: at or over it, the item is
 // something to sit down and watch; under it, it is one of the loops a timeline

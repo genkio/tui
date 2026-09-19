@@ -445,3 +445,56 @@ func TestSweepRunsAfterHook(t *testing.T) {
 		t.Fatalf("after hook called %d times, want 1", called)
 	}
 }
+
+// A sweep states the length of a clip only linked, so the feed can tell a short
+// from something to sit down and watch. The backlog gets the same treatment:
+// an item cached before anyone asked outlives the fetch that brought it, and
+// would otherwise wear the wrong chip for as long as it sat there.
+func TestSweepMeasuresLinkedClips(t *testing.T) {
+	s, c, _, _ := newTestSweeper(t, false, [][]core.Item{{
+		{App: "reddit", ID: "1", Title: "a record shop tour", URL: "https://youtu.be/aqz-KE-bpKQ"},
+	}})
+	s.ylen = newYTLens()
+	s.ylen.fetch = func(context.Context, string) (int, error) { return 42, nil }
+
+	s.sweepApp(context.Background(), "reddit")
+	items := c.unread(time.Now(), "")
+	if len(items) != 1 || itemType(items[0]) != "short" {
+		t.Fatalf("fetched item types = %v, want one short", types(items))
+	}
+
+	cached := core.Item{
+		App: "inoreader", ID: "2", Title: "a demo", URL: "https://www.youtube.com/watch?v=GzCsKuDgr6Q",
+	}
+	c.upsert([]core.Item{cached}, time.Now())
+	// Read and kept: out of the feed, still on the saved list, and still wearing
+	// a chip.
+	store := loadSaved(filepath.Join(t.TempDir(), "saved.json"))
+	if err := store.add(cached, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.saved = store
+
+	s.measureBacklog(context.Background())
+	items = c.unread(time.Now(), "")
+	if len(items) != 2 {
+		t.Fatalf("backlog = %d items, want 2", len(items))
+	}
+	for _, it := range items {
+		if got := itemType(it); got != "short" {
+			t.Errorf("%s is a %s after the backlog pass, want short", it.ID, got)
+		}
+	}
+	kept := store.list(time.Now())
+	if len(kept) != 1 || itemType(kept[0]) != "short" {
+		t.Fatalf("saved item types = %v, want one short", types(kept))
+	}
+}
+
+func types(items []core.Item) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, itemType(it))
+	}
+	return out
+}

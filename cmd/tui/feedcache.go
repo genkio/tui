@@ -294,6 +294,31 @@ func (c *feedCache) unjudged(now time.Time) []core.Item {
 	return items
 }
 
+// unmeasured is the unread backlog whose clip length nobody has stated: items
+// that link a YouTube video no app attached. A length arriving from a later
+// lookup is what tells a short from something to sit down and watch, and the
+// backlog outlives the fetch that brought it, so asking again about what is
+// already cached is the only way those ever get one.
+func (c *feedCache) unmeasured(now time.Time) []core.Item {
+	return c.pick(now, func(e *feedEntry) bool {
+		return !e.Read && e.VidSecs == 0 && ytLinkRe.MatchString(e.URL+" "+e.Title+" "+e.Body)
+	})
+}
+
+// setVidSecs records a length learned after the item was cached. False means
+// there is nothing to record it on, or the length was already known.
+func (c *feedCache) setVidSecs(app, id string, secs int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.byKey[core.Key(app, id)]
+	if !ok || secs <= 0 || e.VidSecs > 0 {
+		return false
+	}
+	e.VidSecs = secs
+	c.rev++
+	return true
+}
+
 func (c *feedCache) pick(now time.Time, want func(*feedEntry) bool) []core.Item {
 	c.mu.Lock()
 	defer c.mu.Unlock()

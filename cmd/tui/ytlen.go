@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/genkio/tui/core"
 )
 
 // A YouTube card is built in the browser from a link in the body, and nothing
@@ -85,6 +87,35 @@ func (y *ytLens) get(ctx context.Context, id string) int {
 	}
 	y.secs[id] = secs
 	return secs
+}
+
+// fill states the length of the YouTube clip an item links but no app attached,
+// in place, as the item arrives. The badge over the player is the browser's to
+// ask for, but the video/short split is decided long before a browser sees the
+// item — by the chip counts, which are taken over the whole backlog — and an
+// unknown length there reads as a video however short the clip runs. Lookups
+// are cached for the life of the process and gated, so a sweep of a feed full
+// of the same channel asks once per video.
+func (y *ytLens) fill(ctx context.Context, items []core.Item) {
+	var wg sync.WaitGroup
+	for i := range items {
+		it := &items[i]
+		if it.VidSecs > 0 {
+			continue
+		}
+		id := ytLinkID(*it)
+		if id == "" {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if secs := y.get(ctx, id); secs > 0 {
+				it.VidSecs = secs
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 var ytIDRe = regexp.MustCompile(`^[\w-]{11}$`) // same shape the page's ytId() matches
