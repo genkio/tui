@@ -62,8 +62,8 @@ reading stops working, that is the first place to look
 
 - **macOS or Linux.**
 - **Go 1.26+** to build from source.
-- For login: a Chromium-family browser (Brave, Chrome, Chromium, Edge, …). You
-  can also set the cookie by hand instead.
+- For login: a Chromium-family browser (Helium, Brave, Chrome, Chromium, Edge,
+  …). You can also set the cookie by hand instead.
 - A Folo account you can log into.
 
 ## Install

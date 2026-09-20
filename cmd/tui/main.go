@@ -124,7 +124,7 @@ func sourcedVars(dir string, names []string) map[string]bool {
 // Chromium-family browser to drive. The picker warns before a login attempt.
 func missingAuthTools() []string {
 	if _, err := core.FindChromium(); err != nil {
-		return []string{"a Chromium browser (Brave, Chrome, …)"}
+		return []string{"a Chromium browser (Helium, Brave, Chrome, …)"}
 	}
 	return nil
 }

@@ -26,7 +26,8 @@ bilibili-tui   unread · 18                      updated 14:32:07
 ## Requirements
 
 - Go 1.26+ (to build from source)
-- For login only: a Chromium-family browser (Brave, Chrome, Chromium, Edge, …).
+- For login only: a Chromium-family browser (Helium, Brave, Chrome, Chromium,
+  Edge, …).
 
 ## Quick start
 

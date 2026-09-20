@@ -25,8 +25,8 @@ tui                    # open its terminal client
 ```
 
 Log into an app with `tui <app> --auth` (e.g. `tui x --auth`): it opens a
-Chromium-family browser (Brave, Chrome, Chromium, Edge, …) to capture your
-session, so install one if you haven't. Credentials and settings live in
+Chromium-family browser (Helium, Brave, Chrome, Chromium, Edge, …) to capture
+your session, so install one if you haven't. Credentials and settings live in
 `~/.config/tui/env`. Reading a story with `o` uses
 [carbonyl](https://github.com/genkio/carbonyl), installed as a dependency.
 
