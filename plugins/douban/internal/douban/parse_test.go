@@ -522,3 +522,93 @@ func TestToItem(t *testing.T) {
 		t.Errorf("source should carry author + activity: %q", it.Source)
 	}
 }
+
+// A long 动态 reaches the homepage clipped, ending in a （全文） link. The clip
+// has to name the page carrying the rest, since nothing else does.
+func TestParseHomeClipped(t *testing.T) {
+	fixture := `<html><body>
+<div class="new-status status-wrapper">
+  <div class="status-item" data-uid="1502950" data-sid="9729313810" data-aid="500354233" data-atype="topic">
+    <div class="mod">
+      <div class="hd">
+        <div class="text"><a href="https://www.douban.com/people/zhutong/" class="lnk-people">天蝎小猪</a><span type="topic">说：</span></div>
+      </div>
+      <div class="bd">
+        <div class="content">
+          <div class="title"><a href="https://www.douban.com/topic/500354233/?_spm_id=MTUwMjk1MA"></a></div>
+          <blockquote><p style="white-space: pre-line;">每个设定都在颠覆人类中心主义！
+现象级科幻神作 ...<a href="https://www.douban.com/topic/500354233/?_spm_id=MTUwMjk1MA">（全文）</a></p></blockquote>
+        </div>
+        <div class="actions">
+          <span class="created_at" title="2026-09-20 02:15:53"><a href="https://www.douban.com/topic/500354233/">1小时前</a></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>`
+
+	statuses, err := parseHome([]byte(fixture), time.Date(2026, 9, 20, 3, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("parseHome: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	s := statuses[0]
+	if len(s.Clips) != 1 {
+		t.Fatalf("a clipped saying should record one clip: %+v", s.Clips)
+	}
+	if s.Clips[0].URL != "https://www.douban.com/topic/500354233/" {
+		t.Errorf("clip should point at the 全文 page, tracking dropped: %q", s.Clips[0].URL)
+	}
+	// the clip has to match the text verbatim, or the whole version can't replace it
+	if !strings.Contains(s.Text, s.Clips[0].Text) {
+		t.Errorf("clip %q is not a substring of text %q", s.Clips[0].Text, s.Text)
+	}
+}
+
+// An unclipped saying carries no （全文） link, so nothing is fetched for it.
+func TestParseHomeNoClips(t *testing.T) {
+	statuses, err := parseHome([]byte(homeFixture), time.Date(2026, 8, 8, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("parseHome: %v", err)
+	}
+	for _, s := range statuses {
+		if len(s.Clips) != 0 {
+			t.Errorf("status %s should have no clips: %+v", s.ID, s.Clips)
+		}
+	}
+}
+
+func TestParseFull(t *testing.T) {
+	rich := `<html><body><div class="article"><div class="topic-content">
+  <div class="rich-content topic-richtext">
+    <p data-align="">每个设定都在颠覆人类中心主义！</p><p data-align="">现象级科幻神作<a class="subject-quote" href="https://book.douban.com/subject/37426819/">《时间之子》</a>系列，简中版终于上市。  </p><p data-align="">♦豆瓣9.0分</p>
+  </div>
+</div></div></body></html>`
+	got, err := parseFull([]byte(rich))
+	if err != nil {
+		t.Fatalf("parseFull: %v", err)
+	}
+	want := "每个设定都在颠覆人类中心主义！\n现象级科幻神作《时间之子》系列，简中版终于上市。\n♦豆瓣9.0分"
+	if got != want {
+		t.Errorf("parseFull = %q, want %q", got, want)
+	}
+
+	// a status page keeps the homepage's markup instead of a rich-content block
+	status := `<html><body><div class="status-item" data-sid="1"><div class="hd"><div class="text">
+  <blockquote><p>一行<br>两行</p></blockquote>
+</div></div></div></body></html>`
+	got, err = parseFull([]byte(status))
+	if err != nil {
+		t.Fatalf("parseFull status page: %v", err)
+	}
+	if got != "一行\n两行" {
+		t.Errorf("parseFull status page = %q", got)
+	}
+
+	if _, err := parseFull([]byte(`<html><body><p>nothing here</p></body></html>`)); err == nil {
+		t.Error("a page with no status text should error rather than return empty")
+	}
+}

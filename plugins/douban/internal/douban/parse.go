@@ -3,6 +3,7 @@ package douban
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -43,12 +44,20 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 		}
 
 		var embed *core.Quote
+		var clips []Clip
+		if p.more != "" {
+			clips = append(clips, Clip{Text: p.saying, URL: p.more})
+		}
 		// a reshare carries the original status in a sibling wrapper; embed it
 		if real := findFirst(wrapper, func(n *html.Node) bool {
 			return n.Data == "div" && hasClass(n, "status-real-wrapper")
 		}); real != nil {
 			if orig := findFirst(real, isStatusItem); orig != nil {
-				embed = parseItem(orig).embed()
+				op := parseItem(orig)
+				embed = op.embed()
+				if op.more != "" {
+					clips = append(clips, Clip{Text: op.saying, URL: op.more})
+				}
 			}
 		}
 		// resharing a discussion brings no original wrapper: the card itself is
@@ -74,6 +83,7 @@ func parseHome(body []byte, now time.Time) ([]Status, error) {
 			URL:      stripQuery(p.url),
 			Images:   append(p.images, own.images()...),
 			Embed:    embed,
+			Clips:    clips,
 		}
 		if t, err := time.ParseInLocation("2006-01-02 15:04:05", p.created, cst); err == nil {
 			s.CreatedAt = t.UTC()
@@ -91,6 +101,7 @@ type item struct {
 	author   string
 	activity string // e.g. "说", "想读", "转发"; may be empty
 	saying   string // blockquote text (what the user wrote)
+	more     string // where the whole saying lives, when the stream clipped it
 	created  string // "2006-01-02 15:04:05" wall clock
 	card     *card  // the subject/topic block it points at, if any
 	images   []string
@@ -163,6 +174,71 @@ func (c *card) images() []string {
 	return c.pics
 }
 
+// sayingOf reads a status blockquote: the words, and the address of the page
+// holding them whole when douban clipped them. A clipped saying ends in a
+// （全文） link, which is the only handle on the rest of the text.
+func sayingOf(quote *html.Node) (saying, more string) {
+	if a := findFirst(quote, func(c *html.Node) bool {
+		return c.Data == "a" && strings.Contains(textOf(c), "全文")
+	}); a != nil {
+		more = stripTracking(unwrapLink2(attr(a, "href")))
+	}
+	return textOf(quote), more
+}
+
+// parseFull pulls the whole saying off the page a （全文） link points at.
+// A 动态 renders it as a rich-content block of paragraphs; a status page keeps
+// the homepage's own markup, so its blockquote is the text.
+func parseFull(body []byte) (string, error) {
+	doc, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("parsing douban status page: %w", err)
+	}
+	if rich := findFirst(doc, func(n *html.Node) bool {
+		return n.Data == "div" && hasClass(n, "rich-content")
+	}); rich != nil {
+		return blockText(rich), nil
+	}
+	if item := findFirst(doc, isStatusItem); item != nil {
+		if quote := findFirst(item, func(n *html.Node) bool { return n.Data == "blockquote" }); quote != nil {
+			return blockText(quote), nil
+		}
+	}
+	return "", errors.New("no status text on the page")
+}
+
+// blockText is textOf with paragraph structure kept: douban writes a long
+// status as a run of <p>, and flattening those into one line loses the shape
+// the author gave it.
+func blockText(n *html.Node) string {
+	var lines []string
+	var buf strings.Builder
+	flush := func() {
+		if line := strings.Join(strings.Fields(buf.String()), " "); line != "" {
+			lines = append(lines, line)
+		}
+		buf.Reset()
+	}
+	var walk func(*html.Node)
+	walk = func(c *html.Node) {
+		switch {
+		case c.Type == html.TextNode:
+			buf.WriteString(c.Data)
+		case c.Type == html.ElementNode && (c.Data == "p" || c.Data == "div" || c.Data == "br"):
+			flush()
+		}
+		for gc := c.FirstChild; gc != nil; gc = gc.NextSibling {
+			walk(gc)
+		}
+		if c.Type == html.ElementNode && (c.Data == "p" || c.Data == "div") {
+			flush()
+		}
+	}
+	walk(n)
+	flush()
+	return strings.Join(lines, "\n")
+}
+
 // isCardBlock matches either markup douban serves a card in: .block for a
 // subject (a book, a movie), .topic-card for a discussion passed along.
 func isCardBlock(n *html.Node) bool {
@@ -190,7 +266,7 @@ func parseItem(n *html.Node) item {
 				p.author = textOf(who)
 			}
 			if quote = findFirst(txt, func(c *html.Node) bool { return c.Data == "blockquote" }); quote != nil {
-				p.saying = textOf(quote)
+				p.saying, p.more = sayingOf(quote)
 			}
 			// newer statuses date themselves inside .text; that stamp is not part
 			// of what the user did, so it never belongs in the activity
@@ -206,7 +282,7 @@ func parseItem(n *html.Node) item {
 	// topic-card quotes the discussion, which is not what this user wrote)
 	if p.saying == "" {
 		if quote := findOutside(n, block, func(c *html.Node) bool { return c.Data == "blockquote" }); quote != nil {
-			p.saying = textOf(quote)
+			p.saying, p.more = sayingOf(quote)
 		}
 	}
 

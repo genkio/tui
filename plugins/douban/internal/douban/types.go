@@ -26,4 +26,14 @@ type Status struct {
 	Age       string      // relative time derived from CreatedAt, e.g. "2h"
 	Images    []string    // attached pictures; a reshared post keeps its own
 	Embed     *core.Quote // what a 转发 passed along: the original status, or the discussion it points at
+	Clips     []Clip      // sayings the stream cut short, and where the rest lives
+}
+
+// Clip is a saying douban truncated in the timeline. A long 动态 reaches the
+// homepage cut to a few lines and ending in a （全文） link; the rest exists
+// only on the page that link points at, which is login-walled, so the whole
+// text has to be fetched with the same session cookie.
+type Clip struct {
+	Text string // the clipped saying, verbatim as it appears in Text
+	URL  string // the page carrying it whole
 }

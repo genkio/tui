@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,7 +61,31 @@ func (c *Client) Home(ctx context.Context, limit int) ([]Status, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.douban.com/", nil)
+	body, err := c.get(ctx, "https://www.douban.com/")
+	if err != nil {
+		return nil, err
+	}
+
+	statuses, err := parseHome(body, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	// A dead session gets the logged-out landing page: no stream, just login
+	// links. Surface that as a session problem rather than an empty timeline.
+	if len(statuses) == 0 && bytes.Contains(body, []byte("accounts.douban.com")) && !bytes.Contains(body, []byte("status-item")) {
+		return nil, errors.New("douban session is stale: the saved cookie expired. Re-run 'tui douban --auth' to refresh it")
+	}
+	if limit < len(statuses) {
+		statuses = statuses[:limit]
+	}
+	c.unclip(ctx, statuses)
+	return statuses, nil
+}
+
+// get fetches one douban page as the captured browser session and returns its
+// body, mapping the ways douban says no onto errors the user can act on.
+func (c *Client) get(ctx context.Context, rawURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -95,20 +120,64 @@ func (c *Client) Home(ctx context.Context, limit int) ([]Status, error) {
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("douban returned HTTP %d: %s", resp.StatusCode, snippet(body))
 	}
+	return body, nil
+}
 
-	statuses, err := parseHome(body, time.Now())
-	if err != nil {
-		return nil, err
+// maxUnclip caps how many status pages one refresh will open. Each is a second
+// request douban did not ask for, and the WAF counts them; a timeline rarely
+// holds more than a couple of clipped 动态 anyway.
+const maxUnclip = 8
+
+// unclip replaces every clipped saying with the whole text, read off the page
+// the （全文） link points at. Those pages are login-walled, so this is the only
+// place the rest of a long 动态 can come from. A page that will not load leaves
+// its status as douban served it: a short read beats no feed.
+func (c *Client) unclip(ctx context.Context, statuses []Status) {
+	type job struct {
+		status *Status
+		clip   Clip
 	}
-	// A dead session gets the logged-out landing page: no stream, just login
-	// links. Surface that as a session problem rather than an empty timeline.
-	if len(statuses) == 0 && bytes.Contains(body, []byte("accounts.douban.com")) && !bytes.Contains(body, []byte("status-item")) {
-		return nil, errors.New("douban session is stale: the saved cookie expired. Re-run 'tui douban --auth' to refresh it")
+	var jobs []job
+	for i := range statuses {
+		for _, cl := range statuses[i].Clips {
+			if cl.URL == "" || cl.Text == "" {
+				continue
+			}
+			jobs = append(jobs, job{&statuses[i], cl})
+		}
 	}
-	if limit < len(statuses) {
-		statuses = statuses[:limit]
+	if len(jobs) > maxUnclip {
+		jobs = jobs[:maxUnclip]
 	}
-	return statuses, nil
+
+	full := make([]string, len(jobs))
+	var wg sync.WaitGroup
+	for i, j := range jobs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body, err := c.get(ctx, j.clip.URL)
+			if err != nil {
+				return
+			}
+			if text, err := parseFull(body); err == nil {
+				full[i] = text
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, j := range jobs {
+		if full[i] == "" || full[i] == j.clip.Text {
+			continue
+		}
+		// the saying rides in the status text and, for a reshare, in the embed;
+		// whichever holds this clip is the one that gets the whole version
+		j.status.Text = strings.Replace(j.status.Text, j.clip.Text, full[i], 1)
+		if j.status.Embed != nil {
+			j.status.Embed.Text = strings.Replace(j.status.Embed.Text, j.clip.Text, full[i], 1)
+		}
+	}
 }
 
 func snippet(b []byte) string {
