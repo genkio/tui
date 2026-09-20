@@ -102,6 +102,11 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	sum.find = func(app, id string, now time.Time) (core.Item, bool) {
 		return findItem(app, id, now, cache, saved, rendered)
 	}
+	digests, err := newDigestStore(db)
+	if err != nil {
+		return err
+	}
+	sum.digests = digests
 	interests, err := loadInterestsDB(db)
 	if err != nil {
 		return err
@@ -114,6 +119,10 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	// Every fetch is followed by a sift of what it brought in, so the button is
 	// a way of asking early rather than the only way of asking.
 	sweep.sift = sift.auto
+	// ...and by a summary of what is still unread, a couple of hundred items at
+	// a time, until the backlog has been described and a fetch's own handful is
+	// all a digest has left to say.
+	sweep.digest = sum.digestAuto
 	if syncPath != "" {
 		sweep.after = func() error { return db.snapshot(syncPath) }
 	}
@@ -235,6 +244,20 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 			startSummary(w, r, sum)
 		case http.MethodGet:
 			showSummary(w, r, sum)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	// The pile of digests a fetch writes by itself: GET reports on the run and
+	// takes the language the page is reading in, POST is the two things that can
+	// be done to the one on screen (next, retry).
+	mux.HandleFunc("/digest", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			startDigest(w, r, sum, cache, flusher)
+		case http.MethodGet:
+			showDigest(w, r, sum)
 		default:
 			w.Header().Set("Allow", "GET, POST")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -528,6 +551,10 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 	}
 	tally.gists = len(gisting)
+	// Likewise the digests a fetch wrote by itself: a pile of its own, counted
+	// off the store rather than out of the backlog, since a digest is prose
+	// about items rather than an item.
+	tally.digests = sum.digests.waitingCount()
 
 	items := selectItems(backlog, sel)
 	// What the deck's back arrow can reach: the last items read out of whichever
@@ -536,6 +563,22 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	if sel.Kind == "gist" {
 		items = gisting
 		behindWant = func(e *feedEntry) bool { return e.gisting() }
+	}
+	// The summary chip is prose rather than cards: one digest on screen, the
+	// oldest one nobody has cleared, with next and retry under it. No items, so
+	// nothing here counts it or windows it.
+	var digest *digestData
+	digesting := sel.Kind == "digest"
+	if digesting {
+		items = nil
+		if d, ok := sum.digests.waiting(); ok {
+			digest = &digestData{
+				ID: d.ID, Count: d.Count, Waiting: tally.digests, HTML: template.HTML(d.HTML),
+			}
+			if at, err := time.Parse(time.RFC3339, d.Generated); err == nil {
+				digest.When = humanAgo(at)
+			}
+		}
 	}
 	failed, warn, capped := cache.trouble(apps)
 	// Only the best-first order needs the numbers; the other two are a clock.
@@ -570,11 +613,17 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	rendered.put(items)
 	rendered.put(behind)
 
+	running := false
+	if j, ok := sum.job(digestKey); ok && j.State == "running" {
+		running = true
+	}
 	writePage(w, tmpl, pageInput{
 		items: items, behind: behind, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
 		swipe: deck, order: order, worth: worth, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 		summaryOpen: q.Get("summary") == "1", interests: interests.words(),
+		digestView: digesting, digest: digest, digestRunning: running,
+		sumLang: sum.digests.language(),
 	})
 }
 

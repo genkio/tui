@@ -171,5 +171,30 @@ CREATE TABLE IF NOT EXISTS gists (
   PRIMARY KEY (app, id, lang),
   FOREIGN KEY (app, id) REFERENCES items(app, id) ON DELETE CASCADE
 );
+-- A briefing of the unread backlog that nobody asked for: every fetch hands the
+-- next couple of hundred unread items to the model and leaves what came back
+-- here, to be read and then cleared. The items it read are kept alongside,
+-- since clearing one is marking exactly those read.
+--
+-- No foreign key from digest_items to items: a digest outlives the rows it read
+-- (an item pruned out of the cache is still an id worth marking read upstream),
+-- and a briefing that lost half its batch to a prune would clear half of what
+-- it told you about.
+CREATE TABLE IF NOT EXISTS digests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lang TEXT NOT NULL DEFAULT '',
+  html TEXT NOT NULL DEFAULT '',
+  count INTEGER NOT NULL DEFAULT 0,
+  generated TEXT NOT NULL DEFAULT '',
+  marked TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS digest_items (
+  digest_id INTEGER NOT NULL,
+  app TEXT NOT NULL,
+  id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  PRIMARY KEY (digest_id, app, id),
+  FOREIGN KEY (digest_id) REFERENCES digests(id) ON DELETE CASCADE
+);
 DROP TABLE IF EXISTS item_feedback;
 PRAGMA user_version = 1;`

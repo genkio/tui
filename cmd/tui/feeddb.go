@@ -366,6 +366,106 @@ ON CONFLICT(app,id,lang) DO UPDATE SET html=excluded.html,comments=excluded.comm
 	return tx.Commit()
 }
 
+// loadDigests reads every batch briefing back, oldest first, with the items
+// each one read. The cleared ones come back too: what they read is what keeps
+// the next run from summarizing the same items over again.
+func (s *feedDB) loadDigests() ([]*storedDigest, error) {
+	rows, err := s.db.Query(`SELECT id,lang,html,count,generated,marked FROM digests ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*storedDigest
+	byID := map[int64]*storedDigest{}
+	for rows.Next() {
+		var d storedDigest
+		if err := rows.Scan(&d.ID, &d.Lang, &d.HTML, &d.Count, &d.Generated, &d.Marked); err != nil {
+			return nil, err
+		}
+		out = append(out, &d)
+		byID[d.ID] = &d
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items, err := s.db.Query(`SELECT digest_id,app,id FROM digest_items ORDER BY digest_id, ordinal`)
+	if err != nil {
+		return nil, err
+	}
+	defer items.Close()
+	for items.Next() {
+		var id int64
+		var it digestItem
+		if err := items.Scan(&id, &it.App, &it.ID); err != nil {
+			return nil, err
+		}
+		if d, ok := byID[id]; ok {
+			d.Items = append(d.Items, it)
+		}
+	}
+	return out, items.Err()
+}
+
+// putDigest writes a new digest and the batch it read, and hands back the id
+// the row was given.
+func (s *feedDB) putDigest(d *storedDigest) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`INSERT INTO digests(lang,html,count,generated,marked) VALUES(?,?,?,?,?)`,
+		d.Lang, d.HTML, d.Count, d.Generated, d.Marked)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	for i, it := range d.Items {
+		if _, err := tx.Exec(`INSERT INTO digest_items(digest_id,app,id,ordinal) VALUES(?,?,?,?)`, id, it.App, it.ID, i); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// updateDigest replaces the prose of a digest that has been written again. The
+// batch is untouched: a retry is the same items read a second time, which is
+// the whole of what tells it from the next run.
+func (s *feedDB) updateDigest(d *storedDigest) error {
+	_, err := s.db.Exec(`UPDATE digests SET lang=?,html=?,count=?,generated=? WHERE id=?`,
+		d.Lang, d.HTML, d.Count, d.Generated, d.ID)
+	return err
+}
+
+func (s *feedDB) markDigest(id int64, at string) error {
+	_, err := s.db.Exec(`UPDATE digests SET marked=? WHERE id=?`, at, id)
+	return err
+}
+
+// The language the automatic digests are written in. Kept on the server rather
+// than in the browser like the rest of the summary language setting: these runs
+// happen on a fetch, with no page open to ask. It is whatever the last page to
+// read one was set to.
+func (s *feedDB) loadDigestLang() (string, error) {
+	var lang string
+	err := s.db.QueryRow(`SELECT value FROM metadata WHERE key = 'digest_lang'`).Scan(&lang)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return lang, err
+}
+
+func (s *feedDB) saveDigestLang(lang string) error {
+	_, err := s.db.Exec(`INSERT INTO metadata(key,value) VALUES('digest_lang',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, lang)
+	return err
+}
+
 // interests is the reader's own list of what they are following at the moment,
 // in the metadata table rather than a table of its own: it is one string, it is
 // edited whole in a textarea, and a row per line would be a schema for

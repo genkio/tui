@@ -103,6 +103,10 @@ type sweeper struct {
 	// returns at once — the run itself is the sifter's own goroutine, and it is
 	// minutes long. Nil in tests, and when there is no sifter to ask.
 	sift func()
+	// ...and the other half of it: the next couple of hundred unread items are
+	// summarized as they arrive, so the backlog is described by the time it is
+	// opened. Returns at once for the same reason the sift does. Nil in tests.
+	digest func()
 
 	busy atomic.Bool
 	wake chan struct{}
@@ -209,6 +213,11 @@ func (s *sweeper) sweep(ctx context.Context, first bool) {
 	// whole sweep rather than after each app, so one run covers the fetch.
 	if s.sift != nil {
 		s.sift()
+	}
+	// ...and to describe it. Behind the sift, which is the cheaper and faster of
+	// the two and decides what is worth reading at all.
+	if s.digest != nil {
+		s.digest()
 	}
 	if s.after != nil {
 		if err := s.after(); err != nil {

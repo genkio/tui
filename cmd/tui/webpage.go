@@ -99,9 +99,11 @@ type feedTally struct {
 	// The sift's ladder: rung -> how many items sit on it. Empty on a list
 	// nothing has judged, which is how the row knows not to draw the group.
 	ranks map[int]int
-	// How many items have a discussion read and waiting under them, and how many
+	// How many items have a discussion read and waiting under them, how many
+	// digests a fetch has written and nobody has cleared, and how many items
 	// answer something on the reader's own list.
 	gists   int
+	digests int
 	matched int
 	// app -> subcategory -> count, for the services that have one (see subApps).
 	// Nested rather than flat because two services can name a stream the same
@@ -224,11 +226,19 @@ type pageInput struct {
 	// ?summary=1: open this source's briefing rather than its cards, which is
 	// where a finished icon on another page sends you.
 	summaryOpen bool
-	swipe       bool   // this request's layout: one card at a time instead of the scrolling feed
-	order       string // "asc", "desc" or "best", which the header's toggle cycles
-	updated     time.Time
-	fetching    bool // a sweep is in flight, so the count is about to move
-	capped      bool // a service's backlog runs deeper than the sweep reached
+	// The summary chip: the digest waiting to be read, nil when the pile is
+	// empty, and whether a run is writing one right now.
+	digestView    bool
+	digest        *digestData
+	digestRunning bool
+	// The language the server writes those in, which the browser checks its own
+	// setting against: a fetch has nobody to ask, so the page has to have said.
+	sumLang  string
+	swipe    bool   // this request's layout: one card at a time instead of the scrolling feed
+	order    string // "asc", "desc" or "best", which the header's toggle cycles
+	updated  time.Time
+	fetching bool // a sweep is in flight, so the count is about to move
+	capped   bool // a service's backlog runs deeper than the sweep reached
 }
 
 type pageData struct {
@@ -295,7 +305,16 @@ type pageData struct {
 	// others.
 	SummaryApp  string
 	SummaryOpen bool
-	Filters     []filterGroup
+	// The summary chip's own page: one digest, its two controls, and nothing
+	// else. Digest is nil when there is none waiting, which is the ordinary
+	// state of a backlog that has been read through.
+	DigestView    bool
+	Digest        *digestData
+	DigestRunning bool
+	// What the server would write the next automatic summary in, so the page can
+	// say so when its own setting disagrees.
+	SumLang string
+	Filters []filterGroup
 	// The second row: this source's subcategories, busiest first. Only ever
 	// filled when a source chip that has them is the one on.
 	Subs       []filterChip
@@ -337,6 +356,17 @@ type filterChip struct {
 	// a service (the content types, and the saved list, which is read off disk).
 	State string // "ok", "bad", or ""
 	Title string // what the state means, for a hover or long press
+}
+
+// digestData is the digest the summary chip shows: what it read, when, how
+// many are behind it, and the prose itself, already rendered from the model's
+// Markdown when the run landed.
+type digestData struct {
+	ID      int64
+	Count   int
+	When    string
+	Waiting int
+	HTML    template.HTML
 }
 
 type cardData struct {
@@ -530,6 +560,8 @@ func buildPageData(in pageInput) pageData {
 	// The skipped pile is not the backlog a briefing reads, and a briefing of it
 	// would be a summary of what you have already been told to skip.
 	case in.skippedView:
+	// ...and the summary chip's page is already a briefing.
+	case in.digestView:
 	case in.sel.Kind == "app":
 		summaryApp = in.sel.Key
 	case !in.sel.on():
@@ -614,6 +646,10 @@ func buildPageData(in pageInput) pageData {
 		Sel:           in.sel.String(),
 		SummaryApp:    summaryApp,
 		SummaryOpen:   summaryApp != "" && in.summaryOpen,
+		DigestView:    in.digestView,
+		Digest:        in.digest,
+		DigestRunning: in.digestRunning,
+		SumLang:       in.sumLang,
 		Asc:           in.order != orderDesc,
 		SortWord:      sortWord(in.order),
 		SortMark:      sortMark(in.order),
@@ -621,14 +657,16 @@ func buildPageData(in pageInput) pageData {
 		SortHref:      flip,
 		Swipe:         swipe,
 		DeckStart:     deckStart,
-		BulkMark:      !in.savedView && !in.blockedView && !in.itemView,
-		DeckHref:      deck,
-		Warn:          in.warn,
-		HasApps:       len(in.apps) > 0,
-		Cards:         cards,
-		TagFilters:    in.tagFilters,
-		SavedTags:     tags,
-		TagOptions:    savedTagOptions,
+		// Not on the summary chip's page: what clears a digest is its own next
+		// button, which clears exactly the batch it read.
+		BulkMark:   !in.savedView && !in.blockedView && !in.itemView && !in.digestView,
+		DeckHref:   deck,
+		Warn:       in.warn,
+		HasApps:    len(in.apps) > 0,
+		Cards:      cards,
+		TagFilters: in.tagFilters,
+		SavedTags:  tags,
+		TagOptions: savedTagOptions,
 	}
 }
 
@@ -1062,9 +1100,15 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 	// chip has to be able to appear the moment you tap gist on a card, and a page
 	// that only grew the chip on its next load is a page where asking for a
 	// discussion looks like it did nothing.
+	// ...and beside it the digests a fetch wrote without being asked: one chip
+	// for the pile, counting what is still waiting to be read. Hidden while it
+	// holds nothing, for the reason the gist chip is: it has to be able to
+	// appear on a page that was loaded before the run finished.
 	if feed {
 		out = append(out, filterGroup{Chips: []filterChip{{
 			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists, Hidden: t.gists == 0,
+		}, {
+			Kind: "digest", Key: "digest", Label: "summary", Count: t.digests, Hidden: t.digests == 0,
 		}}})
 	}
 
@@ -1178,7 +1222,7 @@ func chipHref(q url.Values, sel feedSel) string {
 		// The filter params this replaces, one no page carries, and the briefing
 		// flag: a pick is a page of cards, whatever the page it was tapped from
 		// happened to be showing.
-		case "app", "type", "rank", "gist", "mine", "x", "sub", "json", "summary":
+		case "app", "type", "rank", "gist", "digest", "mine", "x", "sub", "json", "summary":
 		default:
 			out[k] = v
 		}
@@ -1188,6 +1232,8 @@ func chipHref(q url.Values, sel feedSel) string {
 		out.Set(sel.Kind, sel.Key)
 	case "gist":
 		out.Set("gist", "1")
+	case "digest":
+		out.Set("digest", "1")
 	case "mine":
 		out.Set("mine", "1")
 	}
@@ -1338,6 +1384,9 @@ func parseSel(q url.Values) feedSel {
 	}
 	if q.Get("gist") == "1" {
 		return feedSel{Kind: "gist", Key: "gist"}
+	}
+	if q.Get("digest") == "1" {
+		return feedSel{Kind: "digest", Key: "digest"}
 	}
 	if q.Get("mine") == "1" {
 		return feedSel{Kind: "mine", Key: "mine"}

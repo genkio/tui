@@ -387,12 +387,19 @@ button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);pa
    part-expanded — so coming back is coming back and not a reload. */
 .summary{display:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 body.sumon .summary{display:block}
+/* the summary chip's own page is nothing but the digest, so it stands in for no
+   cards and has nothing to be toggled against */
+.summary.digest{display:block}
 .smeta{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 /* the briefing has been overtaken: items arrived that it never read. Loud
    enough to catch the eye next to "next", which is what it is telling you to
    do, and gone entirely when there is nothing to say. */
 .sold{padding:1px 8px;border:1px solid var(--accent);border-radius:999px;color:var(--accent);font-weight:600}
 .sold:empty{display:none}
+/* "next" sits under the prose rather than above it: it clears every item the
+   summary read, which is what you do once you have read it */
+.sfoot{display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.sfoot .rest{margin-left:0;font-size:14px}
 .summary .body{font-size:15px}
 .summary .body h2{margin:18px 0 6px;font-size:16px;font-weight:700}
 .summary .body ul,.summary .body ol{margin:8px 0;padding-left:22px}
@@ -505,7 +512,7 @@ video.ffs{object-fit:cover !important}
 }
 </style>
 </head><body>
-<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-skippedview="{{if .SkippedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-deckstart="{{.DeckStart}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" hidden></div>
+<div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-skippedview="{{if .SkippedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-deckstart="{{.DeckStart}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" data-sumlang="{{.SumLang}}" hidden></div>
 <div class="wrap">
 <header>
   <div class="sub" id="sub">{{if .ItemView}}<a class="viewlink" href="/">unread</a> <span class="viewon">one item</span> <a class="viewlink" href="/?saved=1">saved</a>{{else}}{{if .FeedView}}<button class="settings viewon" id="settingsOpen" type="button" title="{{if .Capped}}settings — a service's backlog runs deeper than the sweep reached{{else}}settings{{end}}">unread</button>{{else}}<a class="viewlink" href="/">unread</a>{{end}} <a class="viewlink{{if .SavedView}} viewon{{end}}" href="/?saved=1">saved</a> <a class="viewlink{{if .SkippedView}} viewon{{end}}" href="/?skipped=1" title="what the sift skipped for you — read them here to check it">skipped</a> <a class="viewlink{{if .BlockedView}} viewon{{end}}" href="/?blocked=1">blocked</a>{{if .BlockedView}} <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}{{end}}</div>
@@ -522,6 +529,8 @@ video.ffs{object-fit:cover !important}
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Every fetch is sifted as it lands, and what the model thinks you can skip shows up here, to be read anyway or cleared in one go.{{end}}</div>
+{{end}}{{else if .DigestView}}{{with .Digest}}<div class="summary digest" id="digest" data-id="{{.ID}}"><div class="smeta">{{.Count}} unread items{{if .When}}, summarized {{.When}}{{end}}{{if gt .Waiting 1}}<span class="sold" title="summaries waiting behind this one">{{.Waiting}} waiting</span>{{end}}<button class="rest" id="digretry" type="button" title="write this summary again over the same items">retry</button></div><div class="body">{{.HTML}}</div><div class="sfoot"><button class="rest" id="dignext" type="button" title="mark every item this read as read, and show the next summary">next</button></div></div>
+{{else}}<div class="note" id="dignote" data-running="{{if .DigestRunning}}1{{else}}0{{end}}">{{if .DigestRunning}}Reading the backlog — this takes a minute or two.{{else}}No summary waiting. Every fetch summarizes the next couple of hundred unread items and leaves the briefing here.{{end}}</div>
 {{end}}{{else if .ItemView}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
@@ -552,11 +561,23 @@ var SEL = document.getElementById('state').getAttribute('data-sel') || '';
 // Set means the deck's arrows take the left edge instead of the right.
 var CONTROLS_LEFT = false;
 try { CONTROLS_LEFT = localStorage.getItem('tui:deck-controls-left') === '1'; } catch(e){}
-// Which language a briefing is asked for in. This browser's choice, kept where
-// its other choices are: one server serves whoever opens it, and the language a
-// summary comes back in belongs to whoever is reading it.
+// Which language a briefing is asked for in. The server holds this one, unlike
+// the layout choices around it: the summaries a fetch writes by itself are
+// written without a page open to ask, so the setting has to live somewhere a
+// fetch can read — and having done that, it is the one setting that is the same
+// on your phone and your desktop. Every page adopts what the server says; what
+// is in localStorage is a cache, for the views that carry no answer (the saved
+// and blocked lists, an item on its own page).
 var SUM_LANG = 'en';
-try { if (localStorage.getItem('tui:summary-lang') === 'zh') SUM_LANG = 'zh'; } catch(e){}
+try {
+  var langHeld = localStorage.getItem('tui:summary-lang');
+  if (langHeld === 'zh' || langHeld === 'en') SUM_LANG = langHeld;
+} catch(e){}
+var SUM_LANG_SAID = document.getElementById('state').getAttribute('data-sumlang') || '';
+if (SUM_LANG_SAID === 'zh' || SUM_LANG_SAID === 'en'){
+  SUM_LANG = SUM_LANG_SAID;
+  try { localStorage.setItem('tui:summary-lang', SUM_LANG); } catch(e){}
+}
 var SAVED_TAGS = {{.SavedTags}};
 var TAG_OPTIONS = {{.TagOptions}};
 // The gist pile (?gist=1): the items whose discussion you asked for. It is not
@@ -1611,6 +1632,20 @@ if (muteDefault){
   });
 })();
 
+// Changing it is the one thing that writes: the server is told, and every
+// other page picks the new language up on its next load. Nothing sends on
+// load — a page that pushed what it happens to hold would be a device quietly
+// undoing the choice you made on the other one.
+(function(){
+  document.addEventListener('tui:sumlang', function(){
+    var fd = new FormData();
+    fd.append('do', 'lang');
+    fd.append('lang', SUM_LANG);
+    fetch('/digest', {method:'POST', body:fd})
+      .catch(function(){ toast('the language is set here, but the server did not hear it'); });
+  });
+})();
+
 // The deck (?deck=1): one card on screen, walked through from an edge column.
 if (SWIPE) (function(){
   var deck = document.getElementById('deck');
@@ -2144,6 +2179,90 @@ if(siftBtn) (function(){
       .then(function(d){ if (sync((d && d.jobs) || {})) watch(); })
       .catch(function(){});
   });
+})();
+
+// The summary chip: the digests a fetch writes by itself. The server renders
+// the one waiting straight into the page, so there is nothing to fetch here and
+// nothing to hold in the tab — only the two things that can be done to it.
+//
+// Both land as a page load, which is the honest thing for either: next has
+// marked a couple of hundred items read and the counts everywhere on the page
+// have moved, and retry is a run of a minute or two whose result is the page
+// itself. A reload is also how the next digest arrives, so the pile is read by
+// tapping one button over and over.
+(function(){
+  var panel = document.getElementById('digest');
+  var note = document.getElementById('dignote');
+  if (!panel && !note) return;
+  var poll = null;
+
+  function ask(){ return fetch('/digest').then(function(r){ return r.json(); }); }
+
+  // A run is going: the page it lands on is this one, so come back for it
+  // rather than leaving a stale digest on screen.
+  function watch(){
+    if (poll) return;
+    poll = setInterval(function(){
+      ask().then(function(j){
+        if (j && j.state === 'running') return;
+        clearInterval(poll); poll = null;
+        location.reload();
+      }).catch(function(){});
+    }, 3000);
+  }
+
+  function waiting(){
+    if (!panel) return;
+    panel.textContent = '';
+    var n = document.createElement('div');
+    n.className = 'note';
+    n.textContent = 'Reading the backlog — this takes a minute or two.';
+    panel.appendChild(n);
+  }
+
+  function send(what){
+    var fd = new FormData();
+    fd.append('do', what);
+    fd.append('id', panel.dataset.id);
+    fd.append('lang', SUM_LANG);
+    return fetch('/digest', {method:'POST', body:fd})
+      .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); });
+  }
+
+  var next = document.getElementById('dignext');
+  var redo = document.getElementById('digretry');
+  // Both taps are a couple of hundred items' worth of work before anything on
+  // screen can change — next marks them read and reloads, retry starts a run —
+  // so the controls go dead at once and the page cover goes up. Without it the
+  // tap looks like it missed, and the next thing you do is tap it again.
+  function busy(on, say){
+    if (next) { next.disabled = on; if (say) next.textContent = say; }
+    if (redo) redo.disabled = on;
+    document.getElementById('loading').classList.toggle('hid', !on);
+  }
+  if (next) next.addEventListener('click', function(){
+    busy(true, 'clearing…');
+    send('next')
+      .then(function(){ location.reload(); })
+      .catch(function(err){ busy(false, 'next'); toast((err && err.message || '').trim() || 'could not clear that summary'); });
+  });
+  if (redo) redo.addEventListener('click', function(){
+    busy(true);
+    send('retry')
+      // The cover comes down on the panel's own "reading the backlog" note,
+      // which takes over as the indicator: the run is minutes long, and the
+      // page is yours again while it goes.
+      .then(function(){ document.getElementById('loading').classList.add('hid'); waiting(); watch(); })
+      .catch(function(err){ busy(false); toast((err && err.message || '').trim() || 'could not write that summary again'); });
+  });
+
+  // With nothing waiting, a run the last fetch started is what this page is
+  // waiting for, so watch for it. With a digest on screen there is nothing to
+  // wait for: a run finishing elsewhere adds to the pile behind this one, and
+  // reloading the page out from under someone reading it would be the rudest
+  // possible way to say so.
+  if (note && note.dataset.running === '1') watch();
+  else if (note) ask().then(function(j){ if (j && j.state === 'running') watch(); }).catch(function(){});
 })();
 
 // Gist: the discussion under one Hacker News or reddit card. A story's item is

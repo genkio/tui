@@ -546,7 +546,11 @@ Each cited item gets a **row of its own** — a bullet carrying four links is a
 row nobody can tell apart — and wears a short label rather than its own URL,
 which matters most on x, where a post has no title to borrow.
 
-**summarize in**, in settings, picks the language: English or 中文. It applies to
+**summarize in**, in settings, picks the language: English or 中文. It is kept on
+the server rather than in the browser, so it is the same setting on your phone
+and your desktop — the summaries a fetch writes by itself (see **The summary
+chip**) have no page open to ask, and once it lives there it may as well be one
+answer for everyone reading. It applies to
 the next run, not the ones already written — a briefing is in the language it was
 written in — so switching hands the sparkles back to offering a run, and
 switching back finds the earlier briefings still where they were kept. Titles,
@@ -606,6 +610,45 @@ briefing is capped, so the rest of the backlog was never mentioned to you, and
 whatever arrived in the sweep since it ran was not in it either. Both are left
 unread, which is the only reading of "mark all read" that cannot clear something
 you were never told about.
+
+### The summary chip: briefings nobody asked for
+
+The sparkles are for when you want a briefing. The **summary** chip is what
+happens without you: every fetch, right behind the sift, hands the next
+**200 unread items** to the same model and leaves what came back on the chip.
+A backlog of fifteen hundred is eight fetches' worth of summaries — a couple of
+hours of quarter-hourly sweeps — and once it has caught up, a fetch's own
+handful is one short summary rather than a pile to work through.
+
+Each run takes the **oldest** unread items no summary has read yet, so the pile
+works through the backlog from the end that would otherwise never be reached,
+and no two summaries cover the same item. The chip counts what is waiting;
+picking it shows one summary — the oldest — and nothing else. No cards, no
+scrolling past half of it wondering which items you have dealt with.
+
+There are exactly two things to do to one:
+
+- **next** marks every item that summary read as read, and hands you the one
+  behind it. Items you have already read in the feed are left alone, and
+  anything that arrived after the run was never in it, so nothing is cleared
+  that you were not told about. A backlog is emptied by tapping this over and
+  over.
+- **retry** writes the same batch again, in its place in the pile. "next" would
+  move on to items this summary never mentioned; a run the model made a mess of
+  wants this one.
+
+The language is **summarize in**, which is why that setting lives on the server:
+these runs happen on a fetch, with no page open to ask. Changing it anywhere
+changes it everywhere, and applies to the next run rather than the summaries
+already written — **retry** is how you have one of those over again in the
+language you have just picked. They queue on the same worker as every other briefing, so a
+summary and a source's sparkle never race each other for the model, and they
+need the same `pi` CLI; without it the server says so once in its log and the
+chip simply stays empty.
+
+Nothing else changes. The items stay unread and in the feed until a **next**
+clears them, the chips and counts are what they were, and the sift, the gist
+chip and the sparkles all carry on as before.
 
 ### Summarizing a discussion
 

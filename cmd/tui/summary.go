@@ -166,6 +166,18 @@ type summarizer struct {
 	// briefing read rather than what the latest run of the same source did.
 	read map[string]map[string]bool
 	kept []string // read's keys, oldest first, for eviction
+	// The digests a fetch writes by itself, which this runs on the same worker
+	// as everything else here: one model subprocess at a time, however it was
+	// asked for. Nil in tests, and in a server with no database to keep them in.
+	digests *digestStore
+	// Whether a run could happen at all, asked before a fetch starts one rather
+	// than found out five minutes later: a digest nobody asked for has nobody in
+	// front of it to be told that pi is not installed. Swapped out in tests,
+	// which have no CLI and no business needing one.
+	ready func() error
+	// Said once: a machine with no pi on it cannot write a digest, and a fetch
+	// lands every quarter of an hour.
+	saidPi sync.Once
 	// The items whose discussion has been read and is waiting, by feed key. A
 	// gist is a minute of somebody else's time, so they are fired off in a
 	// handful and collected later rather than waited on one at a time — and the
@@ -177,6 +189,7 @@ type summarizer struct {
 func newSummarizer(cache *feedCache) *summarizer {
 	s := &summarizer{
 		ask:     piSummary,
+		ready:   func() error { _, err := piPath(); return err },
 		thread:  fetchDiscussion,
 		story:   fetchHNStory,
 		article: fetchArticle,
@@ -317,7 +330,10 @@ func (s *summarizer) start(ask summaryAsk) error {
 
 // brief is one run, of whichever kind was asked for.
 func (s *summarizer) brief(ctx context.Context, ask summaryAsk) summaryJob {
-	if ask.id != "" {
+	switch {
+	case ask.app == digestKey:
+		return s.briefDigest(ctx, ask)
+	case ask.id != "":
 		return s.briefItem(ctx, ask)
 	}
 	return s.briefApp(ctx, ask)
@@ -873,9 +889,9 @@ func clipRunes(s string, n int) string {
 // the feed server's own working directory would be handing it a repository it
 // has no business in.
 func piSummary(ctx context.Context, prompt string) (string, error) {
-	bin, err := exec.LookPath("pi")
+	bin, err := piPath()
 	if err != nil {
-		return "", errors.New("pi is not on PATH: install the pi CLI to summarize a backlog")
+		return "", err
 	}
 	dir, err := os.MkdirTemp("", "tui-summary-")
 	if err != nil {
@@ -912,6 +928,18 @@ func piSummary(ctx context.Context, prompt string) (string, error) {
 		return "", errors.New("pi returned an empty summary")
 	}
 	return md, nil
+}
+
+// piPath is the CLI, or why there isn't one. Asked before a digest run as well
+// as during one: a run a fetch started has nobody in front of it to be told,
+// so the reason is worth logging once rather than failing every quarter of an
+// hour in silence.
+func piPath() (string, error) {
+	bin, err := exec.LookPath("pi")
+	if err != nil {
+		return "", errors.New("pi is not on PATH: install the pi CLI to summarize a backlog")
+	}
+	return bin, nil
 }
 
 // piTrouble picks what to put in front of the reader when the CLI fails. Its
