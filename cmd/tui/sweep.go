@@ -50,8 +50,11 @@ const (
 	// markChunk is how many ids go into one --mark-read call. Inoreader spends
 	// an HTTP round trip per id, so a few hundred in one subprocess would run
 	// past any sane timeout with no record of how far it got.
-	markChunk   = 25
-	markTimeout = 90 * time.Second
+	markChunk = 25
+	// markTimeout is one --mark-read call's budget. Inoreader's own request
+	// ceiling is two minutes, so leave room for its error to come back instead
+	// of killing the subprocess and learning nothing.
+	markTimeout = 3 * time.Minute
 	// flushEvery is how often read marks that failed to reach their app are
 	// retried, on top of being flushed the moment they are made.
 	flushEvery = 45 * time.Second
@@ -448,17 +451,29 @@ func firstLine(s string) string {
 // already went through is wasted work at best.
 func markInChunks(ctx context.Context, mark markFunc, app string, ids []string) ([]string, error) {
 	var done []string
-	for i := 0; i < len(ids); i += markChunk {
+	size := markChunkOf(app)
+	for i := 0; i < len(ids); i += size {
 		if err := ctx.Err(); err != nil {
 			return done, err
 		}
-		chunk := ids[i:min(i+markChunk, len(ids))]
+		chunk := ids[i:min(i+size, len(ids))]
 		if err := mark(ctx, app, chunk); err != nil {
 			return done, err
 		}
 		done = append(done, chunk...)
 	}
 	return done, nil
+}
+
+// markChunkOf is how many ids one --mark-read call carries for an app.
+// Inoreader goes one at a time: it spends a round trip per id, and the site's
+// latency swings from under a second to over a minute, so a batched chunk
+// times out as a whole and the ids that did land are sent again next round.
+func markChunkOf(app string) int {
+	if app == "inoreader" {
+		return 1
+	}
+	return markChunk
 }
 
 // markFlusher carries read marks from the cache to the apps themselves, so the

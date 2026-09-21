@@ -110,7 +110,7 @@ func ids(n int) []string {
 func TestMarkInChunksSplitsWork(t *testing.T) {
 	m := &fakeMark{}
 	want := ids(markChunk*2 + 3)
-	done, err := markInChunks(context.Background(), m.fn, "inoreader", want)
+	done, err := markInChunks(context.Background(), m.fn, "folo", want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,12 +130,27 @@ func TestMarkInChunksSplitsWork(t *testing.T) {
 // A failure partway reports what already landed, so the retry doesn't repeat it.
 func TestMarkInChunksReportsPartialProgress(t *testing.T) {
 	m := &fakeMark{failFrom: 3}
-	done, err := markInChunks(context.Background(), m.fn, "inoreader", ids(markChunk*4))
+	done, err := markInChunks(context.Background(), m.fn, "folo", ids(markChunk*4))
 	if err == nil {
 		t.Fatal("expected the failure to surface")
 	}
 	if len(done) != markChunk*2 {
 		t.Fatalf("reported %d ids as done, want the %d that landed before the failure", len(done), markChunk*2)
+	}
+}
+
+// Inoreader's are sent one at a time; see markChunkOf.
+func TestMarkInChunksSendsInoreaderOneAtATime(t *testing.T) {
+	m := &fakeMark{}
+	done, err := markInChunks(context.Background(), m.fn, "inoreader", ids(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 3 {
+		t.Fatalf("marked %d of 3", len(done))
+	}
+	if len(m.calls) != 3 {
+		t.Fatalf("made %d calls for 3 ids, want one each", len(m.calls))
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,6 +16,16 @@ import (
 	"golang.org/x/net/html"
 
 	"github.com/genkio/tui/core"
+)
+
+const (
+	// requestTimeout bounds one xajax call. Inoreader's print_articles is
+	// wildly variable: the same page comes back in 3s or in 90s, and a 30s
+	// ceiling turned those slow renders into failed fetches.
+	requestTimeout = 2 * time.Minute
+	// unreadsBudget bounds a fetch including its retry, so the pair still fits
+	// inside the caller's own timeout instead of being killed mid-call.
+	unreadsBudget = 3 * time.Minute
 )
 
 // Client talks to one Inoreader account through the web app's "xajax" RPC
@@ -30,7 +41,7 @@ type Client struct {
 // cookie is the raw browser Cookie header, ua is the User-Agent to send.
 func New(base, cookie, ua string) *Client {
 	return &Client{
-		http:   &http.Client{Timeout: 30 * time.Second},
+		http:   &http.Client{Timeout: requestTimeout},
 		base:   strings.TrimRight(strings.TrimSpace(base), "/"),
 		cookie: sanitizeCookie(cookie),
 		ua:     ua,
@@ -60,6 +71,8 @@ func (c *Client) Unreads(ctx context.Context, unreadOnly bool, max int) ([]Artic
 	if max <= 0 {
 		max = 50
 	}
+	ctx, cancel := context.WithTimeout(ctx, unreadsBudget)
+	defer cancel()
 	out, err := c.freshPage(ctx, unreadOnly, max)
 	if err != nil {
 		return nil, err
@@ -153,6 +166,10 @@ func (c *Client) postXajax(ctx context.Context, fn, body string) (*xjxEnvelope, 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return nil, fmt.Errorf("inoreader %s: timed out waiting for a response; the site is being slow", fn)
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()

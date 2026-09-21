@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const frag1001 = `<div class="article_title mb-2">` +
@@ -288,5 +289,21 @@ func TestSanitizeCookie(t *testing.T) {
 		if got := sanitizeCookie(in); got != want {
 			t.Errorf("sanitizeCookie(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestUnreadsSlowServerSaysTimedOut(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := New(srv.URL, "cookie=1", "test-agent")
+	c.http.Timeout = 50 * time.Millisecond
+	_, err := c.Unreads(context.Background(), true, 50)
+	if err == nil || !strings.Contains(err.Error(), "timed out waiting for a response") {
+		t.Fatalf("Unreads err = %v, want a timed-out message", err)
 	}
 }
