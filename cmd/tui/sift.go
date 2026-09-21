@@ -204,12 +204,18 @@ type sifter struct {
 	interests *interestStore
 	queue     chan struct{}
 	said      sync.Once
-	mu        sync.Mutex
-	job       siftJob
+	// Where a run that failed says so, for the banner: nearly every sift is one
+	// a fetch asked for, with no button being watched and nobody to toast.
+	mishaps *mishapLog
+	mu      sync.Mutex
+	job     siftJob
 }
 
-func newSifter(cache *feedCache, interests *interestStore) *sifter {
-	return &sifter{judge: typesafeJudge, cache: cache, interests: interests, queue: make(chan struct{}, 1)}
+func newSifter(cache *feedCache, interests *interestStore, mishaps *mishapLog) *sifter {
+	return &sifter{
+		judge: typesafeJudge, cache: cache, interests: interests,
+		mishaps: mishaps, queue: make(chan struct{}, 1),
+	}
 }
 
 // serve is the one worker, taking a run at a time until the server stops.
@@ -332,6 +338,9 @@ feeding:
 	switch {
 	case firstErr != nil:
 		s.job.State, s.job.Err = "failed", firstErr.Error()
+		// ...and on the banner, where a fetch's own sift has its only reader. A
+		// shutdown below is nobody's trouble and says nothing.
+		s.mishaps.note("sift", s.job.Err)
 	case parent.Err() != nil:
 		s.job.State, s.job.Err = "failed", "the server stopped before the sift finished"
 	default:

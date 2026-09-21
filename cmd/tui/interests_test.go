@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -75,9 +76,10 @@ func TestSiftAsksTheListAsOneChoice(t *testing.T) {
 func TestSubjectIsAskedOfOneItemAtATime(t *testing.T) {
 	c := newTestCache(t)
 	c.upsert([]core.Item{item("x", "1", "one"), item("x", "2", "two")}, time.Now())
-	var alone int
+	// Counted across the run's workers, which judge in parallel.
+	var alone atomic.Int32
 	s := testSifter(t, c, func(_ context.Context, it core.Item, interests []string) (siftVerdict, error) {
-		alone++
+		alone.Add(1)
 		v := siftVerdict{Worth: 0.9, Rank: 2}
 		if it.ID == "1" {
 			v.Interest, v.InterestFor = 0.97, interests[0]
@@ -91,8 +93,8 @@ func TestSubjectIsAskedOfOneItemAtATime(t *testing.T) {
 		t.Fatal(err)
 	}
 	settledSift(t, s)
-	if alone != 2 {
-		t.Fatalf("asked %d times, want one per item", alone)
+	if n := alone.Load(); n != 2 {
+		t.Fatalf("asked %d times, want one per item", n)
 	}
 	if c.matchedCount() != 1 {
 		t.Fatalf("matched %d, want the one the subject caught", c.matchedCount())

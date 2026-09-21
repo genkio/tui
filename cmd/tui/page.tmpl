@@ -87,6 +87,11 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
    by cropping themselves rather than pushing them off */
 .sub{flex:1;min-width:0;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .warn{background:rgba(214,69,69,.12);border:1px solid rgba(214,69,69,.5);color:var(--fg);border-radius:10px;padding:10px 12px;margin:-4px 0 12px;font-size:14px}
+/* the same red a stale session wears, with room for the × that puts it away */
+.mishap{display:flex;align-items:flex-start;gap:10px}
+.msay{flex:1;min-width:0;overflow-wrap:anywhere}
+.mishapx{background:none;border:0;color:var(--fg);opacity:.55;font-size:18px;line-height:1.1;padding:0 2px;cursor:pointer}
+.mishapx:hover{opacity:1}
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:14px;
   padding:14px 16px;margin-bottom:12px;
@@ -523,7 +528,8 @@ video.ffs{object-fit:cover !important}
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{.SortTitle}}"><span class="sarrow">{{.SortMark}}</span>{{.SortWord}}</a>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
-{{end}}{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
+{{end}}<div class="warn mishap hid" id="mishap" data-id="">⚠ <span class="msay" id="mishapsays"></span><button class="mishapx" id="mishapx" type="button" title="dismiss until the next one" aria-label="dismiss">×</button></div>
+{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
@@ -2693,6 +2699,50 @@ document.addEventListener('click', function(e){
     if (w._ytPlayer && w._ytPlayer.pauseVideo) w._ytPlayer.pauseVideo();
   });
 });
+
+// The banner under the header: the last sift or summary that failed where
+// nobody could see it. Both of them run on a fetch every quarter of an hour, so
+// a key that has expired or a CLI that has stopped answering otherwise looks
+// like a feature that simply stopped doing anything — the buttons' own toasts
+// only reach whoever is watching one at the time.
+//
+// Filled by the page rather than the server, and never rendered visible: which
+// of these has been dismissed is the browser's to remember, and a server that
+// rendered it would flash the banner on every load before the answer was known.
+// It comes back for the next one because the dismissal is against that mishap's
+// own name, not against the banner.
+(function(){
+  var bar = document.getElementById('mishap');
+  var says = document.getElementById('mishapsays');
+  var x = document.getElementById('mishapx');
+  if (!bar || !says || !x) return;
+  var KEY = 'tui:mishap';
+  function gone(){ try { return localStorage.getItem(KEY) || ''; } catch(e){ return ''; } }
+  function put(id){ try { localStorage.setItem(KEY, id); } catch(e){} }
+
+  function show(j){
+    var id = (j && j.mishap) || '';
+    if (!id || id === gone()){ bar.classList.add('hid'); return; }
+    bar.dataset.id = id;
+    says.textContent = j.says || 'the last run failed';
+    bar.classList.remove('hid');
+  }
+  x.addEventListener('click', function(){
+    put(bar.dataset.id || '');
+    bar.classList.add('hid');
+  });
+
+  // Once on load and every minute after, which is fast enough for a thing that
+  // happens on a quarter-hourly fetch and cheap enough to leave running. A
+  // hidden tab asks nothing and catches up when it comes back.
+  function ask(){
+    if (document.hidden) return;
+    fetch('/status').then(function(r){ return r.json(); }).then(show).catch(function(){});
+  }
+  ask();
+  setInterval(ask, 60000);
+  document.addEventListener('visibilitychange', ask);
+})();
 </script>
 </div></body></html>
 {{define "card"}}<article class="card{{if .Read}} read{{end}}{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .RankKey}} data-rank="{{.RankKey}}"{{end}}{{if .Gisted}} data-gistready="1"{{end}}{{if .YouTube}} data-yt="{{.YouTube}}"{{end}}{{if .Matched}} data-mine="mine"{{end}}{{if .Read}} data-history="1"{{end}}{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}{{if .Worth}}<span class="kw" title="how likely the sift thought you would want this, from 0 to 1">{{.Worth}}</span>{{end}}{{if .MatchedFor}}<span class="kw" title="the subject on your list this answers">{{.MatchedFor}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

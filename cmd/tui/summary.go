@@ -182,6 +182,10 @@ type summarizer struct {
 	// (digestFloor). A field rather than the constant so tests can ask for a
 	// digest of three items without building a hundred.
 	floor int
+	// Where a run that failed says so, for the banner. Every kind of briefing
+	// ends up here, since a failure is a failure of the same model and CLI
+	// whichever of them asked.
+	mishaps *mishapLog
 	// The items whose discussion has been read and is waiting, by feed key. A
 	// gist is a minute of somebody else's time, so they are fired off in a
 	// handful and collected later rather than waited on one at a time — and the
@@ -258,6 +262,13 @@ func (s *summarizer) serve(ctx context.Context) {
 		case ask := <-s.queue:
 			job := s.brief(ctx, ask)
 			s.put(ask.key(), job)
+			// One seam for every kind of briefing there is: a source's, an item's
+			// discussion, and the digests a fetch writes by itself, which have no
+			// reader at all to tell. A run cut short by the server stopping is not
+			// trouble and says nothing.
+			if job.State == "failed" && ctx.Err() == nil {
+				s.mishaps.note("summary", job.Err)
+			}
 			if ask.id != "" {
 				s.settle(ask, job)
 			}

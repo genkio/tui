@@ -95,7 +95,11 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	if err != nil {
 		return err
 	}
+	// Where the sift and the summaries leave what went wrong, since both of them
+	// nearly always run on a fetch with no page open to be told.
+	mishaps := &mishapLog{}
 	sum := newSummarizer(cache)
+	sum.mishaps = mishaps
 	// An item's discussion can be asked for from anywhere its card is drawn, and
 	// the saved list outlives the backlog, so a briefing looks an item up the same
 	// way its own page does rather than in the cache alone.
@@ -111,7 +115,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	if err != nil {
 		return err
 	}
-	sift := newSifter(cache, interests)
+	sift := newSifter(cache, interests, mishaps)
 	flusher := newMarkFlusher(root, cache)
 	ylen := newYTLens()
 	sweep := newSweeper(root, cache, flusher, block, drain, every)
@@ -206,10 +210,11 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	})
 	// How the page knows when a fetch it asked for has finished: a sweep can
 	// take minutes, so the alternative is guessing at a delay and reloading into
-	// the same numbers.
+	// the same numbers. The last mishap rides along on it rather than on a
+	// second endpoint of its own — a page that is open should hear that the
+	// reading is failing whether or not anyone is watching a button.
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"fetching":%t,"unread":%d}`, sweep.sweeping(), cache.unreadCount())
+		showStatus(w, sweep, cache, mishaps)
 	})
 	mux.HandleFunc("/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

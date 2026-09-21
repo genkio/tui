@@ -20,7 +20,7 @@ import (
 func testSifter(t *testing.T, cache *feedCache, judge func(context.Context, core.Item, []string) (siftVerdict, error)) *sifter {
 	t.Helper()
 	t.Setenv(typesafeKey, "test-key")
-	s := newSifter(cache, &interestStore{})
+	s := newSifter(cache, &interestStore{}, &mishapLog{})
 	s.judge = judge
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -196,6 +196,12 @@ func TestSiftStopsAtTheFirstFailure(t *testing.T) {
 	}
 	if got := c.unjudgedCount(); got != 1 {
 		t.Fatalf("unjudged is %d: a failed run must leave the item for the next one", got)
+	}
+	// ...and on the banner, since nearly every sift is one a fetch asked for
+	// with no button being watched.
+	m, ok := s.mishaps.latest()
+	if !ok || m.Kind != "sift" || !strings.Contains(m.Msg, "401") {
+		t.Errorf("mishap = %+v, want the sift's own failure", m)
 	}
 }
 

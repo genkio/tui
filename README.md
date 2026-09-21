@@ -659,6 +659,21 @@ Nothing else changes. The items stay unread and in the feed until a **next**
 clears them, the chips and counts are what they were, and the sift, the gist
 chip and the sparkles all carry on as before.
 
+### When the reading fails
+
+The sift and the summaries both talk to something that can refuse: an API key
+that has expired, a model that is overloaded, a `pi` that is no longer on the
+PATH. Both of them nearly always run on a fetch, every quarter of an hour, with
+nobody in front of them — so a refusal used to reach the log and nowhere else,
+and the feature simply looked like it had stopped doing anything.
+
+The last one now says so in a red banner under the header, in the words
+whatever refused used. The **×** puts it away, and the next failure brings it
+back: the dismissal is against that one failure, not against the banner. A page
+that is open picks up a new one within a minute without being reloaded, and a
+server restart clears the slate — a reason from before it is about a server
+that is no longer running.
+
 ### Summarizing a discussion
 
 A Hacker News card carries half its item. "Hacker News: Best" is a stub — the
