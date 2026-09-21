@@ -16,15 +16,15 @@ user is watching:
 
 ```sh
 herdr pane send-keys <pane-id> ctrl+c
-herdr pane run <pane-id> 'make'
-herdr pane wait-output <pane-id> --match 'bilibili-tui' --timeout 180000   # the last thing make builds
-herdr pane run <pane-id> './tui serve --sync-dir ~/box/tui'
+herdr pane run <pane-id> 'make serve'
+herdr pane wait-output <pane-id> --match 'listening on' --timeout 180000
 herdr pane read <pane-id> --source recent-unwrapped --lines 20
 ```
 
-`make` builds `./tui` plus every plugin binary. The `--sync-dir` flag is what
-this machine's server always runs with; check the pane's scrollback if it looks
-different.
+`make serve` builds `./tui` plus every plugin binary and runs the server the way
+this machine runs it, `--sync-dir` and all. Another sync dir is
+`make serve SYNC_DIR=...`; check the pane's scrollback if what it was running
+looks different.
 
 Do this whenever a change needs to be seen in the running web UI. No need to ask.
 

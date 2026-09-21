@@ -2,7 +2,11 @@ APPS := x inoreader slack folo reddit douban bilibili
 CODESIGN_ID := tui-codesign
 
 .DEFAULT_GOAL := build
-.PHONY: build run launcher apps firewall signing-cert clean help $(APPS)
+.PHONY: build run serve launcher apps firewall signing-cert clean help $(APPS)
+
+# Where this machine's server keeps the copy it syncs after every fetch. Another
+# host with another path passes its own: make serve SYNC_DIR=...
+SYNC_DIR := ~/box/tui
 
 build: launcher apps ## Build tui and every standalone app binary
 
@@ -45,6 +49,11 @@ $(APPS): ## Build one TUI (e.g. make x)
 
 run: launcher ## Open the terminal All client
 	./tui
+
+# Everything, not just the launcher: serve shells out to the app binaries on
+# every fetch, so a rebuild that left them behind would serve the old ones.
+serve: build ## Rebuild and run the web server the way this machine runs it
+	./tui serve --sync-dir $(SYNC_DIR)
 
 clean: ## Remove built binaries
 	rm -f tui
