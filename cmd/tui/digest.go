@@ -411,6 +411,15 @@ func startDigest(w http.ResponseWriter, r *http.Request, sum *summarizer, cache 
 			http.Error(w, "that summary is no longer here", http.StatusNotFound)
 			return
 		}
+		// A run is already going — a fetch's own, most likely, since they land
+		// every quarter of an hour and take a minute or two. start would answer
+		// that tap by doing nothing at all (one job per key, and the automatic
+		// runs share this one), which reads as a retry that quietly never
+		// happened. Say so instead.
+		if j, ok := sum.job(digestKey); ok && j.State == "running" {
+			http.Error(w, "a summary is already being written — try again when it lands", http.StatusConflict)
+			return
+		}
 		lang := summaryLang(r.FormValue("lang"))
 		sum.digests.setLanguage(lang)
 		if err := sum.start(summaryAsk{app: digestKey, lang: lang, redo: strconv.FormatInt(id, 10)}); err != nil {

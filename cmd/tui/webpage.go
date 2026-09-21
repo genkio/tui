@@ -367,6 +367,12 @@ type digestData struct {
 	When    string
 	Waiting int
 	HTML    template.HTML
+	// The stamp behind When, for the page to watch: a retry is finished when the
+	// digest on screen carries a different one. Telling that from a fetch's own
+	// run, which lands behind this one and changes nothing here, is the whole of
+	// what the page needs to know while it waits.
+	Stamp   string
+	Running bool // a run is going: this digest may be about to be rewritten
 }
 
 type cardData struct {

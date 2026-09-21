@@ -635,7 +635,10 @@ There are exactly two things to do to one:
   over.
 - **retry** writes the same batch again, in its place in the pile. "next" would
   move on to items this summary never mentioned; a run the model made a mess of
-  wants this one.
+  wants this one. The summary you are reading stays on screen while it is
+  written, and the page comes back by itself with the new one. A fetch's own run
+  shares the same worker, so a retry asked for while one is going is refused
+  rather than quietly dropped: tap it again when that one lands.
 
 The language is **summarize in**, which is why that setting lives on the server:
 these runs happen on a fetch, with no page open to ask. Changing it anywhere

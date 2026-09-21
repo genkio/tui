@@ -569,11 +569,16 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// nothing here counts it or windows it.
 	var digest *digestData
 	digesting := sel.Kind == "digest"
+	running := false
+	if j, ok := sum.job(digestKey); ok && j.State == "running" {
+		running = true
+	}
 	if digesting {
 		items = nil
 		if d, ok := sum.digests.waiting(); ok {
 			digest = &digestData{
 				ID: d.ID, Count: d.Count, Waiting: tally.digests, HTML: template.HTML(d.HTML),
+				Stamp: d.Generated, Running: running,
 			}
 			if at, err := time.Parse(time.RFC3339, d.Generated); err == nil {
 				digest.When = humanAgo(at)
@@ -613,10 +618,6 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	rendered.put(items)
 	rendered.put(behind)
 
-	running := false
-	if j, ok := sum.job(digestKey); ok && j.State == "running" {
-		running = true
-	}
 	writePage(w, tmpl, pageInput{
 		items: items, behind: behind, total: total, apps: apps, failed: failed, now: now,
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,

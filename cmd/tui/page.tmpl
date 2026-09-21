@@ -529,7 +529,7 @@ video.ffs{object-fit:cover !important}
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Every fetch is sifted as it lands, and what the model thinks you can skip shows up here, to be read anyway or cleared in one go.{{end}}</div>
-{{end}}{{else if .DigestView}}{{with .Digest}}<div class="summary digest" id="digest" data-id="{{.ID}}"><div class="smeta">{{.Count}} unread items{{if .When}}, summarized {{.When}}{{end}}{{if gt .Waiting 1}}<span class="sold" title="summaries waiting behind this one">{{.Waiting}} waiting</span>{{end}}<button class="rest" id="digretry" type="button" title="write this summary again over the same items">retry</button></div><div class="body">{{.HTML}}</div><div class="sfoot"><button class="rest" id="dignext" type="button" title="mark every item this read as read, and show the next summary">next</button></div></div>
+{{end}}{{else if .DigestView}}{{with .Digest}}<div class="summary digest" id="digest" data-id="{{.ID}}" data-gen="{{.Stamp}}" data-running="{{if .Running}}1{{else}}0{{end}}"><div class="smeta">{{.Count}} unread items{{if .When}}, summarized {{.When}}{{end}}{{if gt .Waiting 1}}<span class="sold" title="summaries waiting behind this one">{{.Waiting}} waiting</span>{{end}}<button class="rest" id="digretry" type="button" title="write this summary again over the same items">retry</button></div><div class="body">{{.HTML}}</div><div class="sfoot"><button class="rest" id="dignext" type="button" title="mark every item this read as read, and show the next summary">next</button></div></div>
 {{else}}<div class="note" id="dignote" data-running="{{if .DigestRunning}}1{{else}}0{{end}}">{{if .DigestRunning}}Reading the backlog — this takes a minute or two.{{else}}No summary waiting. Every fetch summarizes the next couple of hundred unread items and leaves the briefing here.{{end}}</div>
 {{end}}{{else if .ItemView}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
@@ -2198,26 +2198,51 @@ if(siftBtn) (function(){
 
   function ask(){ return fetch('/digest').then(function(r){ return r.json(); }); }
 
+  function stop(){ if (poll) { clearInterval(poll); poll = null; } }
+
   // A run is going: the page it lands on is this one, so come back for it
   // rather than leaving a stale digest on screen.
+  //
+  // With a digest in front of you the run worth reloading for is a rewrite of
+  // that one, and the stamp it carries is what says so: a fetch's own run lands
+  // behind this digest and leaves it exactly as it was, so the state alone
+  // cannot tell the two apart and would reload the page for somebody else's
+  // work. A run that failed says why instead of reloading into the same
+  // summary with nothing to show for the tap.
   function watch(){
     if (poll) return;
+    var gen = panel ? panel.dataset.gen : '';
     poll = setInterval(function(){
       ask().then(function(j){
-        if (j && j.state === 'running') return;
-        clearInterval(poll); poll = null;
-        location.reload();
+        if (!j) return;
+        if (panel && j.generated && j.generated !== gen) { stop(); location.reload(); return; }
+        if (j.state === 'running') return;
+        stop();
+        if (!panel) { location.reload(); return; }
+        // The run was somebody else's — a fetch's, which has filed its digest
+        // behind this one and left this one alone. Take the note down and hand
+        // the controls back rather than reloading a page that has not changed.
+        working(false); busy(false, 'next');
+        if (j.state === 'failed') toast((j.error || '').trim() || 'the summary could not be written');
       }).catch(function(){});
     }, 3000);
   }
 
-  function waiting(){
+  // The run, said on the panel itself. The old summary stays underneath rather
+  // than being wiped: it is a minute or two of waiting, it is still the summary
+  // of those items until the new one lands, and a blank panel is the one thing
+  // that cannot say whether anything is happening at all.
+  function working(on, say){
     if (!panel) return;
-    panel.textContent = '';
-    var n = document.createElement('div');
-    n.className = 'note';
-    n.textContent = 'Reading the backlog — this takes a minute or two.';
-    panel.appendChild(n);
+    var n = document.getElementById('digwait');
+    if (!on) { if (n) n.remove(); return; }
+    if (!n) {
+      n = document.createElement('div');
+      n.className = 'note';
+      n.id = 'digwait';
+      panel.insertBefore(n, panel.firstChild);
+    }
+    n.textContent = say || 'A summary is being written — a minute or two.';
   }
 
   function send(what){
@@ -2249,20 +2274,32 @@ if(siftBtn) (function(){
   if (redo) redo.addEventListener('click', function(){
     busy(true);
     send('retry')
-      // The cover comes down on the panel's own "reading the backlog" note,
-      // which takes over as the indicator: the run is minutes long, and the
-      // page is yours again while it goes.
-      .then(function(){ document.getElementById('loading').classList.add('hid'); waiting(); watch(); })
+      // The cover comes down on the panel's own note, which takes over as the
+      // indicator: the run is minutes long, and the page is yours again while
+      // it goes.
+      .then(function(){
+        document.getElementById('loading').classList.add('hid');
+        working(true, 'Writing this summary again — a minute or two. What is below is the old one until it lands.');
+        watch();
+      })
       .catch(function(err){ busy(false); toast((err && err.message || '').trim() || 'could not write that summary again'); });
   });
 
   // With nothing waiting, a run the last fetch started is what this page is
-  // waiting for, so watch for it. With a digest on screen there is nothing to
-  // wait for: a run finishing elsewhere adds to the pile behind this one, and
-  // reloading the page out from under someone reading it would be the rudest
-  // possible way to say so.
+  // waiting for, so watch for it.
+  //
+  // With a digest on screen a run is worth saying so too: a retry survives the
+  // page it was tapped on, and coming back to the same summary with nothing
+  // moving is exactly the state that reads as a tap that went nowhere. Only
+  // retry goes dead — it would be refused while a run is going — since next is
+  // how the pile is read, and a fetch's own run is no reason to stop reading.
   if (note && note.dataset.running === '1') watch();
   else if (note) ask().then(function(j){ if (j && j.state === 'running') watch(); }).catch(function(){});
+  else if (panel && panel.dataset.running === '1') {
+    if (redo) redo.disabled = true;
+    working(true);
+    watch();
+  }
 })();
 
 // Gist: the discussion under one Hacker News or reddit card. A story's item is

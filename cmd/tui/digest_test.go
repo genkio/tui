@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,6 +194,42 @@ func TestDigestRetryRewritesTheSameBatch(t *testing.T) {
 	}
 }
 
+// A retry while a run is already going is refused rather than swallowed. The
+// automatic runs share this job, one lands every quarter of an hour, and start
+// answers a second ask for the same job by doing nothing at all — which on
+// screen is a tap that went nowhere and a summary that never changed.
+func TestDigestRetryIsRefusedWhileARunIsGoing(t *testing.T) {
+	cache := newTestCache(t)
+	backlogOf(cache, 2)
+	var runs atomic.Int32
+	inRun, hold := make(chan struct{}, 1), make(chan struct{})
+	sum := testDigester(t, cache, func(context.Context, string) (string, error) {
+		if runs.Add(1) > 1 {
+			inRun <- struct{}{}
+			<-hold
+		}
+		return "- a run", nil
+	})
+	sum.digestAuto()
+	settledDigest(t, sum)
+	d, _ := sum.digests.waiting()
+
+	// A fetch lands with something new in it and starts a run of its own.
+	cache.upsert([]core.Item{{App: "reddit", ID: "late", Title: "arrived after"}}, time.Now())
+	sum.digestAuto()
+	<-inRun
+
+	rec := digestPost(t, sum, cache, "do=retry&id="+strconv.FormatInt(d.ID, 10))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("retry during a run = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	close(hold)
+	settledDigest(t, sum)
+	if runs.Load() != 2 {
+		t.Errorf("the model ran %d times, want the fetch's run and no retry behind it", runs.Load())
+	}
+}
+
 // The chip is the pile's size, and the page it opens is the digest itself
 // rather than cards.
 func TestDigestChipAndView(t *testing.T) {
@@ -245,11 +282,16 @@ func TestDigestPageRendersProseAndItsTwoControls(t *testing.T) {
 		apps: []string{"reddit"}, tally: &tally, now: time.Now(), block: &blocker{},
 		sel:        feedSel{Kind: "digest", Key: "digest"},
 		digestView: true,
-		digest:     &digestData{ID: 7, Count: 200, When: "3m ago", Waiting: 1, HTML: "<p>the day in one page</p>"},
+		digest: &digestData{ID: 7, Count: 200, When: "3m ago", Waiting: 1, HTML: "<p>the day in one page</p>",
+			Stamp: "2026-09-21T00:18:50Z", Running: true},
 	}
 	page := renderInput(t, in)
+	// The stamp and the run are what a retry is watched by: the page comes back
+	// when this digest carries a different one, rather than when any run at all
+	// finishes.
 	for _, want := range []string{`id="digest"`, `data-id="7"`, "200 unread items", "summarized 3m ago",
-		`id="dignext"`, `id="digretry"`, "the day in one page"} {
+		`id="dignext"`, `id="digretry"`, "the day in one page",
+		`data-gen="2026-09-21T00:18:50Z"`, `data-running="1"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page is missing %q", want)
 		}
