@@ -27,6 +27,7 @@ func testDigester(t *testing.T, cache *feedCache, ask func(context.Context, stri
 	}
 	sum.digests = store
 	sum.ready = nil // no CLI to look for: ask is the stub above
+	sum.floor = 1   // any backlog at all, so a test can be three items long
 	return sum
 }
 
@@ -113,6 +114,35 @@ func TestDigestReadsOneCappedBatchPerFetch(t *testing.T) {
 	second := <-prompts
 	if strings.Contains(second, "post 0\n") {
 		t.Error("the second batch read an item the first one had already covered")
+	}
+}
+
+// A fetch's own handful is not a briefing. Sweeps land every quarter of an
+// hour, and one digest per sweep is a pile of one-line summaries to tap
+// through — more summaries than items on a quiet day. The backlog has to be
+// worth reading about before a run starts, and what is under the floor waits in
+// the feed for the run that does.
+func TestDigestWaitsForABacklogWorthReading(t *testing.T) {
+	cache := newTestCache(t)
+	backlogOf(cache, digestFloor-1)
+	runs := 0
+	sum := testDigester(t, cache, func(context.Context, string) (string, error) {
+		runs++
+		return "- a run", nil
+	})
+	sum.floor = digestFloor
+
+	sum.digestAuto()
+	if n := sum.digests.waitingCount(); n != 0 || runs != 0 {
+		t.Fatalf("waiting = %d after %d runs, want a shallow backlog left alone", n, runs)
+	}
+
+	// One more item is the floor, and the whole backlog goes in the digest —
+	// what was under it was never skipped, only waiting.
+	cache.upsert([]core.Item{{App: "reddit", ID: "tipping", Title: "the hundredth"}}, time.Now())
+	sum.digestAuto()
+	if j := settledDigest(t, sum); j.State != "done" || j.Count != digestFloor {
+		t.Fatalf("job = %+v, want one run over the whole %d", j, digestFloor)
 	}
 }
 

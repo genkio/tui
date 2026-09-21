@@ -614,11 +614,17 @@ you were never told about.
 ### The summary chip: briefings nobody asked for
 
 The sparkles are for when you want a briefing. The **summary** chip is what
-happens without you: every fetch, right behind the sift, hands the next
-**200 unread items** to the same model and leaves what came back on the chip.
-A backlog of fifteen hundred is eight fetches' worth of summaries — a couple of
-hours of quarter-hourly sweeps — and once it has caught up, a fetch's own
-handful is one short summary rather than a pile to work through.
+happens without you: a fetch that finds **100 unread items** nothing has
+summarized yet hands the next **200** of them to the same model, right behind
+the sift, and leaves what came back on the chip. A backlog of fifteen hundred is
+eight fetches' worth of summaries — a couple of hours of quarter-hourly sweeps.
+
+The hundred is the floor because a fetch's own handful is not a briefing: a
+sweep lands every quarter of an hour, and a summary per sweep is a pile of
+one-liners to tap through, more summaries than items on a quiet day. Once the
+backlog is caught up the chip stays where it is for a while and then has a
+proper day's reading in it. Nothing waits in the dark either way — what is under
+the floor is unread, in the feed, and first in line when a run does happen.
 
 Each run takes the **oldest** unread items no summary has read yet, so the pile
 works through the backlog from the end that would otherwise never be reached,

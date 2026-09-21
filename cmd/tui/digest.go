@@ -40,6 +40,13 @@ const (
 	// added together is the widest read there is, and the run most likely to
 	// outrun the model. What is left over is the next fetch's digest.
 	digestCap = summaryAllCap
+	// ...and how shallow it can be before a fetch leaves it alone. A sweep lands
+	// every quarter of an hour and brings a handful with it, and a digest per
+	// handful is a pile of one-line briefings to tap through rather than a
+	// backlog described: the summaries outnumber the items they cover. Nothing
+	// is lost by waiting — what is under the floor is still unread, still in the
+	// feed, and first in line when the next run does happen.
+	digestFloor = 100
 )
 
 // digestItem is one item a digest read, as the pair that names an item
@@ -252,8 +259,9 @@ func (s *digestStore) setLanguage(lang string) {
 // digestAuto is the digest a fetch asks for, which is every digest there is
 // until you tap retry: the sweeper calls it at the end of a sweep, behind the
 // sift, so what has landed is described before anyone looks at it. A run
-// already going, or a backlog every digest has already read, is the ordinary
-// answer here and not worth a word.
+// already going, a backlog every digest has already read, or one too shallow to
+// be worth a briefing of its own is the ordinary answer here and not worth a
+// word.
 func (s *summarizer) digestAuto() {
 	if s.digests == nil || s.cache == nil {
 		return
@@ -264,7 +272,7 @@ func (s *summarizer) digestAuto() {
 			return
 		}
 	}
-	if len(s.digestPick(time.Now())) == 0 {
+	if len(s.digestPick(time.Now())) < s.floor {
 		return
 	}
 	if err := s.start(summaryAsk{app: digestKey, lang: s.digests.language()}); err != nil {

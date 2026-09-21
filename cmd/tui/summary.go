@@ -178,6 +178,10 @@ type summarizer struct {
 	// Said once: a machine with no pi on it cannot write a digest, and a fetch
 	// lands every quarter of an hour.
 	saidPi sync.Once
+	// How deep the unread backlog has to be before a fetch writes one of its own
+	// (digestFloor). A field rather than the constant so tests can ask for a
+	// digest of three items without building a hundred.
+	floor int
 	// The items whose discussion has been read and is waiting, by feed key. A
 	// gist is a minute of somebody else's time, so they are fired off in a
 	// handful and collected later rather than waited on one at a time — and the
@@ -190,6 +194,7 @@ func newSummarizer(cache *feedCache) *summarizer {
 	s := &summarizer{
 		ask:     piSummary,
 		ready:   func() error { _, err := piPath(); return err },
+		floor:   digestFloor,
 		thread:  fetchDiscussion,
 		story:   fetchHNStory,
 		article: fetchArticle,
