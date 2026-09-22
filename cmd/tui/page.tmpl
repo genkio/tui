@@ -58,6 +58,13 @@
 </script>
 <title>{{.HeadTitle}}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='12'>🗞️</text></svg>">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="tui">
+<meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -385,6 +392,9 @@ button.viewlink{background:none;border:0;border-bottom:1px dotted var(--line);pa
 .note{padding:16px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:15px}
 .note a{color:var(--accent);font-weight:600;text-decoration:none}
 .note.offer{margin-top:10px}
+/* the one line that says whether the saved list would survive the server going
+   away, which is not a thing anyone can check by looking at a page that works */
+.offkept{border:0;padding:4px 2px 0;font-size:13px;text-align:center}
 /* The briefing over a source's backlog, in place of the cards it is a briefing
    of: one card-shaped block, since it is one piece of prose about the whole
    pick rather than a row per item. Hiding the feed rather than replacing it
@@ -529,6 +539,8 @@ video.ffs{object-fit:cover !important}
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
 {{end}}<div class="warn mishap hid" id="mishap" data-id="">⚠ <span class="msay" id="mishapsays"></span><button class="mishapx" id="mishapx" type="button" title="dismiss until the next one" aria-label="dismiss">×</button></div>
+<div class="warn hid" id="offwarn"></div>
+<div class="warn hid" id="offline">⚠ {{if .SavedView}}Offline — this is the saved list as it stood when the server was last in reach, and nothing here can be saved, tagged or played until it is again.{{else}}Offline — the server is not in reach. The saved list is the part that reads without it.{{end}}</div>
 {{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
 {{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
@@ -543,7 +555,8 @@ video.ffs{object-fit:cover !important}
 {{end}}</div></div>
 <div class="note hid" id="deckEnd">Deck's empty — that's every card.</div>
 {{else}}{{range .Cards}}{{template "card" .}}
-{{end}}{{end}}{{if and .Swipe .Cards}}<div id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5L8 12L15 19"/></svg></button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5L16 12L9 19"/></svg></button></div>
+{{end}}{{end}}{{if .SavedView}}<div class="note offkept hid" id="offkept"></div>
+{{end}}{{if and .Swipe .Cards}}<div id="deckNav" class="deckctl"><button id="deckPrev" class="deckbtn" type="button" title="mark unread and show the previous item" aria-label="previous item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5L8 12L15 19"/></svg></button><button id="deckNext" class="deckbtn" type="button" title="mark read and show the next item" aria-label="next item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5L16 12L9 19"/></svg></button></div>
 {{end}}{{if and .Cards .BulkMark}}<button id="markAll" class="markall{{if .Swipe}} fab{{end}}" type="button" data-total="{{.Total}}"{{if .Swipe}} title="mark all {{.Total}} items in this feed read"{{end}}>{{if .Swipe}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5L10 17.5L19 6.5"/></svg>{{else}}✓ mark all {{.Total}} read{{end}}</button>
 {{end}}{{if .HasApps}}<dialog id="settingsdlg" class="kwdlg settingsdlg"><form method="dialog"><h2>settings</h2><label class="settingrow"><span>place deck card controls on left</span><input id="controlsLeft" type="checkbox"></label><label class="settingrow"><span>start every player muted</span><input id="muteDefault" type="checkbox"></label><div class="settingrow"><span>summarize in</span><span class="radios" id="sumLang"><label><input type="radio" name="sumlang" value="en"><span>English</span></label><label><input type="radio" name="sumlang" value="zh"><span>中文</span></label></span></div><div class="settingcol"><span>what you are following right now</span><textarea id="intext" rows="6" placeholder="one subject per line, in your own words&#10;the Fed&#39;s rate path&#10;anything about Zig" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.Interests}}</textarea><div class="settingfoot"><button id="insave" type="button">save</button></div></div>{{if .Updated}}<div class="settingnote">last fetch: <span id="upd">{{if .Fetching}}happening now{{else}}{{.Updated}}{{end}}</span>{{if .Capped}} · a service's backlog runs deeper than the sweep reached, so the count is short of the truth{{end}}</div>{{end}}<menu><button value="done">done</button></menu></form></dialog>
 {{end}}{{if .BlockedView}}<dialog id="kwdlg" class="kwdlg"><form method="dialog"><h2>blocked keywords</h2><p class="kwhelp">One per line. A post whose <b>title</b> carries one of these — anywhere in it, upper or lower case — is kept out of the feed and filed here instead. A post with no title of its own (an x post) is never blocked. Saving also clears whatever the words catch in the backlog you already have.</p><textarea id="kwtext" rows="10" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off">{{.KeywordText}}</textarea><menu><button value="cancel">cancel</button><button id="kwsave" value="save">save</button></menu></form></dialog>
@@ -2732,16 +2745,136 @@ document.addEventListener('click', function(e){
     bar.classList.add('hid');
   });
 
+  // The same poll is what says whether the server is in reach at all, which is
+  // the other banner here. navigator.onLine can't answer that: a phone on a
+  // train has a connection, and what it doesn't have is the machine at home. A
+  // page served out of the worker's cache (see below) looks exactly like a
+  // fresh one until this fails.
+  var off = document.getElementById('offline');
+  function reached(ok){ if (off) off.classList.toggle('hid', ok); }
+
   // Once on load and every minute after, which is fast enough for a thing that
   // happens on a quarter-hourly fetch and cheap enough to leave running. A
   // hidden tab asks nothing and catches up when it comes back.
   function ask(){
     if (document.hidden) return;
-    fetch('/status').then(function(r){ return r.json(); }).then(show).catch(function(){});
+    fetch('/status', {cache: 'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){ reached(true); show(j); })
+      .catch(function(){ reached(false); });
   }
   ask();
   setInterval(ask, 60000);
   document.addEventListener('visibilitychange', ask);
+  // A network that comes back is worth asking about at once rather than in up
+  // to a minute; one that goes away says nothing about the server, so it only
+  // brings the next ask forward.
+  window.addEventListener('online', ask);
+  window.addEventListener('offline', ask);
+})();
+
+// The installed page, and the saved list on a train. A worker (sw.js) keeps the
+// last saved page the server handed over, so opening the app with nothing to
+// reach still opens on what you kept. Everything else here — the feed, a sift,
+// a briefing — is the server's, and offline it says so rather than pretending.
+//
+// The caching policy lives in the worker; this is the half of it that only the
+// page can do: telling the worker which items and stills belong to the list it
+// is looking at, since a card loads its images on a tap and a worker watching
+// traffic would therefore never see them.
+//
+// And saying whether any of it is actually working, because a page that is
+// working online looks exactly like one that will fail the moment it isn't.
+// There are ordinary reasons for a worker not to run — a browser refuses one
+// over plain http, a private tab has none, a browser set to block website data
+// has none, and a freshly registered one is not in charge until the next load
+// — and each of them is worth a sentence on the page rather than a silent
+// nothing followed by a connection-lost screen on a train.
+(function(){
+  var warn = document.getElementById('offwarn');
+  var note = document.getElementById('offkept');
+  function bad(text){
+    if (!warn) return;
+    warn.textContent = '⚠ ' + text;
+    warn.classList.remove('hid');
+  }
+  function good(text){
+    if (!note) return;
+    note.textContent = text;
+    note.classList.remove('hid');
+  }
+  if (window.isSecureContext === false){
+    bad('Offline reading is off: no browser runs a service worker over plain http. Open the https address (tailscale serve publishes one) rather than the tailnet IP and port.');
+    return;
+  }
+  if (!('serviceWorker' in navigator)){
+    bad('Offline reading is off: this browser has no service worker. A private tab has none, and neither has a browser set to block all website data.');
+    return;
+  }
+  navigator.serviceWorker.register('/sw.js')
+    .then(function(){ return navigator.serviceWorker.ready; })
+    .then(function(reg){
+      // clients.claim() hands the worker this page as soon as it activates, but
+      // not instantly and not in every browser, so wait a moment before saying
+      // it hasn't happened. Until it has, this page is talking to the network
+      // on its own and nothing here would survive the server going away.
+      return new Promise(function(resolve){
+        if (navigator.serviceWorker.controller) return resolve(reg);
+        var done = false;
+        function settle(){ if (!done){ done = true; resolve(reg); } }
+        navigator.serviceWorker.addEventListener('controllerchange', settle);
+        setTimeout(settle, 3000);
+      });
+    })
+    .then(function(reg){
+      var worker = navigator.serviceWorker.controller || reg.active;
+      if (!navigator.serviceWorker.controller){
+        bad('Offline reading is set up but not yet in charge of this page. Reload once while the server is in reach, and this line will go away.');
+      }
+      if (!worker) return;
+      // Every view primes the saved list itself, so the app opens on something
+      // readable even if the last thing you did online was triage the feed.
+      var pages = ['/?saved=1'], media = [];
+      if (SAVED_VIEW){
+        pages.push(location.href);
+        document.querySelectorAll('article.card').forEach(function(card){
+          var link = card.querySelector('.footer a.open[href^="/item"]');
+          if (link) pages.push(link.href);
+          card.querySelectorAll('img[data-src]').forEach(function(img){
+            if (img.dataset.src) media.push(img.dataset.src);
+          });
+          card.querySelectorAll('video[poster]').forEach(function(v){
+            if (v.poster) media.push(v.poster);
+          });
+        });
+      }
+      // The worker answers over a port of its own rather than by broadcasting,
+      // so a second tab priming at the same time can't land its numbers here.
+      function ask(msg, then){
+        var ch = new MessageChannel();
+        ch.port1.onmessage = function(e){ then(e.data); };
+        worker.postMessage(msg, [ch.port2]);
+      }
+      function kept(d){
+        if (!d) return;
+        if (d.error){
+          bad('Offline reading is off: the cache would not open (' + d.error + ').');
+          return;
+        }
+        if (!d.saved){
+          good('Offline: nothing kept yet — open this list once more while the server is in reach.');
+          return;
+        }
+        good('Offline: this list and ' + d.items + ' of its items are kept here, with ' + d.media + ' images, for when the server is out of reach.');
+      }
+      if (SAVED_VIEW) ask({type: 'status'}, kept);
+      // After the page has settled: priming is for the next visit, never at the
+      // cost of this one.
+      setTimeout(function(){ ask({type: 'prime', pages: pages.slice(0, 200), media: media.slice(0, 200)}, kept); }, 1500);
+    })
+    .catch(function(err){
+      bad('Offline reading is off: the service worker would not start (' + (err && err.message ? err.message : err) + ').');
+    });
 })();
 </script>
 </div></body></html>

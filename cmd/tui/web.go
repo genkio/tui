@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -294,6 +295,13 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		}
 		handlePos(w, r, saved)
 	})
+	// What makes the page installable, and what keeps the saved list readable
+	// with the server out of reach (see pwa.go).
+	mux.HandleFunc("/manifest.webmanifest", handleManifest)
+	mux.HandleFunc("/sw.js", handleServiceWorker)
+	for path := range iconSizes {
+		mux.HandleFunc(path, handleIcon)
+	}
 	mux.HandleFunc("/dl", handleDownload)
 	mux.HandleFunc("/img", handleImage)
 	mux.HandleFunc("/ytlen", ylen.handle)
@@ -313,6 +321,14 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	fmt.Printf("tui serve listening on %s\n", addr)
 	if u := tailscaleURL(host, port); u != "" {
 		fmt.Printf("  tailnet:  %s\n", u)
+	}
+	// The address to open on a phone, and the reason it is worth saying twice:
+	// installing the page and reading the saved list offline both want a secure
+	// origin, and the tailnet address above is not one.
+	if u := tailscaleServeURL(port); u != "" {
+		fmt.Printf("  https:    %s  (open this one on a phone — installing the page and reading it offline need it)\n", u)
+	} else if _, err := exec.LookPath("tailscale"); err == nil {
+		fmt.Printf("  no https address yet: `tailscale serve --bg %s` publishes one, which is what installing the page and offline reading need\n", port)
 	}
 	if every > 0 {
 		fmt.Printf("  fetching every %s (±%d%%) into %s\n", every, int(sweepJitter*100), cache.path)
@@ -341,6 +357,63 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		return err
 	}
 	return nil
+}
+
+// tailscaleServeURL returns the https URL tailscale serve publishes for this
+// port, or blank when nothing proxies to it. That is the URL worth opening on a
+// phone: a browser installs a page, and runs the service worker that makes the
+// saved list readable offline, only on a secure origin — which the plain
+// tailnet address, http and a port, is not.
+func tailscaleServeURL(port string) string {
+	p, err := exec.LookPath("tailscale")
+	if err != nil {
+		return ""
+	}
+	out, err := exec.Command(p, "serve", "status", "--json").Output()
+	if err != nil {
+		return ""
+	}
+	return serveURLFor(out, port)
+}
+
+// serveURLFor picks the https URL out of `tailscale serve status --json`. Hosts
+// are taken in order so a machine serving more than one says the same thing
+// twice running.
+func serveURLFor(status []byte, port string) string {
+	var st struct {
+		Web map[string]struct {
+			Handlers map[string]struct {
+				Proxy string
+			}
+		}
+	}
+	if json.Unmarshal(status, &st) != nil {
+		return ""
+	}
+	hosts := make([]string, 0, len(st.Web))
+	for h := range st.Web {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+	for _, hostport := range hosts {
+		paths := make([]string, 0, len(st.Web[hostport].Handlers))
+		for p := range st.Web[hostport].Handlers {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			proxy, err := url.Parse(st.Web[hostport].Handlers[path].Proxy)
+			if err != nil || proxy.Port() != port {
+				continue
+			}
+			host, _, err := net.SplitHostPort(hostport)
+			if err != nil {
+				host = hostport
+			}
+			return "https://" + host + path
+		}
+	}
+	return ""
 }
 
 // tailscaleURL returns the device's Tailscale IPv4 URL for port when tailscale

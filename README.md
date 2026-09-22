@@ -279,6 +279,75 @@ render them, so a tap puts a **loading…** cover over the page you tapped from
 rather than leaving it looking idle. `?json=1` returns the whole backlog as JSON for
 scripts (no window). Runs indefinitely until you Ctrl-C.
 
+### Installing it, and reading the saved list offline
+
+The page is a **progressive web app**: it ships a manifest and an icon, so
+**Add to Home Screen** (iOS) or **Install** (Chrome) gives it a launcher of its
+own and opens it without browser chrome.
+
+**This needs an https address.** No browser will install a page, or run the
+service worker behind the offline reading, over plain http — so the tailnet
+address `tui serve` prints (`http://100.x.y.z:8080/`) cannot do either, however
+well it works for reading in a tab. Tailscale publishes one for you:
+
+```sh
+tailscale serve --bg 8080
+```
+
+That fronts the same server at `https://<machine>.<tailnet>.ts.net/` with a real
+certificate. `tui serve` looks for it at startup and prints it as the address to
+open on a phone, or prints the command above when there isn't one yet.
+
+What the worker buys is the **saved list on a train**. It keeps the last saved
+page the server handed over, each saved item's own page, and the stills those
+cards would draw, so opening the app with the server out of reach opens on what
+you kept rather than on an error. The feed itself is not cached: it is a view of
+a backlog only the server holds, and a cached copy of it would be a list of
+things you cannot mark read — so offline the feed falls back to the saved list
+and says why. A server that answers badly counts as out of reach too: restart
+`tui serve` behind `tailscale serve` and the proxy answers 502 for a few
+seconds, which hands over the cached list rather than the proxy's error page.
+
+Priming happens on its own. Every page you open while the server is reachable
+refreshes the cached saved list, and opening the saved list caches its items and
+their images too, up to a few hundred stills (oldest dropped first). Video is
+never cached: a clip is tens of megabytes and the offline promise is reading, not
+watching. The saved list ends with a line saying what is actually kept — how
+many items and images would survive the server going away — since a page that
+works online looks exactly like one that will not work offline. When the worker
+is not running at all, the page says so under the header instead, and says which
+of the ordinary reasons it is: not on https, a browser with no service worker (a
+private tab, or one set to block website data), a registration that failed, or a
+worker that is installed but does not take charge until the next load.
+
+A page is read to the end inside the worker before the browser sees any of it.
+That costs the saved list its progressive render and buys the thing a cache is
+for: a request resolves as soon as its headers land, so a page handed straight
+over is a stream still arriving, and a tailnet over cellular drops those — the
+list paints half a screen and the browser replaces it with **"the network
+connection was lost"**, too late for any cached copy to help. Buffered, a
+dropped connection is just another miss, and the cache answers it.
+
+A page also stops waiting for a slow server after six seconds and shows the
+cached list instead. A tailnet that is up answers in milliseconds; one that is
+half up — the phone has bars, the laptop at home is asleep — can leave a request
+hanging for a minute, which is a minute of looking at nothing when the answer
+was on the device all along. The request is left running, so whatever it brings
+back still refreshes the cache.
+
+Nothing the worker does can fail into a broken page: a cache that will not open
+(a private tab, a browser out of room) falls through to the network rather than
+becoming a connection error of its own making.
+
+Whether the server is in reach is decided by the same status poll that raises the
+failed-run banner, once a minute — `navigator.onLine` cannot answer it, since a
+phone on a train has a connection and what it lacks is the machine at home. When
+the poll fails, a banner under the header says the page is what was last cached
+and that nothing can be saved, tagged or marked read until the server is back.
+Those actions still fail loudly rather than queueing: a read mark that sat in a
+phone for a day and landed on a backlog three fetches younger is worse than one
+you take again.
+
 ### The backlog cache
 
 A page load used to scrape all six services before it sent a byte, which is why
