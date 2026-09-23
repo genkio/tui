@@ -146,7 +146,7 @@ func TestGistChipCollectsWhatIsReady(t *testing.T) {
 		items: items[1:2], total: 1, apps: []string{"hn"}, now: time.Now(),
 		tally: &plain, query: url.Values{},
 	})
-	if !strings.Contains(page, `<a class="fchip hid" href="/?gist=1" data-kind="gist"`) {
+	if !strings.Contains(page, `<a class="fchip flink hid" href="/?gist=1" data-kind="gist"`) {
 		t.Errorf("an empty gist chip should be drawn hidden: %s", page)
 	}
 	if !strings.Contains(page, `if(chip.dataset.kind === 'gist') chip.classList.toggle('hid', count === 0);`) {

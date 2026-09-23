@@ -220,6 +220,7 @@ type pageInput struct {
 	// worth is what each item on the page was given, by feed key, which is what
 	// the best-first order sorts on and what a card wears.
 	skippedView bool
+	skipped     int
 	worth       map[string]float64
 	// One item on a page of its own, reached by its own URL (see itemHref).
 	itemView bool
@@ -265,9 +266,6 @@ type pageData struct {
 	// as the modal's textarea shows them — one per line, blocked view only.
 	Blocked     int
 	BlockedView bool
-	// The live feed itself, with a service logged in: the one view whose
-	// "unread" is the settings button rather than a way back to it.
-	FeedView bool
 	// The skipped pile: its size, in the header and its link on every feed view,
 	// and whether it is what this page is showing.
 	Skipped      int
@@ -329,6 +327,9 @@ type pageData struct {
 // are only a matter of where the row breaks.
 type filterGroup struct {
 	Chips []filterChip
+	// A pile that is a page of its own rather than a slice of this one: drawn
+	// with the saved, skipped and blocked chips instead of among the filters.
+	Pile bool
 }
 
 type filterChip struct {
@@ -640,8 +641,8 @@ func buildPageData(in pageInput) pageData {
 		TagSelected:   tagSelected,
 		Blocked:       in.block.count(),
 		BlockedView:   in.blockedView,
-		FeedView:      len(in.apps) > 0 && !in.savedView && !in.blockedView && !in.skippedView && !in.itemView,
 		SkippedView:   in.skippedView,
+		Skipped:       in.skipped,
 		ItemView:      in.itemView,
 		ClearBlocked:  in.blockedView && in.block.count() > 0,
 		Keywords:      in.block.keywordCount(),
@@ -1111,7 +1112,7 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 	// holds nothing, for the reason the gist chip is: it has to be able to
 	// appear on a page that was loaded before the run finished.
 	if feed {
-		out = append(out, filterGroup{Chips: []filterChip{{
+		out = append(out, filterGroup{Pile: true, Chips: []filterChip{{
 			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists, Hidden: t.gists == 0,
 		}, {
 			Kind: "digest", Key: "digest", Label: "summary", Count: t.digests, Hidden: t.digests == 0,

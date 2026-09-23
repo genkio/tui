@@ -391,10 +391,9 @@ func TestBlockedPageIsTitlesOnly(t *testing.T) {
 	if !strings.Contains(page, `href="https://old.reddit.com/comments/1/"`) {
 		t.Errorf("the row should still open the original: %s", page)
 	}
-	// The header is names alone now; the list's own size is on its chip, and the
-	// name it is under wears the accent.
-	if !strings.Contains(page, `class="viewlink viewon" href="/?blocked=1"`) {
-		t.Errorf("the blocked view should light its own name in the header: %s", page)
+	// The chip for the list you are on is lit, and tapping it again goes home.
+	if !strings.Contains(page, `class="fchip flink" href="/" data-on="1"><span>blocked</span>`) {
+		t.Errorf("the blocked view should light its own chip: %s", page)
 	}
 }
 
@@ -436,7 +435,7 @@ func TestBlockedLinkInTheHeader(t *testing.T) {
 		t.Error("the saved link should still be there beside it")
 	}
 	blocked := renderBlockedPage(t, newTestBlocker(t))
-	if !strings.Contains(blocked, `<a class="viewlink" href="/">unread</a>`) {
+	if !strings.Contains(blocked, `href="/" data-on="1"><span>blocked</span>`) {
 		t.Errorf("the blocked view should link back to the feed: %s", blocked)
 	}
 }

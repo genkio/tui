@@ -339,9 +339,6 @@ func TestSkippedViewReadsLikeTheFeed(t *testing.T) {
 	if strings.Contains(page, `id="summary"`) {
 		t.Error("the skipped pile must not offer a briefing of itself")
 	}
-	if strings.Contains(page, `id="siftBtn"`) {
-		t.Error("a sift is started from the feed, not from its own leavings")
-	}
 	// The number that put the card here, on the card.
 	if !strings.Contains(page, `>0.08<`) {
 		t.Error("a skipped card should wear the worth it was given")
@@ -393,9 +390,9 @@ func TestBestFirstOrdersTheFeedByWorth(t *testing.T) {
 	}
 }
 
-// The feed's own header: the pile is a link beside the other two lists, and the
-// control that fills it sits with the rest of the header's buttons.
-func TestFeedHeaderOffersTheSift(t *testing.T) {
+// The feed links to the pile and counts it. There is no button to fill it: every
+// fetch is sifted by itself.
+func TestFeedLinksToTheSkippedPile(t *testing.T) {
 	page := renderInput(t, pageInput{
 		items: []core.Item{{App: "x", ID: "1", Title: "one"}}, total: 1,
 		apps: []string{"x"}, now: time.Now(),
@@ -403,14 +400,11 @@ func TestFeedHeaderOffersTheSift(t *testing.T) {
 	if !strings.Contains(page, `href="/?skipped=1"`) {
 		t.Error("the header should link to the skipped pile")
 	}
-	if !strings.Contains(page, `>skipped</a>`) {
-		t.Error("the header should name the skipped pile")
+	if !strings.Contains(page, `<span>skipped</span><span class="fn">0</span>`) {
+		t.Error("the header should name the skipped pile and count it")
 	}
-	if !strings.Contains(page, `id="siftBtn"`) {
-		t.Error("the feed should offer to sift")
-	}
-	if !strings.Contains(page, `fetch('/sift', {method:'POST'})`) {
-		t.Error("the button should ask the server to start a run")
+	if strings.Contains(page, `id="siftBtn"`) {
+		t.Error("the sift runs by itself, so the header has no button for it")
 	}
 }
 

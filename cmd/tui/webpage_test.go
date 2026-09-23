@@ -549,7 +549,8 @@ func TestSourceChipCarriesServiceHealth(t *testing.T) {
 	}
 
 	// No logged-in services: nothing to draw.
-	if strings.Contains(renderPage(t, nil, nil, nil, "following", ""), `id="filters"`) {
+	// (The row is still there for the saved, skipped and blocked chips.)
+	if strings.Contains(renderPage(t, nil, nil, nil, "following", ""), `data-kind="`) {
 		t.Fatal("no logged-in service means no chips")
 	}
 
@@ -2034,7 +2035,7 @@ func TestCardFiltersSkipPointlessGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if page := renderSavedPage(t, store); strings.Contains(page, `id="filters"`) {
+	if page := renderSavedPage(t, store); strings.Contains(page, `data-kind="`) {
 		t.Errorf("one source, one type: nothing to filter by:\n%s", page)
 	}
 

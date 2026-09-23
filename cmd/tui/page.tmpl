@@ -219,22 +219,24 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .fsum[data-state="done"] svg{fill:currentColor;stroke:currentColor}
 .fpair>.fchip[data-on="1"]+.fsum{border-color:var(--accent)}
 @keyframes fspin{to{transform:rotate(360deg)}}
-/* the second layer, under the source row: which subreddit, which rss feed. Only
-   the busiest of them fit — a source can have dozens, and a wall of them would
+/* the piles beside the feed rather than slices of it (saved, gist, summary,
+   skipped, blocked): each goes to a page of its own, so they are drawn lighter than the chips that narrow this one */
+.fchip.flink{background:transparent;border-style:dashed}
+.fchip.flink[data-on="1"]{border-style:solid}
+/* the last layer, after the piles: which subreddit, which rss feed. Only the
+   busiest of them fit — a source can have dozens, and a wall of them would
    push the first card off the screen — so the script keeps one row and the rest
-   are behind "more". Pulled up tight against the row it narrows, so the two read
-   as one control rather than two. */
-.subs{margin-top:-6px}
+   are behind "more". */
 /* a feed title runs as long as its owner felt like; the chip is capped and the
    whole of it stays in the tooltip */
 .subs .slabel{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fmore{color:var(--accent)}
 .card.read{opacity:.45}
-/* The unread count opens browser-local settings without adding another header
-   control to the narrow row. */
 .settings{
-  padding:0;border:0;background:none;font:inherit;color:inherit;cursor:pointer;
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:32px;margin-left:-4px;padding:0;border:0;background:none;color:var(--muted);cursor:pointer;
 }
+.settings svg{width:19px;height:19px;display:block}
 /* when the last fetch landed. It used to sit beside the count in the header,
    which is four links wide on a phone and had no room for a fifth thing. */
 .settingnote{margin-top:18px;font-size:12px;color:var(--muted)}
@@ -326,10 +328,6 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .itemtag[data-on="1"]{border-color:var(--accent);color:var(--accent);background:rgba(74,158,255,.08)}
 .itemtag:disabled{opacity:.5;cursor:default}
 .viewlink{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line)}
-/* The row is four names and no numbers: the counts are what pushed the last of
-   them off the edge of a phone, and the chips under it already say how deep the
-   backlog is. The view you are on wears the accent instead of a count. */
-.viewon{color:var(--accent);border-bottom-color:var(--accent)}
 /* which way the feed runs and which shape it is in, at the far end of the
    header: each word is what the page already is, and the tap turns it around.
    They keep their width while the counts beside them are free to ellipsis,
@@ -530,20 +528,19 @@ video.ffs{object-fit:cover !important}
 <div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-skippedview="{{if .SkippedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-deckstart="{{.DeckStart}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" data-sumlang="{{.SumLang}}" hidden></div>
 <div class="wrap">
 <header>
-  <div class="sub" id="sub">{{if .ItemView}}<a class="viewlink" href="/">unread</a> <span class="viewon">one item</span> <a class="viewlink" href="/?saved=1">saved</a>{{else}}{{if .FeedView}}<button class="settings viewon" id="settingsOpen" type="button" title="{{if .Capped}}settings — a service's backlog runs deeper than the sweep reached{{else}}settings{{end}}">unread</button>{{else}}<a class="viewlink" href="/">unread</a>{{end}} <a class="viewlink{{if .SavedView}} viewon{{end}}" href="/?saved=1">saved</a> <a class="viewlink{{if .SkippedView}} viewon{{end}}" href="/?skipped=1" title="what the sift skipped for you — read them here to check it">skipped</a> <a class="viewlink{{if .BlockedView}} viewon{{end}}" href="/?blocked=1">blocked</a>{{if .BlockedView}} <button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}{{end}}</div>
+  <div class="sub" id="sub">{{if .BlockedView}}<button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}</div>
   {{if .SavedModeHref}}<a class="decklink" id="savedmode" href="{{.SavedModeHref}}" title="{{if .SavedCompact}}title-only saved items — tap for full cards{{else}}full saved cards — tap for titles only{{end}}"><span class="dmark">{{if .SavedCompact}}≡{{else}}▤{{end}}</span>{{if .SavedCompact}}compact{{else}}full{{end}}</a>
   {{end}}{{if .ClearBlocked}}<button class="sortlink headbutton" id="clearBlocked" type="button" data-total="{{.Blocked}}" title="delete all stored blocked items">clear</button>
-  {{end}}{{if and .HasApps (not .SkippedView)}}<button class="sortlink headbutton" id="siftBtn" type="button" title="every fetch is sifted on its own — this asks typesafe to read whatever is left unjudged now"><span class="sarrow">⚟</span><span id="siftlabel">sift</span></button>
   {{end}}{{if .DeckHref}}<a class="decklink" id="decklink" href="{{.DeckHref}}" title="{{if .Swipe}}a deck, one card at a time — tap for the scrolling list{{else}}a scrolling list — tap for the swipe deck{{end}}"><span class="dmark">{{if .Swipe}}▭{{else}}▤{{end}}</span>{{if .Swipe}}deck{{else}}list{{end}}</a>
   {{end}}{{if .SortHref}}<a class="sortlink" id="sortlink" href="{{.SortHref}}" title="{{.SortTitle}}"><span class="sarrow">{{.SortMark}}</span>{{.SortWord}}</a>
+  {{end}}{{if .HasApps}}<button class="settings" id="settingsOpen" type="button" title="{{if .Capped}}settings — a service's backlog runs deeper than the sweep reached{{else}}settings{{end}}" aria-label="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   {{end}}</header>
 {{if .Warn}}<div class="warn">⚠ {{.Warn}}</div>
 {{end}}<div class="warn mishap hid" id="mishap" data-id="">⚠ <span class="msay" id="mishapsays"></span><button class="mishapx" id="mishapx" type="button" title="dismiss until the next one" aria-label="dismiss">×</button></div>
 <div class="warn hid" id="offwarn"></div>
 <div class="warn hid" id="offline">⚠ {{if .SavedView}}Offline — this is the saved list as it stood when the server was last in reach, and nothing here can be saved, tagged or played until it is again.{{else}}Offline — the server is not in reach. The saved list is the part that reads without it.{{end}}</div>
-{{if or .Filters .TagFilters}}<div class="filters" id="filters">{{range .Filters}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div>
-{{end}}{{if .Subs}}<div class="filters subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></div>
-{{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
+<div class="filters" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></span>{{end}}</div>
+{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Every fetch is sifted as it lands, and what the model thinks you can skip shows up here, to be read anyway or cleared in one go.{{end}}</div>
@@ -1774,73 +1771,6 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     .catch(function(){ clearBlockedBtn.disabled = false; toast('could not clear blocked items'); });
 });
 
-// Sift: TypeSafe reads every unread item nothing has judged yet and says, one
-// by one, whether there is anything in it. What it says no to leaves the feed
-// for the skipped view rather than being marked read or deleted.
-//
-// The server sifts every fetch by itself, so this button is the early ask and
-// the progress readout rather than the way it happens. The run belongs to the
-// server either way: this starts it and then watches — a few hundred items is a
-// minute of round trips, closing the tab does not stop it, and a second tab
-// watching the same run sees the same numbers. The reload at the end is because
-// the feed under it is a different feed by then.
-//
-// Only a run this tab asked for gets an answer in words. One that was already
-// going when the page loaded is the server's own work, and "nothing was set
-// aside" is a reply to a tap, not news.
-var siftBtn = document.getElementById('siftBtn');
-if(siftBtn) (function(){
-  var label = document.getElementById('siftlabel');
-  var poll = null, asked = false;
-  function say(t){ if(label) label.textContent = t; }
-  // How far through, on the button itself: a bare spinner over a minute of
-  // work says nothing about whether it is moving.
-  function running(j){
-    if(!j || j.state !== 'running') return false;
-    siftBtn.disabled = true;
-    say(j.total ? j.done + '/' + j.total : 'sifting…');
-    return true;
-  }
-  function ended(j){
-    if(poll){ clearInterval(poll); poll = null; }
-    siftBtn.disabled = false;
-    say('sift');
-    if(j && j.state === 'failed'){ toast(j.error || 'the sift failed'); return; }
-    if(j && j.aside){ location.reload(); return; }
-    if(asked) toast('nothing was set aside');
-  }
-  function watch(){
-    if(poll) return;
-    poll = setInterval(function(){
-      fetch('/sift').then(function(res){ return res.json(); })
-        .then(function(j){ if(!running(j)) ended(j); })
-        .catch(function(){});
-    }, 2000);
-  }
-  siftBtn.addEventListener('click', function(){
-    siftBtn.disabled = true;
-    asked = true;
-    say('sifting…');
-    fetch('/sift', {method:'POST'})
-      .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); })
-      .then(function(j){ running(j); watch(); })
-      .catch(function(err){
-        siftBtn.disabled = false;
-        say('sift');
-        toast((err && err.message || '').trim() || 'could not sift');
-      });
-  });
-  // A run the last fetch started, one from another tab, or one still going from
-  // before this page loaded, is this button's to report on too. A run that died
-  // is worth saying on hover: nothing else on the page would ever mention it,
-  // and an unsifted feed looks exactly like a feed with nothing to set aside.
-  fetch('/sift').then(function(res){ return res.json(); })
-    .then(function(j){
-      if(running(j)) { watch(); return; }
-      if(j && j.state === 'failed' && j.error) siftBtn.title = 'the last sift failed: ' + j.error;
-    }).catch(function(){});
-})();
-
 // Summarize: a briefing over one source's whole unread backlog, asked for from
 // that source's own chip. A run costs minutes, so nothing here waits on one —
 // the icon spins, the server keeps working after the tap that started it, and
@@ -2612,18 +2542,12 @@ if(siftBtn) (function(){
 // cached) can be a chip like any other. The click is still intercepted, because
 // leaving the page is exactly when a mark that hasn't reached the server yet
 // would be lost.
-(function(){
-  ['filters','subs'].forEach(function(id){
-    var bar = document.getElementById(id);
-    if (!bar) return;
-    bar.addEventListener('click', function(e){
-      var a = e.target.closest ? e.target.closest('a.fchip') : null;
-      if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
-      e.preventDefault();
-      leaveFor(a.getAttribute('href'));
-    });
-  });
-})();
+document.getElementById('filters').addEventListener('click', function(e){
+  var a = e.target.closest ? e.target.closest('a.fchip') : null;
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+  e.preventDefault();
+  leaveFor(a.getAttribute('href'));
+});
 
 // The subcategory row is kept to a single line: a source can carry dozens of
 // them, and a block of chips that pushes the first card off the screen is worse

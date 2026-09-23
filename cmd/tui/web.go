@@ -554,7 +554,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, savedView: true,
-			savedCompact: compact, block: block, swipe: deck, sel: sel, tally: &tally, query: q,
+			savedCompact: compact, block: block, skipped: cache.skippedCount(), swipe: deck, sel: sel, tally: &tally, query: q,
 			tags: itemTags, tagFilters: savedTagFilters(all, itemTags, tag, q),
 		})
 		return
@@ -572,8 +572,9 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 			return
 		}
 		writePage(w, tmpl, pageInput{
-			items: items, total: len(items), now: now, block: block, blockedView: true,
-			sel: sel, tally: &tally, query: q,
+			items: items, total: len(items), now: now, saved: saved, block: block, blockedView: true,
+			skipped: cache.skippedCount(),
+			sel:     sel, tally: &tally, query: q,
 		})
 		return
 	}
@@ -608,7 +609,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		writePage(w, tmpl, pageInput{
 			items: items, behind: behind, total: total, apps: apps, now: now, sel: sel, tally: &tally,
 			query: q, saved: saved, block: block, swipe: deck, order: order,
-			skippedView: true, worth: worth,
+			skippedView: true, skipped: len(all), worth: worth,
 		})
 		return
 	}
@@ -702,7 +703,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		swipe: deck, order: order, worth: worth, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 		summaryOpen: q.Get("summary") == "1", interests: interests.words(),
 		digestView: digesting, digest: digest, digestRunning: running,
-		sumLang: sum.digests.language(),
+		sumLang: sum.digests.language(), skipped: cache.skippedCount(),
 	})
 }
 
@@ -744,7 +745,7 @@ func handleItem(w http.ResponseWriter, r *http.Request, loader *pageLoader, cach
 	rendered.put([]core.Item{it})
 	writePage(w, tmpl, pageInput{
 		items: []core.Item{it}, total: 1, now: now, saved: saved, block: block,
-		itemView: true, query: q,
+		itemView: true, query: q, skipped: cache.skippedCount(),
 	})
 }
 
