@@ -46,6 +46,7 @@ $TUI_SYNC_DIR/
   env                          credentials for every app, and TYPESAFE_API_KEY (chmod 600)
   feed.db                      snapshot of the feed database
   config/<app>-tui/config.toml per-app settings
+  videos/                      what the web UI's keep saved (see below)
 ```
 
 Migrate existing state once:
@@ -64,6 +65,30 @@ don't survive file syncing, and the captured session values in `env` are what
 the apps actually use. Feed content, plugin read marks, saved and blocked
 items, keywords, and the Douban chart cache all live in the local database.
 The server snapshots it into the sync directory after each fetch.
+
+### Keeping videos on the server
+
+With a sync dir and a download server running on the same machine, a video
+card's **keep** stops being a browser download: the server hands the video (x,
+reddit, bilibili, YouTube, redgifs) to the download server, which fetches it
+into `$TUI_SYNC_DIR/videos/`. Files are named after the video's title, or the
+post's text when it has none; `videos/.keeps.json` records which file belongs
+to which post. The button then reads *keeping…*, *kept*, or *error* (tap it
+for why). Point it at the download server in the env file:
+
+```sh
+export TUI_KEEP_URL='http://127.0.0.1:9000'
+```
+
+The download server is anything that answers two routes:
+
+- `POST /api/saves` with JSON `{"url", "dir", "name", "title"}`: download
+  `url` into `dir` as `name` plus the file's extension, where a `{title}` in
+  `name` is the video's own title, or `title` when it has none. Answers `202`
+  with `{"id", "status"}`.
+- `GET /api/saves/{id}`: `{"id", "status", "path", "error"}`, with `status`
+  one of `queued`, `downloading`, `done` or `error`, and `path` the saved file
+  once it is `done`.
 
 ## Use
 

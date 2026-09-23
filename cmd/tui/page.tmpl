@@ -298,7 +298,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 @media (pointer: fine){.deckctl{display:none}}
 .open{color:var(--muted);text-decoration:none;font-weight:700;font-size:14px;min-height:40px;display:inline-flex;align-items:center;gap:4px}
 .expand{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0;min-height:40px}
-.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.gist{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
+.speed,.mute,.rot,.save,.img,.share,.rgv,.loop,.detail,.gist,.keep{background:none;border:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer;padding:0;min-height:40px}
 /* the discussion under a Hacker News card, asked for from the card. Filled in
    the accent colour once there is one, the same thing the source sparkles say,
    and dimmed while the model is reading the thread. */
@@ -320,6 +320,8 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
 .save[data-saved="1"]{color:var(--accent)}
+.keep[data-state="kept"]{color:var(--ok, var(--accent))}
+.keep[data-state="error"]{color:var(--bad)}
 .tagrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .itemtag{
   min-height:30px;padding:3px 9px;border:1px solid var(--line);border-radius:999px;
@@ -933,6 +935,54 @@ document.addEventListener('click', function(e){
   setSaved(b.closest('article.card'), b.dataset.saved !== '1');
 });
 
+// Keep hands the video to the server, which has a download server fetch it into
+// the sync dir, and the button follows the download from there: keeping…, then
+// kept, or error, whose tap says what went wrong and offers the keep again. A
+// page opened while one is running picks up watching it.
+function keepShow(b, st){
+  b.dataset.state = st.state || '';
+  if (st.error) b.dataset.error = st.error; else delete b.dataset.error;
+  b.textContent = {kept: 'kept', keeping: 'keeping…', error: 'error'}[st.state] || 'keep';
+  if (st.state === 'keeping') keepWatch(b);
+}
+function keepWatch(b){
+  if (b._watching) return;
+  b._watching = true;
+  var tick = function(){
+    fetch('/keep?n=' + encodeURIComponent(b.dataset.n), {cache: 'no-store'})
+      .then(function(res){ if(!res.ok) throw new Error(res.status); return res.json(); })
+      .then(function(st){
+        if (st.state === 'keeping'){ setTimeout(tick, 3000); return; }
+        b._watching = false;
+        keepShow(b, st);
+      })
+      .catch(function(){ setTimeout(tick, 10000); });
+  };
+  setTimeout(tick, 3000);
+}
+document.addEventListener('click', function(e){
+  var b = e.target.closest ? e.target.closest('button.keep') : null;
+  if (!b || b.disabled) return;
+  var state = b.dataset.state;
+  if (state === 'kept' || state === 'keeping') return;
+  if (state === 'error'){
+    alert('The download failed:\n\n' + (b.dataset.error || 'no details') + '\n\nTap keep to try again.');
+    keepShow(b, {state: ''});
+    return;
+  }
+  var fd = new FormData();
+  fd.append('n', b.dataset.n);
+  fd.append('u', b.dataset.u);
+  fd.append('t', b.dataset.t || '');
+  b.disabled = true;
+  fetch('/keep', {method: 'POST', body: fd})
+    .then(function(res){ if(!res.ok) return res.text().then(function(t){ throw new Error(t || res.status); }); return res.json(); })
+    .then(function(st){ keepShow(b, st); })
+    .catch(function(err){ keepShow(b, {state: 'error', error: 'the server did not take it: ' + err.message}); })
+    .then(function(){ b.disabled = false; });
+});
+document.querySelectorAll('button.keep[data-state="keeping"]').forEach(keepWatch);
+
 if(SAVED_VIEW) document.querySelectorAll('article.card').forEach(function(card){
   var footer = card.querySelector(':scope > .footer');
   if(!footer) return;
@@ -1183,7 +1233,8 @@ function ytThumb(card, id){
   d.addEventListener('click', function(){ ytPlay(d, id); });
   var foot = card.querySelector('.footer');
   foot.before(d);
-  // No save button: YouTube doesn't hand out direct streams the way
+  // Keep is the server's (it hands the watch page to the download server): YouTube
+  // doesn't hand out direct streams a browser could save the way
   // video.twimg.com does.
   addPlayerControls(foot);
 }
@@ -2802,4 +2853,4 @@ document.addEventListener('click', function(e){
 })();
 </script>
 </div></body></html>
-{{define "card"}}<article class="card{{if .Read}} read{{end}}{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .RankKey}} data-rank="{{.RankKey}}"{{end}}{{if .Gisted}} data-gistready="1"{{end}}{{if .YouTube}} data-yt="{{.YouTube}}"{{end}}{{if .Matched}} data-mine="mine"{{end}}{{if .Read}} data-history="1"{{end}}{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}{{if .Worth}}<span class="kw" title="how likely the sift thought you would want this, from 0 to 1">{{.Worth}}</span>{{end}}{{if .MatchedFor}}<span class="kw" title="the subject on your list this answers">{{.MatchedFor}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div><a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}
+{{define "card"}}<article class="card{{if .Read}} read{{end}}{{if .Compact}} compact{{end}}{{if and .Compact .ShowActions}} expandable{{end}}" data-app="{{.App}}" data-id="{{.ID}}" data-type="{{.Type}}" data-sub="{{.Source}}"{{if .RankKey}} data-rank="{{.RankKey}}"{{end}}{{if .Gisted}} data-gistready="1"{{end}}{{if .YouTube}} data-yt="{{.YouTube}}"{{end}}{{if .Matched}} data-mine="mine"{{end}}{{if .Read}} data-history="1"{{end}}{{if .PosSrc}} data-pos="{{.Pos}}" data-pos-key="{{.PosSrc}}"{{end}}><div class="meta"><span class="chip" style="background:{{.Color}}">{{.Chip}}</span>{{if .Source}}<span class="src">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}{{if .Age}}<span class="dot">·</span><span>{{.Age}}</span>{{end}}{{if .Keyword}}<span class="kw" title="the keyword that blocked this">{{.Keyword}}</span>{{end}}{{if .Worth}}<span class="kw" title="how likely the sift thought you would want this, from 0 to 1">{{.Worth}}</span>{{end}}{{if .MatchedFor}}<span class="kw" title="the subject on your list this answers">{{.MatchedFor}}</span>{{end}}</div><div class="preview">{{if .ListTitle}}<div class="ctitle compact-only">{{.ListTitle}}</div>{{end}}{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .PreviewBody}}<div class="body">{{.PreviewBody}}</div>{{end}}</div>{{if .ShowActions}}<div class="full hid">{{if .Title}}<div class="ctitle">{{.Title}}</div>{{end}}{{if .FullBody}}<div class="body">{{.FullBody}}</div>{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{end}}{{if .Audio}}<audio class="aud" controls preload="metadata" src="{{.Audio}}"></audio>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{with .Quote}}<blockquote class="quote"><div class="qmeta">{{if .URL}}<a class="qsrc" href="{{.URL}}" target="_blank" rel="noopener" title="open the quoted post">{{.Source}} ↗</a>{{else}}<span class="qsrc">{{.Source}}</span>{{end}}{{if .Author}}<span class="dot">·</span><span>{{.Author}}</span>{{end}}</div>{{if .PreviewBody}}<div class="preview"><div class="body">{{.PreviewBody}}</div></div><div class="full hid"><div class="body">{{.FullBody}}</div></div>{{end}}{{if .Images}}<div class="imgbox hid">{{range .Images}}<img data-src="{{.}}" alt="" loading="lazy">{{end}}</div>{{end}}{{if .Video}}<div class="vidbox"><video class="vid" controls playsinline muted preload="none"{{if .Poster}} poster="{{.Poster}}"{{end}} src="{{.Video}}"></video>{{if .VidLen}}<span class="vlen">{{.VidLen}}</span>{{end}}</div>{{if .KeepServer}}<button class="keep" type="button" data-n="{{.KeepName}}" data-u="{{.Video}}" data-t="{{.KeepTitle}}" data-state="{{.KeepState}}"{{if .KeepError}} data-error="{{.KeepError}}"{{end}} title="download the video to the server">{{if eq .KeepState "kept"}}kept{{else if eq .KeepState "keeping"}}keeping…{{else if eq .KeepState "error"}}error{{else}}keep{{end}}</button>{{else}}<a class="open" href="/dl?n=x-{{$.ID}}-quote.mp4&u={{.Video}}" title="download the quoted video"><span>keep</span></a>{{end}}{{end}}</blockquote>{{end}}<div class="footer">{{if .URL}}<a class="open" href="{{.URL}}" target="_blank" rel="noopener" title="open original"><span>open</span></a>{{end}}{{if .ShowActions}}<button class="save" type="button" data-saved="{{if .Saved}}1{{else}}0{{end}}" title="keep this item in the saved list">{{if .Saved}}saved{{else}}save{{end}}</button><button class="share" type="button" title="share this item">share</button>{{if .Link}}<a class="open" href="{{.Link}}" title="this item on a page of its own"><span>link</span></a>{{end}}{{if .Compact}}<button class="detail" type="button" title="show this saved item in full">details</button>{{end}}{{if .HasVideo}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button><button class="rot" type="button" title="rotated fullscreen">rotate</button>{{else if .Audio}}<button class="speed" type="button" title="playback speed for every player">2×</button><button class="mute" type="button" title="sound for this item">unmute</button>{{end}}{{if .HasImage}}<button class="img" type="button" data-on="0" title="show the attached images">image</button>{{end}}{{if .RedGif}}<button class="rgv" type="button" data-on="0" data-id="{{.RedGif}}" title="show the linked redgifs clip">video</button>{{end}}{{if .KeepServer}}<button class="keep" type="button" data-n="{{.KeepName}}" data-u="{{.KeepSrc}}" data-t="{{.KeepTitle}}" data-state="{{.KeepState}}"{{if .KeepError}} data-error="{{.KeepError}}"{{end}} title="download the video to the server">{{if eq .KeepState "kept"}}kept{{else if eq .KeepState "keeping"}}keeping…{{else if eq .KeepState "error"}}error{{else}}keep{{end}}</button>{{else if .Keep}}<a class="open" href="{{.Keep}}" title="download video"><span>keep</span></a>{{end}}{{if .HasVideo}}<button class="loop" type="button" data-on="0" title="repeat every video">loop</button>{{end}}{{if .Gist}}<button class="gist" type="button" data-state="idle" title="summarize the discussion under this">gist</button>{{end}}{{if .Expand}}<button class="expand hid" type="button">less</button>{{end}}{{end}}</div></article>{{end}}

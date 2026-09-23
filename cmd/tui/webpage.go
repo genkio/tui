@@ -390,16 +390,22 @@ type cardData struct {
 	Link        string // this item's own page here, blank when that page is what you are on
 	Video       string // mp4 for the inline player: the app's own, or this server's bilibili route
 	Keep        string // where the footer's keep link saves that mp4 from
-	Poster      string
-	VidLen      string // "1:23" badge over the poster; blank when the length is unknown
-	HasVideo    bool   // this card or its quote has a player, so show the shared controls
-	Audio       string // attached episode file; the card shows an inline audio player
-	RedGif      string // redgifs clip id; the footer offers to fetch and play it
-	YouTube     string // YouTube video this item is about; the page grows a player for it
-	Type        string // what the card carries: "video", "short", "audio" or "text"
-	Images      []string
-	HasImage    bool // this card or its quote has stills, so offer the image toggle
-	Quote       *quoteData
+	// The server-side keep (see keep.go): what the download server is handed, the file it
+	// writes, and how that has gone. KeepServer is the page having one at all.
+	KeepSrc, KeepName    string
+	KeepTitle            string // the post's text, for a file name when the video has no title
+	KeepState, KeepError string
+	KeepServer           bool
+	Poster               string
+	VidLen               string // "1:23" badge over the poster; blank when the length is unknown
+	HasVideo             bool   // this card or its quote has a player, so show the shared controls
+	Audio                string // attached episode file; the card shows an inline audio player
+	RedGif               string // redgifs clip id; the footer offers to fetch and play it
+	YouTube              string // YouTube video this item is about; the page grows a player for it
+	Type                 string // what the card carries: "video", "short", "audio" or "text"
+	Images               []string
+	HasImage             bool // this card or its quote has stills, so offer the image toggle
+	Quote                *quoteData
 	// A Hacker News or reddit card: the footer offers a briefing of the
 	// discussion under it, which is the half of the item the feed does not carry.
 	Gist   bool
@@ -466,6 +472,11 @@ type quoteData struct {
 	Poster      string
 	VidLen      string
 	Images      []string
+	KeepName    string
+	KeepTitle   string
+	KeepState   string
+	KeepError   string
+	KeepServer  bool
 }
 
 // buildPageData shapes the items into what page.tmpl renders: header counts,
@@ -483,17 +494,24 @@ func buildPageData(in pageInput) pageData {
 	if swipe {
 		cl = swipeClips
 	}
+	var keptNow map[string]keepStatus
+	if keeps != nil {
+		keptNow = keeps.states()
+	}
 	build := func(it core.Item) cardData {
 		if in.blockedView {
 			return buildBlockedCard(it, in.block.caughtBy(it.App, it.ID))
 		}
 		if in.savedView && in.savedCompact {
-			return buildSavedCompactCard(it, cl)
+			card := buildSavedCompactCard(it, cl)
+			keepStates(&card, keptNow)
+			return card
 		}
 		// In the saved view every card is saved by definition; in the feed ask
 		// the store.
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
 		card := buildCard(it, starred, cl)
+		keepStates(&card, keptNow)
 		// A card in a list carries the way to its own page; the item view is that
 		// page, so there it would only link back to itself.
 		if !in.itemView {
@@ -825,6 +843,22 @@ func buildBlockedCard(it core.Item, why string) cardData {
 	}
 }
 
+// keepStates marks a card, and its quote, with how their keeps stand. Nil
+// states is a server with no keeper, whose cards keep the /dl link.
+func keepStates(c *cardData, states map[string]keepStatus) {
+	if states == nil {
+		return
+	}
+	if c.KeepName != "" {
+		st := states[c.KeepName]
+		c.KeepServer, c.KeepState, c.KeepError = true, st.State, st.Error
+	}
+	if q := c.Quote; q != nil && q.KeepName != "" {
+		st := states[q.KeepName]
+		q.KeepServer, q.KeepState, q.KeepError = true, st.State, st.Error
+	}
+}
+
 func buildSavedCompactCard(it core.Item, cl clips) cardData {
 	card := buildCard(it, true, cl)
 	card.Compact = true
@@ -884,6 +918,15 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 	}
 	c.YouTube = ytLinkID(it)
 	c.Keep = keepURL(it.App, it.ID, c.Video)
+	c.KeepSrc = keepSource(it, c.Video, c.YouTube, c.RedGif)
+	if c.KeepSrc != "" {
+		c.KeepName = keepName(it.App + "-" + it.ID)
+		c.KeepTitle = keepTitle(it.Title, it.Body)
+	}
+	if c.Quote != nil && c.Quote.Video != "" && it.Quote != nil {
+		c.Quote.KeepName = keepName(it.App + "-" + it.ID + "-quote")
+		c.Quote.KeepTitle = keepTitle(it.Quote.Text, it.Title, it.Body)
+	}
 	c.HasVideo = c.Video != "" || (c.Quote != nil && c.Quote.Video != "")
 	c.HasImage = len(c.Images) > 0 || (c.Quote != nil && len(c.Quote.Images) > 0)
 	_, c.Gist = gistRefOf(it)

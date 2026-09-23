@@ -303,6 +303,9 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		mux.HandleFunc(path, handleIcon)
 	}
 	mux.HandleFunc("/dl", handleDownload)
+	if keeps = newKeeperFromEnv(); keeps != nil {
+		mux.HandleFunc("/keep", keeps.handle)
+	}
 	mux.HandleFunc("/img", handleImage)
 	mux.HandleFunc("/ytlen", ylen.handle)
 	mux.HandleFunc("/redgif", newRedgifLens().handle)
