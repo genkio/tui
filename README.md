@@ -495,6 +495,9 @@ headline with nothing behind it. Tapping it hands every unread item no run has
 judged yet to [TypeSafe](https://typesafe.ai)'s `jev-latest`, one yes/no
 question per item — *is this worth the reader's time?* — and files what it says
 no to under **skipped** in the header, out of the feed and out of every count.
+Anything carrying a video, a short or an episode is left out of the sift
+altogether: the model only sees the text around a clip, so those stay in their
+chips however thin the caption is.
 
 It runs on TypeSafe rather than on a chat model because of what it is: a few
 hundred judgments and no prose anywhere in the answer. That is the difference

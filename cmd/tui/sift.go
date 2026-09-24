@@ -559,7 +559,6 @@ type siftEntry struct {
 	Source string `json:"source,omitempty"`
 	Author string `json:"author,omitempty"`
 	Age    string `json:"age,omitempty"`
-	Kind   string `json:"carries,omitempty"`
 	Title  string `json:"title,omitempty"`
 	Text   string `json:"text,omitempty"`
 }
@@ -626,9 +625,6 @@ func siftEntryOf(it core.Item) siftEntry {
 	e := siftEntry{Source: strings.TrimSpace(it.Source), Age: it.Age}
 	if a := strings.TrimSpace(it.Author); a != "" && a != e.Source {
 		e.Author = a
-	}
-	if ty := itemType(it); ty != "text" {
-		e.Kind = ty
 	}
 	title := strings.TrimSpace(itemTitle(it))
 	body := strings.TrimSpace(it.Body)

@@ -99,6 +99,30 @@ func TestSiftTakesTheJudgedOutOfTheFeed(t *testing.T) {
 	}
 }
 
+// A clip is never the sift's to judge: a run leaves it alone, and one judged
+// before that rule stays in the feed however low it scored.
+func TestSiftLeavesClipsInTheFeed(t *testing.T) {
+	c := newTestCache(t)
+	now := time.Now()
+	clip, ep := item("x", "1", "gm"), item("x", "2", "gm")
+	clip.Video, ep.Audio = "https://v/1.mp4", "https://a/2.mp3"
+	c.upsert([]core.Item{clip, ep, item("x", "3", "gm")}, now)
+
+	if got := c.unjudgedCount(); got != 1 {
+		t.Fatalf("unjudged is %d, want only the text item", got)
+	}
+	c.judge(map[string]siftVerdict{
+		core.Key("x", "1"): {Worth: 0.01, Rank: 1, Interest: -1},
+		core.Key("x", "3"): {Worth: 0.01, Rank: 1, Interest: -1},
+	}, now)
+	if got := c.skippedCount(); got != 1 {
+		t.Fatalf("skipped is %d, want only the text item", got)
+	}
+	if got := c.unreadCount(); got != 2 {
+		t.Fatalf("unread is %d, want the clip and the episode", got)
+	}
+}
+
 // A fetch sifts itself. Nobody taps anything here: the sweeper asks at the end
 // of a sweep, so the feed that comes out of a fetch is already judged.
 func TestASweepSiftsWhatItBrought(t *testing.T) {

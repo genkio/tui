@@ -96,8 +96,15 @@ func (e *feedEntry) judged() bool { return e.JudgedAt != "" && e.Rank > 0 }
 // bucket to go through and disagree with, not a delete.
 // A match is never skipped, whatever the cut made of it. The reader named the
 // subject themselves, which outranks a model's opinion about whether there is
-// anything in this particular piece of it.
-func (e *feedEntry) skipped() bool { return e.judged() && e.Worth < siftCut && !e.matched() }
+// anything in this particular piece of it. Nor is anything to watch or listen
+// to: the sift reads the text around a clip, not the clip, so a run leaves
+// those to the video, short and audio chips (see sifts).
+func (e *feedEntry) skipped() bool {
+	return e.judged() && e.Worth < siftCut && !e.matched() && e.sifts()
+}
+
+// sifts reports whether the item is one a sift run judges at all: text only.
+func (e *feedEntry) sifts() bool { return itemType(e.Wire.Item(time.Time{})) == "text" }
 
 // gisting reports whether the item is set aside for its discussion: you asked
 // for the thread under it and moved on, so it is out of the feed and in the gist
@@ -289,7 +296,7 @@ func (c *feedCache) worths() map[string]float64 {
 // reached yet, oldest first, so a run interrupted halfway is resumed by asking
 // again rather than started over.
 func (c *feedCache) unjudged(now time.Time) []core.Item {
-	items := c.pick(now, func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() })
+	items := c.pick(now, func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() && e.sifts() })
 	sortItems(items, true)
 	return items
 }
@@ -429,7 +436,7 @@ func (c *feedCache) skippedCount() int {
 }
 
 func (c *feedCache) unjudgedCount() int {
-	return c.count(func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() })
+	return c.count(func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() && e.sifts() })
 }
 
 func (c *feedCache) count(want func(*feedEntry) bool) int {
