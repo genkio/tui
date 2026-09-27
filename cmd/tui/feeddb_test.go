@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -431,5 +433,102 @@ func TestSavedClipLengthReachesTheRow(t *testing.T) {
 	items := reloaded.list(now)
 	if len(items) != 1 || items[0].VidSecs != 42 {
 		t.Fatalf("length after reload = %+v, want 42 seconds", items)
+	}
+}
+
+func TestFeedSaveWritesOnlyWhatChanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "feed.db")
+	db, err := openFeedDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.close()
+	cache, err := loadFeedCacheDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cache.upsert([]core.Item{{App: "x", ID: "1", Title: "one"}, {App: "x", ID: "2", Title: "two"}, {App: "x", ID: "3", Title: "three"}}, now)
+	if err := cache.save(); err != nil {
+		t.Fatal(err)
+	}
+	cache.markRead("x", []string{"2"}, now)
+	cache.drop([]string{core.Key("x", "1")})
+	cache.upsert([]core.Item{{App: "x", ID: "4", Title: "four"}, {App: "x", ID: "3", Title: "three, edited"}}, now)
+	cache.rev++
+	if err := cache.save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := loadFeedCacheDB(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range reloaded.entries {
+		got = append(got, fmt.Sprintf("%s:%s:%t", e.ID, e.Title, e.Read))
+	}
+	want := []string{"2:two:true", "3:three, edited:false", "4:four:false"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reloaded feed = %v, want %v", got, want)
+	}
+	var orphans int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM items WHERE app='x' AND id='1'`).Scan(&orphans); err != nil {
+		t.Fatal(err)
+	}
+	if orphans != 0 {
+		t.Fatal("a dropped item's row outlived it")
+	}
+}
+
+// A field sameEntry does not compare is one whose change alone is never saved.
+func TestSameEntrySeesEveryField(t *testing.T) {
+	fresh := func() *feedEntry { return &feedEntry{Wire: core.Wire{Quote: &core.Quote{}}} }
+	// Every leaf field, by name, with a way to set it to something non-zero.
+	var leaves []string
+	var visit func(v reflect.Value, path string, touch string)
+	visit = func(v reflect.Value, path string, touch string) {
+		for j := 0; j < v.NumField(); j++ {
+			f, name := v.Field(j), path+v.Type().Field(j).Name
+			switch f.Kind() {
+			case reflect.Struct:
+				visit(f, name+".", touch)
+			case reflect.Pointer:
+				visit(f.Elem(), name+".", touch)
+			default:
+				if touch == "" {
+					leaves = append(leaves, name)
+					continue
+				}
+				if name != touch {
+					continue
+				}
+				switch f.Kind() {
+				case reflect.String:
+					f.SetString("x")
+				case reflect.Bool:
+					f.SetBool(true)
+				case reflect.Int:
+					f.SetInt(7)
+				case reflect.Float64:
+					f.SetFloat(0.5)
+				case reflect.Slice:
+					f.Set(reflect.ValueOf([]string{"x"}))
+				default:
+					t.Fatalf("%s: no case for %s", name, f.Kind())
+				}
+			}
+		}
+	}
+	visit(reflect.ValueOf(fresh()).Elem(), "", "")
+	for _, name := range leaves {
+		changed := fresh()
+		visit(reflect.ValueOf(changed).Elem(), "", name)
+		if sameEntry(*fresh(), *changed) {
+			t.Errorf("sameEntry misses a change to %s", name)
+		}
+	}
+	if len(leaves) < 20 {
+		t.Fatalf("walked only %d fields", len(leaves))
 	}
 }

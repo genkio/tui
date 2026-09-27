@@ -1868,7 +1868,7 @@ func TestClientWindowDependsOnLayout(t *testing.T) {
 	if got := clientWindow(false); got != 100 {
 		t.Fatalf("list window = %d, want 100", got)
 	}
-	if got := clientWindow(true); got != 20 {
+	if got := clientWindow(true); got != 100 {
 		t.Fatalf("deck window = %d, want 20", got)
 	}
 }

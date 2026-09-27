@@ -466,7 +466,7 @@ func authedFeedApps(root string) []string {
 
 const (
 	listWindow = 100
-	deckWindow = 20
+	deckWindow = 100
 	// How much of what you have already read the deck carries behind the first
 	// unread card. A deck that runs out reloads for the next window, and without
 	// this the reload would throw away every card you could walk back to: one

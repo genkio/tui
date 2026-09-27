@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -248,6 +249,103 @@ func (s *feedDB) replaceFeed(f feedFile) error {
 			return err
 		}
 	}
+	if err := writeFeedStatus(tx, f); err != nil {
+		return err
+	}
+	if err := deleteUnreferencedItems(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// updateFeed brings feed_items from was to f: rows added, changed or gone, and
+// nothing else. A row keeps the ordinal it was inserted with, and a new one goes
+// after every existing one, which is where the cache appends it.
+func (s *feedDB) updateFeed(f feedFile, was, now map[string]feedEntry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var ord int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(ordinal),-1)+1 FROM feed_items`).Scan(&ord); err != nil {
+		return err
+	}
+	for _, e := range f.Items {
+		old, had := was[core.Key(e.App, e.ID)]
+		if had && sameEntry(old, *e) {
+			continue
+		}
+		if !had || !sameWire(old.Wire, e.Wire) {
+			if err := writeItem(tx, e.Wire, true); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`INSERT INTO feed_items(app,id,first_seen,read,read_at,synced,judged_at,worth,rank,interest,interest_for,gist_at,ordinal) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(app,id) DO UPDATE SET first_seen=excluded.first_seen,read=excluded.read,read_at=excluded.read_at,synced=excluded.synced,judged_at=excluded.judged_at,worth=excluded.worth,rank=excluded.rank,interest=excluded.interest,interest_for=excluded.interest_for,gist_at=excluded.gist_at`,
+			e.App, e.ID, e.FirstSeen, e.Read, e.ReadAt, e.Synced, e.JudgedAt, e.Worth, e.Rank, e.Interest, e.InterestFor, e.GistAt, ord)
+		if err != nil {
+			return err
+		}
+		if !had {
+			ord++
+		}
+	}
+	for k, e := range was {
+		if _, ok := now[k]; ok {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM feed_items WHERE app=? AND id=?`, e.App, e.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM items WHERE app=? AND id=?
+  AND NOT EXISTS (SELECT 1 FROM saved_items WHERE saved_items.app=items.app AND saved_items.id=items.id)
+  AND NOT EXISTS (SELECT 1 FROM blocked_items WHERE blocked_items.app=items.app AND blocked_items.id=items.id)`, e.App, e.ID)
+		if err != nil {
+			return err
+		}
+	}
+	if err := writeFeedStatus(tx, f); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// sameEntry and sameWire compare field by field: reflect.DeepEqual took most of
+// a save's time across a backlog of tens of thousands. A field added to any of
+// the three has to be added here (TestSameEntrySeesEveryField says which).
+func sameEntry(a, b feedEntry) bool {
+	if !sameWire(a.Wire, b.Wire) {
+		return false
+	}
+	return a.FirstSeen == b.FirstSeen && a.Read == b.Read && a.ReadAt == b.ReadAt &&
+		a.Synced == b.Synced && a.JudgedAt == b.JudgedAt && a.Worth == b.Worth &&
+		a.Rank == b.Rank && a.Interest == b.Interest && a.InterestFor == b.InterestFor &&
+		a.GistAt == b.GistAt
+}
+
+func sameWire(a, b core.Wire) bool {
+	if !slices.Equal(a.Images, b.Images) {
+		return false
+	}
+	if (a.Quote == nil) != (b.Quote == nil) {
+		return false
+	}
+	if a.Quote != nil {
+		qa, qb := a.Quote, b.Quote
+		if qa.Source != qb.Source || qa.Author != qb.Author || qa.Text != qb.Text ||
+			qa.URL != qb.URL || qa.Video != qb.Video || qa.Poster != qb.Poster ||
+			qa.VidSecs != qb.VidSecs || !slices.Equal(qa.Images, qb.Images) {
+			return false
+		}
+	}
+	return a.App == b.App && a.ID == b.ID && a.Title == b.Title && a.Body == b.Body &&
+		a.Source == b.Source && a.Author == b.Author && a.URL == b.URL && a.Age == b.Age &&
+		a.TS == b.TS && a.Type == b.Type && a.Video == b.Video && a.Poster == b.Poster &&
+		a.VidSecs == b.VidSecs && a.Audio == b.Audio
+}
+
+func writeFeedStatus(tx *sql.Tx, f feedFile) error {
 	if _, err := tx.Exec(`DELETE FROM app_status`); err != nil {
 		return err
 	}
@@ -257,13 +355,8 @@ func (s *feedDB) replaceFeed(f feedFile) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO metadata(key,value) VALUES('swept',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, f.Swept); err != nil {
-		return err
-	}
-	if err := deleteUnreferencedItems(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := tx.Exec(`INSERT INTO metadata(key,value) VALUES('swept',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, f.Swept)
+	return err
 }
 
 func (s *feedDB) loadSaved() ([]savedItem, error) {

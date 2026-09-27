@@ -35,6 +35,11 @@ type feedCache struct {
 	written int
 	path    string
 	db      *feedDB
+	// What the database holds, as of the last write. A save writes the rows that
+	// differ from it: rewriting the whole backlog took seconds, and a mark waits
+	// on its save. Nil until the first write when the cache was not loaded from
+	// the database it writes to.
+	stored map[string]feedEntry
 }
 
 func loadFeedCacheDB(db *feedDB) (*feedCache, error) {
@@ -44,6 +49,10 @@ func loadFeedCacheDB(db *feedDB) (*feedCache, error) {
 	}
 	c := &feedCache{db: db, path: db.path, byKey: map[string]*feedEntry{}, status: map[string]appStatus{}}
 	c.load(f)
+	c.stored = make(map[string]feedEntry, len(c.entries))
+	for _, e := range c.entries {
+		c.stored[core.Key(e.App, e.ID)] = *e
+	}
 	return c, nil
 }
 
@@ -700,9 +709,20 @@ func (c *feedCache) save() error {
 		return nil // a later snapshot already landed
 	}
 	if c.db != nil {
-		if err := c.db.replaceFeed(f); err != nil {
+		next := make(map[string]feedEntry, len(items))
+		for _, e := range items {
+			next[core.Key(e.App, e.ID)] = *e
+		}
+		var err error
+		if c.stored == nil {
+			err = c.db.replaceFeed(f)
+		} else {
+			err = c.db.updateFeed(f, c.stored, next)
+		}
+		if err != nil {
 			return err
 		}
+		c.stored = next
 		c.written = rev
 		return nil
 	}
