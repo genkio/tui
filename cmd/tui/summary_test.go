@@ -945,3 +945,14 @@ func TestCappedBriefingSaysHowDeepTheBacklogWas(t *testing.T) {
 		t.Errorf("backlog = %d, want 0 when nothing was left out", r.Backlog)
 	}
 }
+
+func TestUnswapCitations(t *testing.T) {
+	in := "- [/item?app=xforyou&id=2103884838474334642](免费 AI 工程讲座)——转述\n- [ok](/item?app=reddit&id=1) fine"
+	want := "- [免费 AI 工程讲座](/item?app=xforyou&id=2103884838474334642)——转述\n- [ok](/item?app=reddit&id=1) fine"
+	if got := unswapCitations(in); got != want {
+		t.Fatalf("got %q", got)
+	}
+	if html := linkify(unswapCitations(in)); !strings.Contains(html, `href="/item?app=xforyou&amp;id=2103884838474334642"`) {
+		t.Fatalf("link not rendered: %s", html)
+	}
+}

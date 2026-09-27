@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -389,7 +390,7 @@ func (s *summarizer) briefApp(ctx context.Context, ask summaryAsk) summaryJob {
 		// The same Markdown renderer the cards use, so a briefing's links, lists
 		// and tables come out as the rest of the page's prose does and the model's
 		// output cannot bring HTML of its own with it.
-		HTML:      linkify(md),
+		HTML:      linkify(unswapCitations(md)),
 		Generated: time.Now().UTC().Format(time.RFC3339),
 	}
 }
@@ -866,6 +867,16 @@ card, under the item it is about:
 	n := 0
 	writeComments(&b, th.Replies, 1, &n)
 	return b.String()
+}
+
+// The model now and then writes a citation inside out, [/item?...](label),
+// which renders as bracketed text with a dead link on the label. The page value
+// is ours and unmistakable, so the pair is put back the right way round rather
+// than the whole run thrown out.
+var swappedCitation = regexp.MustCompile(`\[(/item\?[^\]\s]+)\]\(([^()\n]+)\)`)
+
+func unswapCitations(md string) string {
+	return swappedCitation.ReplaceAllString(md, "[$2]($1)")
 }
 
 // summarySaying names what the briefing is of, in the prompt's opening line.

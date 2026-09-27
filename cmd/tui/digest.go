@@ -351,7 +351,7 @@ func (s *summarizer) briefDigest(ctx context.Context, ask summaryAsk) summaryJob
 	}
 	job := summaryJob{
 		State: "done", Lang: ask.lang, Count: len(items),
-		HTML:      linkify(md),
+		HTML:      linkify(unswapCitations(md)),
 		Generated: time.Now().UTC().Format(time.RFC3339),
 	}
 	var stored error
