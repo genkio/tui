@@ -102,6 +102,20 @@ The clients default to `http://127.0.0.1:8080`. Point either one at another
 machine with `--server URL`, or set `TUI_SERVER_URL`. Standalone apps remain
 available by name: `tui x`, `tui reddit`, and so on.
 
+### Running it as a macOS service
+
+From a source checkout, `make service` builds everything and installs
+`tui serve --sync-dir ...` as a launchd login agent (`com.genkio.tui`), so it
+starts at boot and comes back if it crashes. It runs the binaries in this
+checkout, with the `PATH` of the shell that installed it.
+
+```sh
+make service            # install (or reinstall) and start
+make restart            # rebuild and restart after a code change
+make logs               # follow ~/Library/Logs/tui.log
+make service-uninstall  # stop it and remove it from login
+```
+
 ## The `all` timeline
 
 Bare `tui` opens **all**: one feed of the unread items from every logged-in

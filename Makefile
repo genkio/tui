@@ -2,11 +2,22 @@ APPS := x inoreader slack folo reddit douban bilibili
 CODESIGN_ID := tui-codesign
 
 .DEFAULT_GOAL := build
-.PHONY: build run serve launcher apps firewall signing-cert clean help $(APPS)
+.PHONY: build run serve service restart logs service-uninstall launcher apps firewall signing-cert clean help $(APPS)
 
 # Where this machine's server keeps the copy it syncs after every fetch. Another
 # host with another path passes its own: make serve SYNC_DIR=...
-SYNC_DIR := ~/box/tui
+SYNC_DIR := $(HOME)/box/tui
+
+# launchd agent running the same `tui serve` as `make serve`, from this checkout.
+SERVICE := com.genkio.tui
+PLIST := $(HOME)/Library/LaunchAgents/$(SERVICE).plist
+LOG := $(HOME)/Library/Logs/tui.log
+DOMAIN = gui/$$(id -u)
+# Prints the log from before the (re)start until the new server says it is up.
+AWAIT_UP = n=$$(wc -l < $(LOG) 2>/dev/null || echo 0); \
+	  launchctl kickstart -k $(DOMAIN)/$(SERVICE); \
+	  for i in $$(seq 120); do tail -n +$$((n+1)) $(LOG) | grep -q 'listening on' && break; sleep 0.5; done; \
+	  tail -n +$$((n+1)) $(LOG)
 
 build: launcher apps ## Build tui and every standalone app binary
 
@@ -55,10 +66,47 @@ run: launcher ## Open the terminal All client
 serve: build ## Rebuild and run the web server the way this machine runs it
 	./tui serve --sync-dir $(SYNC_DIR)
 
+# PATH is the installing shell's, since launchd's bare one lacks tailscale, pi
+# and the rest the server shells out to. Re-run after changing it.
+service: build ## Install tui serve as a login agent (starts at boot, restarts on crash) and start it
+	@mkdir -p $(dir $(PLIST)) $(dir $(LOG))
+	@printf '%s\n' \
+	  '<?xml version="1.0" encoding="UTF-8"?>' \
+	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+	  '<plist version="1.0"><dict>' \
+	  '<key>Label</key><string>$(SERVICE)</string>' \
+	  '<key>ProgramArguments</key><array>' \
+	  '<string>$(CURDIR)/tui</string><string>serve</string><string>--sync-dir</string><string>$(SYNC_DIR)</string>' \
+	  '</array>' \
+	  '<key>WorkingDirectory</key><string>$(CURDIR)</string>' \
+	  "<key>EnvironmentVariables</key><dict><key>PATH</key><string>$$PATH</string></dict>" \
+	  '<key>RunAtLoad</key><true/>' \
+	  '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>' \
+	  '<key>ThrottleInterval</key><integer>5</integer>' \
+	  '<key>StandardOutPath</key><string>$(LOG)</string>' \
+	  '<key>StandardErrorPath</key><string>$(LOG)</string>' \
+	  '</dict></plist>' > $(PLIST)
+	@plutil -lint -s $(PLIST)
+	@launchctl bootout $(DOMAIN)/$(SERVICE) 2>/dev/null; \
+	  while launchctl print $(DOMAIN)/$(SERVICE) >/dev/null 2>&1; do sleep 0.2; done; \
+	  launchctl bootstrap $(DOMAIN) $(PLIST)
+	@$(AWAIT_UP)
+
+restart: build ## Rebuild and restart the installed service
+	@launchctl print $(DOMAIN)/$(SERVICE) >/dev/null 2>&1 || { echo "$(SERVICE) not loaded; run make service"; exit 1; }
+	@$(AWAIT_UP)
+
+logs: ## Follow the service log
+	tail -n 50 -F $(LOG)
+
+service-uninstall: ## Stop the service and remove it from login
+	-launchctl bootout $(DOMAIN)/$(SERVICE)
+	rm -f $(PLIST)
+
 clean: ## Remove built binaries
 	rm -f tui
 	@for a in $(APPS); do $(MAKE) -C plugins/$$a clean || true; done
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-9s\033[0m %s\n", $$1, $$2}'
+	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2}'

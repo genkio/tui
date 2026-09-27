@@ -1,32 +1,23 @@
 # tui
 
-## Restarting the dev server after a change
+## Restarting the server after a change
 
-The server runs in the foreground of a [Herdr](https://herdr.dev) pane, usually
-the one below this agent's. Find it rather than guessing the id, which changes
-between sessions:
-
-```sh
-herdr pane list --workspace "$HERDR_WORKSPACE_ID"   # the one whose cwd is this repo
-herdr pane layout --pane "$HERDR_PANE_ID"           # which of them is below
-```
-
-Rebuild and restart it there, not in a fresh shell, so it keeps the terminal the
-user is watching:
+The server runs as a launchd agent (`com.genkio.tui`, installed by
+`make service`), not in a terminal. After a change that needs to be seen in the
+running web UI, rebuild and restart it:
 
 ```sh
-herdr pane send-keys <pane-id> ctrl+c
-herdr pane run <pane-id> 'make serve'
-herdr pane wait-output <pane-id> --match 'listening on' --timeout 180000
-herdr pane read <pane-id> --source recent-unwrapped --lines 20
+make restart   # builds ./tui and every plugin, restarts, prints the log until "listening on"
 ```
 
-`make serve` builds `./tui` plus every plugin binary and runs the server the way
-this machine runs it, `--sync-dir` and all. Another sync dir is
-`make serve SYNC_DIR=...`; check the pane's scrollback if what it was running
-looks different.
+No need to ask. Its output goes to `~/Library/Logs/tui.log` (`make logs` follows
+it; the user may be watching that in a Herdr pane). If `make restart` says the
+agent isn't loaded, run `make service`. Re-run `make service` too if the
+Makefile's `service` target or `SYNC_DIR` changed, since the plist is written
+from them.
 
-Do this whenever a change needs to be seen in the running web UI. No need to ask.
+`make serve` still runs it in the foreground, but only after
+`make service-uninstall`, or the two fight over port 8080.
 
 ## "release"
 
