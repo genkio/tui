@@ -796,12 +796,21 @@ func appLabel(app string) string {
 	if l := appLabels[app]; l != "" {
 		return l
 	}
+	if p, ok := customs.lookup(app); ok && p.meta.Label != "" {
+		return p.meta.Label
+	}
 	return app
 }
 
 func appColor(app string) string {
 	if c := appColors[app]; c != "" {
 		return c
+	}
+	if p, ok := customs.lookup(app); ok {
+		if p.meta.Color != "" {
+			return p.meta.Color
+		}
+		return customColor
 	}
 	return "#4a9eff"
 }

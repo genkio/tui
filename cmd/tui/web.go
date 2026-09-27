@@ -341,6 +341,13 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	if syncPath != "" {
 		fmt.Printf("  syncing after each fetch to %s\n", syncPath)
 	}
+	if dir := core.PluginsDir(); dir != "" {
+		names := customs.scan()
+		if len(names) == 0 {
+			names = []string{"none yet"}
+		}
+		fmt.Printf("  custom plugins from %s: %s\n", dir, strings.Join(names, ", "))
+	}
 	if drain {
 		fmt.Println("  draining: a fetched Inoreader article is marked read there so the rest of the backlog can be reached")
 	}
@@ -449,7 +456,8 @@ func tailnetReachable(host, tailnetIP string) bool {
 //
 // x counts twice: its For You timeline is a source of its own here (see
 // xForYouApp), swept and served like any other, and it is logged in exactly when
-// x is because it is x.
+// x is because it is x. A custom plugin needs no login, so every one in the
+// plugins directory is on.
 func authedFeedApps(root string) []string {
 	var out []string
 	for _, a := range appsIn(root) {
@@ -461,7 +469,7 @@ func authedFeedApps(root string) []string {
 			out = append(out, xForYouApp)
 		}
 	}
-	return out
+	return append(out, customs.scan()...)
 }
 
 const (

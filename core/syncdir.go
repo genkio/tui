@@ -67,3 +67,18 @@ func ConfigPath(app, file string) string {
 	}
 	return filepath.Join(dir, app, file)
 }
+
+// PluginsDir is where custom plugins (one parser file each) are read from:
+// $TUI_SYNC_DIR/plugins when the sync dir is set, so one flag carries both,
+// else $XDG_CONFIG_HOME/tui/plugins or ~/.config/tui/plugins. Empty when no
+// location can be resolved.
+func PluginsDir() string {
+	if dir := SyncDir(); dir != "" {
+		return filepath.Join(dir, "plugins")
+	}
+	dir := userConfigDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "tui", "plugins")
+}

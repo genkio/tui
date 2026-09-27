@@ -23,6 +23,8 @@ func runCommand(args []string) error {
 			return runWebCommand(args[1:])
 		case "all":
 			return runAllCommand(args[1:])
+		case "custom":
+			return runCustomCommand(args[1:])
 		}
 	}
 	return runAllCommand(args)

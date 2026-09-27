@@ -47,6 +47,7 @@ $TUI_SYNC_DIR/
   feed.db                      snapshot of the feed database
   config/<app>-tui/config.toml per-app settings
   videos/                      what the web UI's keep saved (see below)
+  plugins/                     custom plugins, one parser file each (see below)
 ```
 
 Migrate existing state once:
@@ -469,6 +470,68 @@ Run one active server for a synced snapshot; if two machines overwrite it, the
 last completed fetch wins. SQLite keeps the full feed, blocked history, saved
 items, and plugin read markers. The limits apply only to what one web response
 sends to a browser.
+
+### Custom plugins
+
+A custom plugin is a source that is one JavaScript file instead of a plugin
+compiled into `tui`: it fetches a page and parses it into items, the way an
+RSSHub route does. It needs no login. The server reads them from `plugins/` in
+the sync directory (`~/.config/tui/plugins` without one), so `--sync-dir
+~/Dropbox/tui` loads `~/Dropbox/tui/plugins/*.js`. The file name is the source
+name: `forum.js` becomes a `forum` chip, swept, cached, counted, sifted,
+summarized and marked read like any other source. Read state lives only in
+`feed.db`, since there is nothing upstream to tell.
+
+The folder is read on every page load and sweep, and a parser on every fetch,
+so adding or editing one needs no restart: the next sweep picks it up. A
+parser that fails to load or fetch still gets a chip, drawn red with the error.
+Try one without the server:
+
+```sh
+tui custom --sync-dir ~/Dropbox/tui forum   # or: tui custom ./path/to/parser.js
+```
+
+A parser is CommonJS. `fetch` returns the items, optionally `async`; `label`,
+`color` and `description` are optional and style the chip:
+
+```js
+module.exports = {
+  label: "frm",
+  color: "#2a9d8f",
+  fetch() {
+    const url = "https://forum.example.com/threads/123";
+    const $ = load(get(url, { encoding: "shift_jis" }));  // encoding only if the site misreports it
+    const thread = $("h1").text().trim();
+    return $("article.post").map((i, el) => {
+      const post = $(el);
+      return {
+        id: post.attr("data-id"),                 // required, and stable across fetches
+        html: post.find(".content").html(),       // or body: plain text
+        url: `${url}#${post.attr("data-id")}`,
+        author: post.find(".author").text(),
+        source: thread,
+        ts: post.find("time").attr("datetime"),   // a Date, RFC 3339, or epoch ms
+      };
+    });
+  },
+};
+```
+
+What the script can call:
+
+- `get(url, { encoding, headers })` fetches a page as text. The encoding comes
+  from the response unless you name one. An error status throws.
+- `load(html)` returns a cheerio-style `$`. Selections have `find`, `filter`,
+  `closest`, `children`, `parent`, `next`, `prev`, `first`, `last`, `eq`, `is`,
+  `hasClass`, `text`, `html`, `attr`, `length`, `toArray`, `each` and `map`
+  (which returns a plain array and drops `null` items).
+- `console.log(...)` writes to the server log.
+
+Item fields match `--json`: `id`, `title`, `body` or `html` (flattened to text,
+with its images put on the card), `url`, `author`, `source`, `ts`, `images`,
+`video`, `poster`, `audio`, `type`. A fetch keeps the newest 300. The script has
+no filesystem or process access, and the fetch's time limit also stops a
+runaway loop.
 
 ### Blocking by keyword
 

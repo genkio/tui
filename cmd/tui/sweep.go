@@ -74,12 +74,21 @@ type markFunc func(ctx context.Context, app string, ids []string) error
 
 func subprocessFetch(root string) fetchFunc {
 	return func(ctx context.Context, app string, max int, now time.Time) ([]core.Item, bool, error) {
+		if p, ok := customs.lookup(app); ok {
+			return fetchCustom(ctx, p, max, now)
+		}
 		return fetchApp(ctx, root, app, max, now)
 	}
 }
 
 func subprocessMark(root string) markFunc {
 	return func(_ context.Context, app string, ids []string) error {
+		// A custom plugin has nothing upstream to tell: the cache is its read
+		// state. Nor has one whose file is gone, whose marks would otherwise be
+		// retried against a subcommand that does not exist, forever.
+		if plugin, _ := pluginOf(app); pluginMains[plugin] == nil {
+			return nil
+		}
 		return runMarkRead(root, app, ids, markTimeout)
 	}
 }
