@@ -24,6 +24,7 @@ func TestKeepSourceNamesWhatYtDlpCanRead(t *testing.T) {
 		{core.Item{App: "bilibili", URL: "https://www.bilibili.com/video/BV1xx411c7mD"}, biliPath + "?id=BV1xx411c7mD", "", "", "https://www.bilibili.com/video/BV1xx411c7mD"},
 		{core.Item{App: "inoreader"}, "", "dQw4w9WgXcQ", "", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
 		{core.Item{App: "reddit"}, "", "", "tealbluefinwhale", "https://www.redgifs.com/watch/tealbluefinwhale"},
+		{core.Item{App: "inoreader", Audio: "https://cdn.example/ep.mp3"}, "", "", "", "https://cdn.example/ep.mp3"},
 		{core.Item{App: "reddit"}, "", "", "", ""},
 	} {
 		if got := keepSource(c.it, c.video, c.yt, c.rg); got != c.want {
@@ -168,6 +169,16 @@ func TestKeepButtonReplacesTheDownloadLink(t *testing.T) {
 	}
 	if !strings.Contains(out, `class="keep" type="button" data-n="x-50"`) || !strings.Contains(out, `data-state="kept"`) {
 		t.Fatalf("no kept button in %s", out)
+	}
+}
+
+func TestKeepButtonOnAPodcastEpisode(t *testing.T) {
+	keeps = newKeeper("http://127.0.0.1:1", t.TempDir())
+	t.Cleanup(func() { keeps = nil })
+
+	out := renderPage(t, []core.Item{{App: "inoreader", ID: "7", Title: "E253｜an episode", Audio: "https://cdn.example/ep.mp3"}}, []string{"inoreader"}, nil, "", "")
+	if !strings.Contains(out, `class="keep" type="button" data-n="inoreader-7" data-u="https://cdn.example/ep.mp3" data-t="E253｜an episode"`) {
+		t.Fatalf("no keep button for the episode in %s", out)
 	}
 }
 

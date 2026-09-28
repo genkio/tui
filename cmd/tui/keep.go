@@ -325,7 +325,8 @@ func keepTitle(texts ...string) string {
 }
 
 // keepSource is what the download server is handed for a card's video: the clip itself
-// when the card carries a direct one, else the page yt-dlp knows how to read.
+// when the card carries a direct one, else the page yt-dlp knows how to read, else
+// the card's podcast episode.
 func keepSource(it core.Item, video, youtube, redgif string) string {
 	switch {
 	case strings.HasPrefix(video, biliPath+"?"):
@@ -340,5 +341,5 @@ func keepSource(it core.Item, video, youtube, redgif string) string {
 	case redgif != "":
 		return "https://www.redgifs.com/watch/" + strings.ToLower(redgif)
 	}
-	return ""
+	return it.Audio
 }
