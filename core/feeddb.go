@@ -31,7 +31,11 @@ func OpenFeedDB(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	// Immediate, because a deferred transaction that reads before it writes
+	// fails with SQLITE_BUSY_SNAPSHOT when another connection (a plugin's
+	// readstore or chartcache) commits in between, and busy_timeout never
+	// retries that. Pragmas in the DSN so every pooled connection gets them.
+	db, err := sql.Open("sqlite", path+"?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
 	if err != nil {
 		return nil, err
 	}
@@ -67,9 +71,6 @@ var feedColumns = []string{
 }
 
 const feedSchema = `
-PRAGMA busy_timeout = 5000;
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS items (
   app TEXT NOT NULL,
   id TEXT NOT NULL,
