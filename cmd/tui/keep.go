@@ -18,7 +18,7 @@ import (
 )
 
 // keepDirName is the folder under the sync dir the footer's keep saves into.
-const keepDirName = "videos"
+const keepDirName = "kept"
 
 // keeps is the server-side keep, nil when there is no download server to
 // hand downloads to; the footer's keep link then falls back to a browser

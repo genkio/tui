@@ -46,7 +46,7 @@ $TUI_SYNC_DIR/
   env                          credentials for every app, and TYPESAFE_API_KEY (chmod 600)
   feed.db                      snapshot of the feed database
   config/<app>-tui/config.toml per-app settings
-  videos/                      what the web UI's keep saved (see below)
+  kept/                        what the web UI's keep saved (see below)
   plugins/                     custom plugins, one parser file each (see below)
 ```
 
@@ -67,13 +67,14 @@ the apps actually use. Feed content, plugin read marks, saved and blocked
 items, keywords, and the Douban chart cache all live in the local database.
 The server snapshots it into the sync directory after each fetch.
 
-### Keeping videos on the server
+### Keeping videos and podcasts on the server
 
 With a sync dir and a download server running on the same machine, a video
 card's **keep** stops being a browser download: the server hands the video (x,
 reddit, bilibili, YouTube, redgifs) to the download server, which fetches it
-into `$TUI_SYNC_DIR/videos/`. Files are named after the video's title, or the
-post's text when it has none; `videos/.keeps.json` records which file belongs
+into `$TUI_SYNC_DIR/kept/`. A podcast card gets a keep too, for its episode.
+Files are named after the video's title, or the post's text when it has none;
+`kept/.keeps.json` records which file belongs
 to which post. The button then reads *keeping…*, *kept*, or *error* (tap it
 for why). Point it at the download server in the env file:
 

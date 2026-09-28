@@ -108,7 +108,7 @@ func keepSettle(t *testing.T, k *keeper, name string) keepStatus {
 
 func TestKeepFollowsTheDownloadToAFile(t *testing.T) {
 	saver, posts := fakeSaver(t)
-	k := newKeeper(saver.URL, filepath.Join(t.TempDir(), "videos"))
+	k := newKeeper(saver.URL, filepath.Join(t.TempDir(), "kept"))
 	k.poll = time.Millisecond
 
 	if st := keepCall(t, k, "POST", "x-1", "https://video.twimg.com/a.mp4"); st.State != keepPending {
