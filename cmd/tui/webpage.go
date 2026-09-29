@@ -338,6 +338,9 @@ type filterGroup struct {
 	// A pile that is a page of its own rather than a slice of this one: drawn
 	// with the saved, skipped and blocked chips instead of among the filters.
 	Pile bool
+	// The sources: the one group left in the dialog while a source's
+	// subcategories are up.
+	Sources bool
 }
 
 type filterChip struct {
@@ -1193,7 +1196,7 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 		}}, appChips...)
 	}
 	if len(appChips) > 0 {
-		out = append(out, filterGroup{Chips: appChips})
+		out = append(out, filterGroup{Chips: appChips, Sources: true})
 	}
 
 	// The ladder, after the sources and before the content types: what a sift
