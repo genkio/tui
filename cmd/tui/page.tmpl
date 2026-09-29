@@ -172,7 +172,25 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
    The groups are display:contents so every chip is a flex item of the one row
    and they fill it as they come — a nested flex box per group would break the
    line at the group boundary and leave the rest of it empty. */
-.filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+.filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:14px}
+/* The row outgrew the space over the first card, so it lives in a modal the
+   header button opens. No padding on the dialog itself: a click whose target is
+   the dialog is then a click on the backdrop, which is how it closes. */
+.filters.quick{padding:0;margin:0 0 12px}
+.filtersdlg{
+  width:min(94vw,600px);max-height:80vh;overflow:auto;padding:0;color:var(--fg);background:var(--bg);
+  border:1px solid var(--line);border-radius:14px;font:inherit;
+}
+.filtersdlg::backdrop{background:rgba(0,0,0,.55)}
+.filteropen{
+  flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px;overflow:hidden;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-radius:999px;
+  padding:3px 9px 3px 8px;min-height:32px;color:var(--fg);
+  font:inherit;font-size:13px;font-weight:600;white-space:nowrap;
+}
+.filteropen svg{flex:none;width:15px;height:15px;color:var(--muted)}
+.filteropen .plabel,.filteropen .chip{min-width:0;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+#savedlink{flex:none}
 .fgroup{display:contents}
 /* groups are set apart by a wider gap, not a rule: the row wraps as chips are
    added, and a rule at the start of a wrapped line reads as a stray mark */
@@ -223,14 +241,10 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
    skipped, blocked): each goes to a page of its own, so they are drawn lighter than the chips that narrow this one */
 .fchip.flink{background:transparent;border-style:dashed}
 .fchip.flink[data-on="1"]{border-style:solid}
-/* the last layer, after the piles: which subreddit, which rss feed. Only the
-   busiest of them fit — a source can have dozens, and a wall of them would
-   push the first card off the screen — so the script keeps one row and the rest
-   are behind "more". */
+/* the last layer, after the piles: which subreddit, which rss feed */
 /* a feed title runs as long as its owner felt like; the chip is capped and the
    whole of it stays in the tooltip */
 .subs .slabel{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fmore{color:var(--accent)}
 .card.read{opacity:.45}
 .settings{
   flex:none;display:inline-flex;align-items:center;justify-content:center;
@@ -531,6 +545,8 @@ video.ffs{object-fit:cover !important}
 <div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-skippedview="{{if .SkippedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-guest="{{if .Guest}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-deckstart="{{.DeckStart}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" data-sumlang="{{.SumLang}}" hidden></div>
 <div class="wrap">
 {{if not .Guest}}<header>
+  <button class="filteropen" id="filtersOpen" type="button" title="pick what this list shows" aria-label="filters" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>{{range .Picked}}{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span class="plabel">{{.Label}}</span>{{end}}{{end}}</button>
+  <a class="fchip flink" id="savedlink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn">{{.Saved}}</span></a>
   <div class="sub" id="sub">{{if .BlockedView}}<button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}</div>
   {{if .SavedModeHref}}<a class="decklink" id="savedmode" href="{{.SavedModeHref}}" title="{{if .SavedCompact}}title-only saved items — tap for full cards{{else}}full saved cards — tap for titles only{{end}}"><span class="dmark">{{if .SavedCompact}}≡{{else}}▤{{end}}</span>{{if .SavedCompact}}compact{{else}}full{{end}}</a>
   {{end}}{{if .ClearBlocked}}<button class="sortlink headbutton" id="clearBlocked" type="button" data-total="{{.Blocked}}" title="delete all stored blocked items">clear</button>
@@ -542,7 +558,8 @@ video.ffs{object-fit:cover !important}
 {{end}}<div class="warn mishap hid" id="mishap" data-id="">⚠ <span class="msay" id="mishapsays"></span><button class="mishapx" id="mishapx" type="button" title="dismiss until the next one" aria-label="dismiss">×</button></div>
 <div class="warn hid" id="offwarn"></div>
 <div class="warn hid" id="offline">⚠ {{if .SavedView}}Offline — this is the saved list as it stood when the server was last in reach, and nothing here can be saved, tagged or played until it is again.{{else}}Offline — the server is not in reach. The saved list is the part that reads without it.{{end}}</div>
-{{if not .Guest}}<div class="filters" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}<button class="fchip fmore hid" id="fmore" type="button" title="show the rest of them">more</button></span>{{end}}</div>
+{{if not .Guest}}<div class="filters quick" id="quick">{{range .Quick}}<a class="fchip{{if .Pile}} flink{{end}}{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{end}}</div>
+<dialog class="filtersdlg" id="filtersdlg"><div class="filters" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div></dialog>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
@@ -772,7 +789,7 @@ function scheduleRecount(){
 }
 // What the server said each chip holds, kept before anything writes over it.
 (function(){
-  document.querySelectorAll('#filters .fchip[data-kind], #subs .fchip[data-kind]').forEach(function(chip){
+  document.querySelectorAll('#filters .fchip[data-kind], #quick .fchip[data-kind]').forEach(function(chip){
     var n = chip.querySelector('.fn');
     if(n) chip.dataset.n0 = n.textContent;
   });
@@ -806,7 +823,7 @@ function recountChips(){
   // ...and the other direction: a card you have just asked a discussion of has
   // this moment joined the pile, so the chip goes up by one and shows itself.
   var aside = document.querySelectorAll('article.card[data-gisting]').length;
-  document.querySelectorAll('#filters .fchip[data-kind], #subs .fchip[data-kind]').forEach(function(chip){
+  document.querySelectorAll('#filters .fchip[data-kind], #quick .fchip[data-kind]').forEach(function(chip){
     var n = chip.querySelector('.fn'), base = parseInt(chip.dataset.n0, 10);
     if(!n || isNaN(base)) return;
     var group = gone[chip.dataset.kind];
@@ -2600,70 +2617,29 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
 // cached) can be a chip like any other. The click is still intercepted, because
 // leaving the page is exactly when a mark that hasn't reached the server yet
 // would be lost.
-var filtersBar = document.getElementById('filters');
-if (filtersBar) filtersBar.addEventListener('click', function(e){
-  var a = e.target.closest ? e.target.closest('a.fchip') : null;
-  if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
-  e.preventDefault();
-  leaveFor(a.getAttribute('href'));
-});
-
-// The subcategory row is kept to a single line: a source can carry dozens of
-// them, and a block of chips that pushes the first card off the screen is worse
-// than not offering the narrowing at all. Which ones fit is a question only the
-// laid-out page can answer, so the server sends them all, busiest first, and
-// this hides whatever wrapped — behind a "more" that has to fit on the line too,
-// which is why the trim runs until the button lands back on the first row.
-(function(){
-  var bar = document.getElementById('subs');
-  if (!bar) return;
-  var more = document.getElementById('fmore');
-  var chips = Array.prototype.slice.call(bar.querySelectorAll('a.fchip'));
-  if (!chips.length) return;
-  var open = false;
-  // Expanding is a choice about this page, so it sticks until it is taken back:
-  // the button that opened the row is the one that closes it again.
-  function expand(forced){
-    open = true;
-    chips.forEach(function(c){ c.classList.remove('hid'); });
-    // Forced open because the chip that is on would have been hidden: there is
-    // no collapsing back to a row that denies the page you are looking at, so
-    // don't offer it.
-    if (forced){ more.classList.add('hid'); return; }
-    more.classList.remove('hid');
-    more.textContent = 'less';
-    more.title = 'back to one row';
-  }
-  function layout(){
-    if (open) return;
-    chips.forEach(function(c){ c.classList.remove('hid'); });
-    more.classList.remove('hid');
-    more.textContent = 'more'; // a width to measure against; the count comes below
-    var top = chips[0].offsetTop, cut = chips.length;
-    for (var i = 0; i < chips.length; i++){
-      if (chips[i].offsetTop > top){ cut = i; break; }
-    }
-    if (cut === chips.length && more.offsetTop <= top){ more.classList.add('hid'); return; }
-    for (var j = cut; j < chips.length; j++) chips[j].classList.add('hid');
-    while (cut > 1 && more.offsetTop > top){ cut--; chips[cut].classList.add('hid'); }
-    // The chip that is on says what you are looking at; hiding it would leave
-    // the row denying the page it belongs to.
-    for (var k = cut; k < chips.length; k++){
-      if (chips[k].dataset.on === '1'){ expand(true); return; }
-    }
-    more.textContent = '+' + (chips.length - cut) + ' more';
-    more.title = 'show the rest of them';
-  }
-  more.addEventListener('click', function(){
-    if (open){ open = false; layout(); return; }
-    expand(false);
+['filters', 'quick'].forEach(function(id){
+  var bar = document.getElementById(id);
+  if (bar) bar.addEventListener('click', function(e){
+    var a = e.target.closest ? e.target.closest('a.fchip') : null;
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+    e.preventDefault();
+    // A pick is a page load, and the source chips have a second row under them
+    // to pick from next, so the dialog comes back open on the page it lands on.
+    if (id === 'filters') try { sessionStorage.setItem('tui:filters-open', '1'); } catch(err){}
+    leaveFor(a.getAttribute('href'));
   });
-  // Open by default: the narrowing is the point of the row, so show it all and
-  // let "less" put it back. The layout pass still runs first, to learn whether
-  // there is anything to expand at all.
-  layout();
-  if (!more.classList.contains('hid')) expand(false);
-  window.addEventListener('resize', layout);
+});
+(function(){
+  var dlg = document.getElementById('filtersdlg'), open = document.getElementById('filtersOpen');
+  if (!dlg || !open) return;
+  open.addEventListener('click', function(){ dlg.showModal(); });
+  dlg.addEventListener('click', function(e){ if (e.target === dlg) dlg.close(); });
+  try {
+    if (sessionStorage.getItem('tui:filters-open')){
+      sessionStorage.removeItem('tui:filters-open');
+      dlg.showModal();
+    }
+  } catch(err){}
 })();
 
 // The order and layout toggles: each a link to this same page the other way
@@ -2672,7 +2648,7 @@ if (filtersBar) filtersBar.addEventListener('click', function(e){
 // each goes to names what it picked, and the script in the head files that away
 // as what this browser wants from here on. Both leave through leaveFor, because
 // a queued read that hasn't reached the server yet would be lost otherwise.
-['sortlink', 'decklink', 'savedmode'].forEach(function(id){
+['sortlink', 'decklink', 'savedmode', 'savedlink'].forEach(function(id){
   var a = document.getElementById(id);
   if (!a) return;
   a.addEventListener('click', function(e){

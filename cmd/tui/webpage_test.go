@@ -1524,7 +1524,10 @@ func TestCardType(t *testing.T) {
 		// video all the same.
 		{"youtube link", core.Item{App: "folo", Body: "clip: https://youtu.be/aqz-KE-bpKQ"}, "video"},
 		{"podcast", core.Item{App: "inoreader", Audio: "https://ex.com/ep.mp3"}, "audio"},
-		{"both", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4", Audio: "https://ex.com/ep.mp3"}, "video"},
+		{"both", core.Item{App: "x", Video: "https://video.twimg.com/a.mp4", Audio: "https://ex.com/ep.mp3"}, "audio"},
+		{"long video over an episode", core.Item{
+			App: "x", Video: "https://video.twimg.com/a.mp4", VidSecs: 3600, Audio: "https://ex.com/ep.mp3",
+		}, "audio"},
 		// A clip the source says runs under videoFloor is a short rather than a
 		// video: a timeline is full of twenty-second loops attached to a sentence,
 		// and counting those as video makes the chip promise a screenful of
@@ -2569,7 +2572,7 @@ func TestSubcategoryRowRenders(t *testing.T) {
 	if filters := strings.Index(page, `id="filters"`); filters > subs {
 		t.Error("the second row belongs under the row it narrows")
 	}
-	for _, want := range []string{`data-kind="sub"`, `data-key="r/golang"`, `id="fmore"`} {
+	for _, want := range []string{`data-kind="sub"`, `data-key="r/golang"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("missing %s:\n%s", want, page)
 		}
@@ -2605,24 +2608,24 @@ func TestEmptyNoteSitsUnderTheChips(t *testing.T) {
 	}
 }
 
-// The trimmed row opens and closes again: the button that showed the rest is
-// the one that puts them back.
-func TestSubcategoryRowFoldsBothWays(t *testing.T) {
+// The chips live in a dialog, so the header button is what says which ones are
+// on: the source and the stream under it.
+func TestFilterButtonShowsThePick(t *testing.T) {
 	page := renderInput(t, pageInput{
 		items: []core.Item{
 			{App: "reddit", ID: "1", Source: "r/golang", Title: "a"},
 			{App: "reddit", ID: "2", Source: "r/rust", Title: "b"},
 		},
 		total: 2, apps: []string{"reddit"}, now: time.Now(),
-		sel: feedSel{Kind: "app", Key: "reddit"}, query: url.Values{"app": {"reddit"}},
+		sel: feedSel{Kind: "app", Key: "reddit", Sub: "r/golang"}, query: url.Values{"app": {"reddit"}, "sub": {"r/golang"}},
 	})
-	if !strings.Contains(page, `id="fmore"`) {
-		t.Fatalf("no fold control:\n%s", page)
+	open, dlg := strings.Index(page, `id="filtersOpen"`), strings.Index(page, `id="filtersdlg"`)
+	if open < 0 || dlg < 0 {
+		t.Fatalf("want a button and the dialog it opens:\n%s", page)
 	}
-	for _, want := range []string{`more.textContent = 'less'`, `'+' + (chips.length - cut) + ' more'`} {
-		if !strings.Contains(page, want) {
-			t.Errorf("the button should say both things; missing %s", want)
-		}
+	button := page[open : strings.Index(page[open:], "</button>")+open]
+	if !strings.Contains(button, `>r/golang</span>`) {
+		t.Errorf("the button should name the stream that is on:\n%s", button)
 	}
 }
 
@@ -2888,5 +2891,45 @@ func TestSiftChipsCountDownWhileReading(t *testing.T) {
 	if !strings.Contains(p, `var gone = {app:{}, type:{}, sub:{}, rank:{}, mine:{}, gist:{}, all:0};`) ||
 		!strings.Contains(p, `['rank','mine'].forEach(function(k){`) {
 		t.Error("the recount should have a bucket per chip axis")
+	}
+}
+
+// A few chips stay over the first card, in their own order, as well as in the
+// dialog; the sparkle is the dialog's alone.
+func TestQuickRowKeepsTheFewOnTop(t *testing.T) {
+	page := renderInput(t, pageInput{
+		items: []core.Item{
+			{App: "reddit", ID: "1", Title: "a", Video: "https://v.example/a.mp4"},
+			{App: "reddit", ID: "2", Title: "b"},
+			{App: "reddit", ID: "3", Title: "c", Audio: "https://ex.com/ep.mp3"},
+		},
+		total: 3, apps: []string{"reddit"}, now: time.Now(), query: url.Values{},
+	})
+	start := strings.Index(page, `id="quick"`)
+	if start < 0 {
+		t.Fatalf("no quick row:\n%s", page)
+	}
+	row := page[start : strings.Index(page[start:], "</div>")+start]
+	last := -1
+	for _, want := range []string{`data-key="all"`, `data-key="digest"`, `data-key="gist"`, `data-key="video"`, `data-key="audio"`} {
+		i := strings.Index(row, want)
+		if i < 0 {
+			t.Fatalf("quick row missing %s:\n%s", want, row)
+		}
+		if i < last {
+			t.Errorf("%s is out of order:\n%s", want, row)
+		}
+		last = i
+	}
+	for _, not := range []string{`/?saved=1`, `data-key="text"`, `data-key="reddit"`, `fsum`} {
+		if strings.Contains(row, not) {
+			t.Errorf("quick row should not carry %s:\n%s", not, row)
+		}
+	}
+	if head := page[strings.Index(page, "<header>"):strings.Index(page, "</header>")]; !strings.Contains(head, `id="savedlink" href="/?saved=1"`) {
+		t.Errorf("the saved chip should sit in the header:\n%s", head)
+	}
+	if !strings.Contains(page[strings.Index(page, `id="filtersdlg"`):], `data-key="video"`) {
+		t.Error("the dialog should still hold the quick chips")
 	}
 }

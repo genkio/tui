@@ -317,7 +317,13 @@ type pageData struct {
 	Filters []filterGroup
 	// The second row: this source's subcategories, busiest first. Only ever
 	// filled when a source chip that has them is the one on.
-	Subs       []filterChip
+	Subs []filterChip
+	// The chips that are on, for the header button that opens the row: the row
+	// lives in a dialog now, so this is what still says what the page is.
+	Picked []filterChip
+	// The few chips worth a tap without opening the dialog, kept over the first
+	// card as the whole row used to be. They are in the dialog as well.
+	Quick      []filterChip
 	Cards      []cardData
 	TagFilters []filterChip
 	SavedTags  map[string][]string
@@ -359,6 +365,30 @@ type filterChip struct {
 	// a service (the content types, and the saved list, which is read off disk).
 	State string // "ok", "bad", or ""
 	Title string // what the state means, for a hover or long press
+	Pile  bool   // drawn as a page of its own (the quick row's copy of a pile chip)
+}
+
+// quickChips are the ones kept over the first card, in the order they sit
+// there. Saved sits in the header instead, beside the filter button.
+var quickChips = []struct{ kind, key string }{
+	{allApp, allApp}, {"mine", "mine"}, {"digest", "digest"}, {"gist", "gist"},
+	{"type", "video"}, {"type", "short"}, {"type", "audio"},
+}
+
+func quickRow(filters []filterGroup) []filterChip {
+	var out []filterChip
+	for _, q := range quickChips {
+		for _, g := range filters {
+			for _, c := range g.Chips {
+				if c.Kind == q.kind && c.Key == q.key {
+					// The sparkle stays in the dialog: one briefing control per source.
+					c.Summarize, c.Pile = false, g.Pile
+					out = append(out, c)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // digestData is the digest the summary chip shows: what it read, when, how
@@ -629,6 +659,29 @@ func buildPageData(in pageInput) pageData {
 		}
 	}
 
+	var picked []filterChip
+	switch {
+	case in.savedView:
+		picked = append(picked, filterChip{Label: "saved"})
+	case in.skippedView:
+		picked = append(picked, filterChip{Label: "skipped"})
+	case in.blockedView:
+		picked = append(picked, filterChip{Label: "blocked"})
+	}
+	for _, g := range filters {
+		for _, c := range g.Chips {
+			// Beside a pile's name, "all" is the absence of a narrowing, not a word.
+			if c.On && !(c.Kind == allApp && picked != nil) {
+				picked = append(picked, c)
+			}
+		}
+	}
+	for _, c := range append(append([]filterChip{}, subs...), in.tagFilters...) {
+		if c.On {
+			picked = append(picked, c)
+		}
+	}
+
 	head := "all — tui"
 	if in.itemView && len(in.items) > 0 {
 		head = headTitle(in.items[0])
@@ -674,6 +727,8 @@ func buildPageData(in pageInput) pageData {
 		Interests:     in.interests,
 		Filters:       filters,
 		Subs:          subs,
+		Picked:        picked,
+		Quick:         quickRow(filters),
 		Sel:           in.sel.String(),
 		SummaryApp:    summaryApp,
 		SummaryOpen:   summaryApp != "" && in.summaryOpen,
@@ -1028,14 +1083,15 @@ const videoFloor = 5 * 60
 // itemType sorts an item by what it carries, so a list can be sliced into
 // things to watch, things to listen to, and things to read. Read off the item
 // rather than the built card, because the feed picks a type before it has built
-// anything. An item with both a player and an episode is audio: the episode is
-// what you would sit down for, and a promo clip attached to it is not the point.
+// anything. An item with both a player and an episode is audio, however long
+// the clip: the episode is what you would sit down for, and a clip attached to
+// it is not the point.
 func itemType(it core.Item) string {
 	switch {
-	case carriesVideo(it) && !shortClip(it):
-		return "video"
 	case it.Audio != "":
 		return "audio"
+	case carriesVideo(it) && !shortClip(it):
+		return "video"
 	case carriesVideo(it):
 		return "short"
 	default:
@@ -1251,8 +1307,7 @@ func subLabel(app, source, author string) string {
 }
 
 // subChips is the second row: with a source chip on, its own subcategories,
-// busiest first so the ones worth a tap are the ones that fit before the row
-// wraps (the page hides the overflow behind a "more"). Counted over the whole
+// busiest first so the ones worth a tap come first. Counted over the whole
 // backlog like every other chip, so the numbers hold still whether or not one
 // of them is already picked.
 //
