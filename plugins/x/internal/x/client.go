@@ -141,7 +141,7 @@ func (c *Client) timeline(ctx context.Context, endpoint string) ([]Tweet, error)
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return nil, fmt.Errorf("x.com rejected the session (HTTP %d); re-run make auth", resp.StatusCode)
+		return nil, fmt.Errorf("x session is stale: x.com rejected the cookie (HTTP %d). Re-run 'tui x --auth' to refresh it", resp.StatusCode)
 	case resp.StatusCode == http.StatusTooManyRequests:
 		return nil, fmt.Errorf("x.com rate limit hit (HTTP 429); wait a bit before refreshing")
 	case resp.StatusCode == http.StatusBadRequest:

@@ -68,7 +68,7 @@ func TestTimelineDoesNotRetryOtherFailures(t *testing.T) {
 	defer srv.Close()
 
 	_, err := testClient(srv.URL).Timeline(context.Background(), Following, 20)
-	if err == nil || !strings.Contains(err.Error(), "rejected the session") {
+	if err == nil || !strings.Contains(err.Error(), "session is stale") {
 		t.Fatalf("err = %v, want the stale-session message", err)
 	}
 	if calls != 1 {
