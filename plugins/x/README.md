@@ -116,6 +116,11 @@ with a dedicated persistent profile (so re-login is rare), waits for you to log
 in, and saves `XTUI_AUTH_TOKEN` and `XTUI_CT0` to `~/.config/tui/env`. Re-run it
 when the session expires (the TUI says "x.com rejected the session" then).
 
+The login profile (`~/.config/tui/profile`) is separate from your everyday
+browser profile, so it starts without your extensions. If your passkey lives in
+a password manager like Bitwarden, install its extension in that window once;
+it stays for later logins.
+
 Prefer to do it by hand? In your browser's DevTools, copy the `auth_token` and
 `ct0` cookie values for `x.com` and set the two variables above.
 

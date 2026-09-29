@@ -119,6 +119,9 @@ func RunAuth(ctx context.Context, loginURL string, capture func(*Session) (map[s
 		// when navigator.webdriver is true.
 		chromedp.Flag("enable-automation", false),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		// Keep extensions the user installed into this profile, e.g. a password
+		// manager holding the passkey for an account with no password.
+		chromedp.Flag("disable-extensions", false),
 	)
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancelAlloc()
