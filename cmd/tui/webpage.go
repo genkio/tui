@@ -224,6 +224,7 @@ type pageInput struct {
 	worth       map[string]float64
 	// One item on a page of its own, reached by its own URL (see itemHref).
 	itemView bool
+	guest    bool // ...opened through a shared link, by somebody without the password
 	// ?summary=1: open this source's briefing rather than its cards, which is
 	// where a finished icon on another page sends you.
 	summaryOpen bool
@@ -271,6 +272,7 @@ type pageData struct {
 	Skipped      int
 	SkippedView  bool
 	ItemView     bool // one item, on its own URL
+	Guest        bool // ...opened through a shared link, so none of the reader's own controls
 	ClearBlocked bool
 	Keywords     int
 	KeywordText  string
@@ -388,6 +390,7 @@ type cardData struct {
 	FullBody    template.HTML
 	URL         string
 	Link        string // this item's own page here, blank when that page is what you are on
+	Share       string // ...signed, for the share button; blank with no password, when the original is what to send
 	Video       string // mp4 for the inline player: the app's own, or this server's bilibili route
 	Keep        string // where the footer's keep link saves that mp4 from
 	// The server-side keep (see keep.go): what the download server is handed, the file it
@@ -505,6 +508,7 @@ func buildPageData(in pageInput) pageData {
 		if in.savedView && in.savedCompact {
 			card := buildSavedCompactCard(it, cl)
 			keepStates(&card, keptNow)
+			card.Share = shareLink(it)
 			return card
 		}
 		// In the saved view every card is saved by definition; in the feed ask
@@ -512,10 +516,11 @@ func buildPageData(in pageInput) pageData {
 		starred := in.savedView || (in.saved != nil && in.saved.has(it.App, it.ID))
 		card := buildCard(it, starred, cl)
 		keepStates(&card, keptNow)
+		card.Share = shareLink(it)
 		// A card in a list carries the way to its own page; the item view is that
 		// page, so there it would only link back to itself.
 		if !in.itemView {
-			card.Link = itemHref(it.App, it.ID)
+			card.Link = webGate.itemLink(it.App, it.ID)
 		}
 		// Where the item was left off, kept with the item itself. The feed shows
 		// it too: a card starred earlier resumes wherever you got to in it.
@@ -662,6 +667,7 @@ func buildPageData(in pageInput) pageData {
 		SkippedView:   in.skippedView,
 		Skipped:       in.skipped,
 		ItemView:      in.itemView,
+		Guest:         in.guest,
 		ClearBlocked:  in.blockedView && in.block.count() > 0,
 		Keywords:      in.block.keywordCount(),
 		KeywordText:   keywordText,
@@ -729,6 +735,17 @@ func itemHref(app, id string) string {
 		return ""
 	}
 	return "/item?" + url.Values{"app": {app}, "id": {id}}.Encode()
+}
+
+// shareLink is what the share button sends once the page is behind a password:
+// this item's page, which the recipient can open, with the original a tap away
+// on it. Without a password the page is only reachable on the tailnet, so the
+// original is still the thing worth sending.
+func shareLink(it core.Item) string {
+	if webGate == nil {
+		return ""
+	}
+	return webGate.itemLink(it.App, it.ID)
 }
 
 func filterSavedByTag(items []core.Item, tags map[string][]string, tag string) []core.Item {

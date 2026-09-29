@@ -70,6 +70,9 @@ function isItemPage(url){
 // describe bytes that no longer exist.
 function whole(req, keep){
   return fetch(req).then(function(res){
+    // Signed out: the login form, which is neither a page to keep nor a reason
+    // to fall back to the cached copy of one.
+    if (res && res.status === 401) return res;
     if (!res || !res.ok) throw new Error('unusable: ' + (res && res.status));
     return res.arrayBuffer().then(function(buf){
       var out = new Response(buf, {

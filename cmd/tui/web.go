@@ -160,6 +160,7 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		sift.serve(ctx)
 	}()
 
+	webGate = newWebAuthFromEnv()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -333,6 +334,9 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	} else if _, err := exec.LookPath("tailscale"); err == nil {
 		fmt.Printf("  no https address yet: `tailscale serve --bg %s` publishes one, which is what installing the page and offline reading need\n", port)
 	}
+	if webGate != nil {
+		fmt.Printf("  password: asked of every request through a proxy or from off the tailnet (%s)\n", webPasswordEnv)
+	}
 	if every > 0 {
 		fmt.Printf("  fetching every %s (±%d%%) into %s\n", every, int(sweepJitter*100), cache.path)
 	} else {
@@ -356,7 +360,11 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 	}
 	fmt.Println("  (ctrl-c to stop)")
 
-	srv := &http.Server{Handler: mux}
+	var handler http.Handler = mux
+	if webGate != nil {
+		handler = webGate.wrap(mux)
+	}
+	srv := &http.Server{Handler: handler}
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -754,6 +762,14 @@ func handleItem(w http.ResponseWriter, r *http.Request, loader *pageLoader, cach
 	// an item that reached this page from the render cache is not in the backlog
 	// for the save to find again.
 	rendered.put([]core.Item{it})
+	// Somebody the item was shared with sees the card and nothing of the reader
+	// around it: not the saved list, not the counts, not the tags.
+	if isGuest(r.Context()) {
+		writePage(w, tmpl, pageInput{
+			items: []core.Item{it}, total: 1, now: now, itemView: true, guest: true, query: q,
+		})
+		return
+	}
 	writePage(w, tmpl, pageInput{
 		items: []core.Item{it}, total: 1, now: now, saved: saved, block: block,
 		itemView: true, query: q, skipped: cache.skippedCount(),
