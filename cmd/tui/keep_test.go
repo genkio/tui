@@ -79,11 +79,12 @@ func fakeSaver(t *testing.T) (*httptest.Server, *atomic.Int32) {
 func keepCall(t *testing.T, k *keeper, method, name, src string) keepStatus {
 	t.Helper()
 	var r *http.Request
-	if method == "POST" {
+	switch method {
+	case "POST":
 		r = httptest.NewRequest("POST", "/keep", strings.NewReader(url.Values{"n": {name}, "u": {src}}.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	} else {
-		r = httptest.NewRequest("GET", "/keep?n="+url.QueryEscape(name), nil)
+	default:
+		r = httptest.NewRequest(method, "/keep?n="+url.QueryEscape(name), nil)
 	}
 	w := httptest.NewRecorder()
 	k.handle(w, r)
@@ -129,6 +130,28 @@ func TestKeepFollowsTheDownloadToAFile(t *testing.T) {
 	os.Remove(filepath.Join(k.dir, "x-1.mp4"))
 	if st := keepCall(t, k, "GET", "x-1", ""); st.State != keepNone {
 		t.Fatalf("after delete: %+v", st)
+	}
+}
+
+func TestKeepDeleteRemovesTheFile(t *testing.T) {
+	saver, _ := fakeSaver(t)
+	k := newKeeper(saver.URL, filepath.Join(t.TempDir(), "kept"))
+	k.poll = time.Millisecond
+
+	keepCall(t, k, "POST", "x-4", "https://video.twimg.com/a.mp4")
+	keepSettle(t, k, "x-4")
+	if st := keepCall(t, k, "DELETE", "x-4", ""); st.State != keepNone {
+		t.Fatalf("after delete: %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(k.dir, "x-4.mp4")); !os.IsNotExist(err) {
+		t.Fatalf("file still there: %v", err)
+	}
+	if _, ok := k.readIndex()["x-4"]; ok {
+		t.Fatal("index still lists it")
+	}
+	// Nothing to delete is not an error.
+	if st := keepCall(t, k, "DELETE", "x-4", ""); st.State != keepNone {
+		t.Fatalf("second delete: %+v", st)
 	}
 }
 

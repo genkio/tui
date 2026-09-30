@@ -548,7 +548,7 @@ video.ffs{object-fit:cover !important}
 <div class="wrap">
 {{if not .Guest}}<header>
   <button class="filteropen" id="filtersOpen" type="button" title="pick what this list shows" aria-label="filters" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>{{range .Picked}}{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span class="plabel">{{.Label}}</span>{{end}}{{end}}</button>
-  <a class="fchip flink" id="savedlink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn">{{.Saved}}</span></a>
+  <a class="fchip flink" id="savedlink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn savedn">{{.Saved}}</span></a>
   <div class="sub" id="sub">{{if .BlockedView}}<button class="viewlink" id="kwopen" type="button" title="edit the blocked keywords"><span id="kwn">{{.Keywords}}</span> keywords</button>{{end}}</div>
   {{if .SavedModeHref}}<a class="decklink" id="savedmode" href="{{.SavedModeHref}}" title="{{if .SavedCompact}}title-only saved items — tap for full cards{{else}}full saved cards — tap for titles only{{end}}"><span class="dmark">{{if .SavedCompact}}≡{{else}}▤{{end}}</span>{{if .SavedCompact}}compact{{else}}full{{end}}</a>
   {{end}}{{if .ClearBlocked}}<button class="sortlink headbutton" id="clearBlocked" type="button" data-total="{{.Blocked}}" title="delete all stored blocked items">clear</button>
@@ -561,7 +561,7 @@ video.ffs{object-fit:cover !important}
 <div class="warn hid" id="offwarn"></div>
 <div class="warn hid" id="offline">⚠ {{if .SavedView}}Offline — this is the saved list as it stood when the server was last in reach, and nothing here can be saved, tagged or played until it is again.{{else}}Offline — the server is not in reach. The saved list is the part that reads without it.{{end}}</div>
 {{if not .Guest}}<div class="filters quick" id="quick">{{range .Quick}}<a class="fchip{{if .Pile}} flink{{end}}{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{end}}</div>
-<dialog class="filtersdlg" id="filtersdlg"><div class="filters{{if .Subs}} focus{{end}}" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup{{if .Sources}} fsrc{{end}}">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div></dialog>
+<dialog class="filtersdlg" id="filtersdlg"><div class="filters{{if .Subs}} focus{{end}}" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup{{if .Sources}} fsrc{{end}}">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn savedn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div></dialog>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
@@ -946,8 +946,7 @@ function setSaved(card, on){
     .then(function(res){ if(!res.ok) throw new Error(res.status === 409 ? 'reload the page and try again' : 'could not save'); return res.json(); })
     .then(function(d){
       if (b){ b.dataset.saved = on ? '1' : '0'; b.textContent = on ? 'saved' : 'save'; }
-      var n = document.getElementById('savedn');
-      if (n) n.textContent = d.saved;
+      document.querySelectorAll('.savedn').forEach(function(n){ n.textContent = d.saved; });
     })
     .catch(function(err){ toast(err.message || 'could not save'); })
     .then(function(){ if (b) b.disabled = false; });
@@ -987,7 +986,17 @@ document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.keep') : null;
   if (!b || b.disabled) return;
   var state = b.dataset.state;
-  if (state === 'kept' || state === 'keeping') return;
+  if (state === 'keeping') return;
+  if (state === 'kept'){
+    if (!confirm('Delete the kept file from the server?')) return;
+    b.disabled = true;
+    fetch('/keep?n=' + encodeURIComponent(b.dataset.n), {method: 'DELETE'})
+      .then(function(res){ if(!res.ok) return res.text().then(function(t){ throw new Error(t || res.status); }); return res.json(); })
+      .then(function(st){ keepShow(b, st); })
+      .catch(function(err){ toast('could not delete it: ' + err.message); })
+      .then(function(){ b.disabled = false; });
+    return;
+  }
   if (state === 'error'){
     alert('The download failed:\n\n' + (b.dataset.error || 'no details') + '\n\nTap keep to try again.');
     keepShow(b, {state: ''});
@@ -1000,7 +1009,12 @@ document.addEventListener('click', function(e){
   b.disabled = true;
   fetch('/keep', {method: 'POST', body: fd})
     .then(function(res){ if(!res.ok) return res.text().then(function(t){ throw new Error(t || res.status); }); return res.json(); })
-    .then(function(st){ keepShow(b, st); })
+    .then(function(st){
+      keepShow(b, st);
+      // Kept is worth coming back to, so it goes in the saved list as well.
+      var card = b.closest('article.card'), sb = card && card.querySelector('button.save');
+      if (sb && sb.dataset.saved !== '1') setSaved(card, true);
+    })
     .catch(function(err){ keepShow(b, {state: 'error', error: 'the server did not take it: ' + err.message}); })
     .then(function(){ b.disabled = false; });
 });

@@ -143,6 +143,28 @@ func (k *keeper) record(name, file string) error {
 	defer k.mu.Unlock()
 	idx := k.readIndex()
 	idx[name] = file
+	return k.writeIndex(idx)
+}
+
+// remove deletes a kept file and its line in the index. A file already gone
+// is as good as removed.
+func (k *keeper) remove(name string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	idx := k.readIndex()
+	file, ok := idx[name]
+	if !ok {
+		return nil
+	}
+	// Base, since the index is a file on a synced folder and could say anything.
+	if err := os.Remove(filepath.Join(k.dir, filepath.Base(file))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	delete(idx, name)
+	return k.writeIndex(idx)
+}
+
+func (k *keeper) writeIndex(idx map[string]string) error {
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return err
@@ -264,7 +286,8 @@ func (k *keeper) clear(name string) {
 	k.mu.Unlock()
 }
 
-// handle is /keep: POST n and u to start one, GET ?n= to ask after it.
+// handle is /keep: POST n and u to start one, GET ?n= to ask after it,
+// DELETE ?n= to delete the file it kept.
 func (k *keeper) handle(w http.ResponseWriter, r *http.Request) {
 	var st keepStatus
 	switch r.Method {
@@ -283,8 +306,19 @@ func (k *keeper) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		st = k.start(name, src, r.FormValue("t"))
+	case http.MethodDelete:
+		name := keepName(r.URL.Query().Get("n"))
+		if name == "" {
+			http.Error(w, "n is required", http.StatusBadRequest)
+			return
+		}
+		if err := k.remove(name); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		st = k.status(name)
 	default:
-		w.Header().Set("Allow", "GET, POST")
+		w.Header().Set("Allow", "GET, POST, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
