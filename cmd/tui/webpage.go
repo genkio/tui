@@ -1119,14 +1119,27 @@ func carriesVideo(it core.Item) bool {
 // length: an unknown length stays a video, since not knowing how long something
 // runs is not knowing that it is short. That is where a linked YouTube clip
 // lands — its length is looked up from the browser, over /ytlen, long after this
-// — and a redgifs clip, which is not resolved until you ask for it.
+// — and a redgifs clip, which is not resolved until you ask for it. The
+// exception is an x GIF: x states no length for one, but it is always a loop of
+// a few seconds.
 func shortClip(it core.Item) bool {
 	secs := it.VidSecs
 	if it.Quote != nil && it.Quote.VidSecs > secs {
 		secs = it.Quote.VidSecs
 	}
-	return secs > 0 && secs < videoFloor
+	if secs == 0 {
+		vid := it.Video
+		if vid == "" && it.Quote != nil {
+			vid = it.Quote.Video
+		}
+		return strings.HasPrefix(vid, xGIFPrefix)
+	}
+	return secs < videoFloor
 }
+
+// xGIFPrefix is where x serves an animated GIF as mp4; a real video lives
+// under ext_tw_video or amplify_video.
+const xGIFPrefix = "https://video.twimg.com/tweet_video/"
 
 // chipRow builds the chip row over a list: one group per axis (which service it
 // came from, what it carries), each chip counting the unread items it stands

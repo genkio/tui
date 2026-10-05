@@ -1556,6 +1556,13 @@ func TestCardType(t *testing.T) {
 		// short: a YouTube link's length is looked up from the browser, and a
 		// redgifs clip is not resolved until you ask for it.
 		{"length unreported", core.Item{App: "reddit", Video: "https://ex.com/v.mp4"}, "video"},
+		// Except an x GIF, which x never gives a length but is always a loop.
+		{"x gif", core.Item{App: "xforyou", Video: "https://video.twimg.com/tweet_video/HT0pwgCW0AAiNws.mp4"}, "short"},
+		{"quoted x gif", core.Item{App: "x", Quote: &core.Quote{Video: "https://video.twimg.com/tweet_video/a.mp4"}}, "short"},
+		{"long video over a quoted gif", core.Item{
+			App: "x", Video: "https://video.twimg.com/ext_tw_video/1/a.mp4", VidSecs: 900,
+			Quote: &core.Quote{Video: "https://video.twimg.com/tweet_video/b.mp4"},
+		}, "video"},
 		// Once a length is known — an app that stated one, or a lookup that filled
 		// it in after the fetch — a linked YouTube clip is judged like any other.
 		{"short youtube link", core.Item{App: "reddit", URL: "https://youtu.be/aqz-KE-bpKQ", VidSecs: 42}, "short"},
