@@ -75,10 +75,11 @@ func showStatus(w http.ResponseWriter, sweep *sweeper, cache *feedCache, mishaps
 	out := struct {
 		Fetching bool   `json:"fetching"`
 		Unread   int    `json:"unread"`
+		Gists    int    `json:"gists"`
 		Mishap   string `json:"mishap,omitempty"` // empty when nothing has gone wrong
 		Says     string `json:"says,omitempty"`
 		When     string `json:"when,omitempty"`
-	}{Fetching: sweep.sweeping(), Unread: cache.unreadCount()}
+	}{Fetching: sweep.sweeping(), Unread: cache.unreadCount(), Gists: cache.gistingCount()}
 	if m, ok := mishaps.latest(); ok {
 		out.Mishap, out.Says, out.When = m.ID, m.says(), m.At.UTC().Format(time.RFC3339)
 	}

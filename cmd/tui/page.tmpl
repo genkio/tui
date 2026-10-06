@@ -839,6 +839,19 @@ function recountChips(){
     if(chip.dataset.kind === 'gist') chip.classList.toggle('hid', count === 0);
   });
 }
+// The gist pile as the server has it now. A gist asked for in another tab (a
+// summary's links open one) never reaches this page's own count, so the chip
+// would stay hidden on coming back. Cards set aside here are added back on top
+// by recountChips, so they come off the base. The pile's own page counts down
+// as it is read, which a server count would race.
+function syncGistChips(n){
+  if(GIST_PILE || typeof n !== 'number') return;
+  var aside = document.querySelectorAll('article.card[data-gisting]').length;
+  document.querySelectorAll('#filters .fchip[data-kind], #quick .fchip[data-kind]').forEach(function(chip){
+    if(chip.dataset.kind === 'gist') chip.dataset.n0 = Math.max(0, n - aside);
+  });
+  scheduleRecount();
+}
 function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.style.opacity='1'; setTimeout(function(){t.style.opacity='0'},1200); }
 // A page that reloads itself under you is startling; say once, in passing, why.
 // Nothing to act on — the reload was the fix — so it fades like any other note.
@@ -2735,7 +2748,7 @@ document.addEventListener('click', function(e){
     if (document.hidden) return;
     fetch('/status', {cache: 'no-store'})
       .then(function(r){ return r.json(); })
-      .then(function(j){ reached(true); show(j); })
+      .then(function(j){ reached(true); show(j); syncGistChips(j && j.gists); })
       .catch(function(){ reached(false); });
   }
   ask();
