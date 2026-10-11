@@ -428,9 +428,11 @@ body.sumon .summary{display:block}
 .sold{padding:1px 8px;border:1px solid var(--accent);border-radius:999px;color:var(--accent);font-weight:600}
 .sold:empty{display:none}
 /* "next" sits under the prose rather than above it: it clears every item the
-   summary read, which is what you do once you have read it */
+   summary read, which is what you do once you have read it. "prev" takes the
+   other end, back to one already cleared. */
 .sfoot{display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .sfoot .rest{margin-left:0;font-size:14px}
+.sfoot .prev{margin-right:auto}
 .summary .body{font-size:15px}
 .summary .body h2{margin:18px 0 6px;font-size:16px;font-weight:700}
 .summary .body ul,.summary .body ol{margin:8px 0;padding-left:22px}
@@ -566,8 +568,8 @@ video.ffs{object-fit:cover !important}
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
 {{end}}{{else if .SkippedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing set aside from that chip.{{else}}Nothing set aside. Every fetch is sifted as it lands, and what the model thinks you can skip shows up here, to be read anyway or cleared in one go.{{end}}</div>
-{{end}}{{else if .DigestView}}{{with .Digest}}<div class="summary digest" id="digest" data-id="{{.ID}}" data-gen="{{.Stamp}}" data-running="{{if .Running}}1{{else}}0{{end}}"><div class="smeta">{{.Count}} unread items{{if .When}}, summarized {{.When}}{{end}}{{if gt .Waiting 1}}<span class="sold" title="summaries waiting behind this one">{{.Waiting}} waiting</span>{{end}}<button class="rest" id="digretry" type="button" title="write this summary again over the same items">retry</button></div><div class="body">{{.HTML}}</div><div class="sfoot"><button class="rest" id="dignext" type="button" title="mark every item this read as read, and show the next summary">next</button></div></div>
-{{else}}<div class="note" id="dignote" data-running="{{if .DigestRunning}}1{{else}}0{{end}}">{{if .DigestRunning}}Reading the backlog — this takes a minute or two.{{else}}No summary waiting. Every fetch summarizes the next couple of hundred unread items and leaves the briefing here.{{end}}</div>
+{{end}}{{else if .DigestView}}{{with .Digest}}<div class="summary digest" id="digest" data-id="{{.ID}}" data-gen="{{.Stamp}}" data-running="{{if .Running}}1{{else}}0{{end}}"><div class="smeta">{{.Count}} {{if not .Cleared}}unread {{end}}items{{if .When}}, summarized {{.When}}{{end}}{{if gt .Waiting 1}}<span class="sold" title="summaries waiting behind this one">{{.Waiting}} waiting</span>{{end}}{{if not .Cleared}}<button class="rest" id="digretry" type="button" title="write this summary again over the same items">retry</button>{{end}}</div><div class="body">{{.HTML}}</div><div class="sfoot">{{if $.DigestPrev}}<a class="rest prev" id="digprev" href="{{$.DigestPrev}}" title="show the summary before this one again">prev</a>{{end}}{{if .Cleared}}<a class="rest" id="digafter" href="{{.Next}}" title="show the summary after this one">next</a>{{else}}<button class="rest" id="dignext" type="button" title="mark every item this read as read, and show the next summary">next</button>{{end}}</div></div>
+{{else}}<div class="note" id="dignote" data-running="{{if .DigestRunning}}1{{else}}0{{end}}">{{if .DigestRunning}}Reading the backlog — this takes a minute or two.{{else}}No summary waiting. Every fetch summarizes the next couple of hundred unread items and leaves the briefing here.{{end}}{{if .DigestPrev}} <a id="digprev" href="{{.DigestPrev}}">See the last one again.</a>{{end}}</div>
 {{end}}{{else if .ItemView}}{{else if not .HasApps}}<div class="note">No reader app is logged in. Run <code>tui &lt;app&gt; --auth</code> on the host, then refresh this page.</div>
 {{else if not .Cards}}<div class="note">{{if .Sel}}Nothing unread from that chip.{{else}}Inbox zero across every timeline.{{end}}</div>
 {{end}}{{if and .Swipe .Cards}}<div class="deckwrap"><div class="deck" id="deck">{{range .Cards}}{{template "card" .}}
@@ -2306,6 +2308,17 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     return fetch('/digest', {method:'POST', body:fd})
       .then(function(res){ if(!res.ok) return res.text().then(function(m){ throw new Error(m); }); return res.json(); });
   }
+
+  // prev, and next on one already cleared, are plain page loads: the cover goes
+  // up the way it does for a chip.
+  ['digprev', 'digafter'].forEach(function(id){
+    var a = document.getElementById(id);
+    if (a) a.addEventListener('click', function(e){
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+      e.preventDefault();
+      leaveFor(a.getAttribute('href'));
+    });
+  });
 
   var next = document.getElementById('dignext');
   var redo = document.getElementById('digretry');

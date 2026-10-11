@@ -330,11 +330,77 @@ func TestDigestPageRendersProseAndItsTwoControls(t *testing.T) {
 		t.Error("mark all read followed the digest onto its own page")
 	}
 
+	if strings.Contains(page, `id="digprev"`) {
+		t.Error("prev with nothing before this one")
+	}
+
+	// One prev went back to: links either way, and nothing that would clear or
+	// rewrite it.
+	in.digestPrev = "/?at=5&digest=1"
+	in.digest = &digestData{ID: 6, Count: 200, When: "1h ago", HTML: "<p>an earlier day</p>",
+		Cleared: true, Next: "/?digest=1"}
+	page = renderInput(t, in)
+	for _, want := range []string{`id="digprev" href="/?at=5&amp;digest=1"`, `id="digafter" href="/?digest=1"`,
+		"200 items", `data-running="0"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("cleared page is missing %q", want)
+		}
+	}
+	for _, not := range []string{`id="dignext"`, `id="digretry"`, "200 unread"} {
+		if strings.Contains(page, not) {
+			t.Errorf("cleared page has %q", not)
+		}
+	}
+
 	in.digest = nil
 	in.digestRunning = true
 	page = renderInput(t, in)
 	if !strings.Contains(page, `data-running="1"`) || !strings.Contains(page, "Reading the backlog") {
 		t.Errorf("an empty pile with a run going does not say so:\n%s", page)
+	}
+	if !strings.Contains(page, `id="digprev"`) {
+		t.Error("an empty pile offers no way back to the last one")
+	}
+	if got := digestHref(map[string][]string{"digest": {"1"}, "at": {"5"}}, 4); got != "/?digest=1&at=4" {
+		t.Errorf("digestHref = %q, want the at it was asked for alone", got)
+	}
+}
+
+// prev steps back through the ones already cleared, and next from there steps
+// forward until it is back on the one waiting.
+func TestDigestViewStepsThroughThePile(t *testing.T) {
+	store, err := newDigestStore(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := summaryJob{State: "done", Lang: "en", Count: 1, HTML: "<p>x</p>"}
+	for i := range 3 {
+		if err := store.add(job, []core.Item{item("reddit", strconv.Itoa(i), "a")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.mark(1, time.Now())
+	store.mark(2, time.Now())
+
+	for _, c := range []struct {
+		at, want, prev, after int64
+	}{
+		{0, 3, 2, 0}, // the one waiting
+		{2, 2, 1, 0}, // cleared, and next is the one waiting again
+		{1, 1, 0, 2}, // the oldest: nothing before it
+		{3, 3, 2, 0}, // not cleared: the one waiting, as without at
+		{9, 3, 2, 0}, // gone
+	} {
+		d, ok, prev, after := store.view(c.at)
+		if !ok || d.ID != c.want || prev != c.prev || after != c.after {
+			t.Errorf("view(%d) = %d %v prev %d after %d, want %d prev %d after %d",
+				c.at, d.ID, ok, prev, after, c.want, c.prev, c.after)
+		}
+	}
+
+	store.mark(3, time.Now())
+	if _, ok, prev, _ := store.view(0); ok || prev != 3 {
+		t.Errorf("with nothing waiting: ok %v prev %d, want prev on the last one cleared", ok, prev)
 	}
 }
 

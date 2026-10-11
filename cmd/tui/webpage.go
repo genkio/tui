@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -233,6 +234,7 @@ type pageInput struct {
 	digestView    bool
 	digest        *digestData
 	digestRunning bool
+	digestPrev    string
 	// The language the server writes those in, which the browser checks its own
 	// setting against: a fetch has nobody to ask, so the page has to have said.
 	sumLang  string
@@ -311,6 +313,7 @@ type pageData struct {
 	DigestView    bool
 	Digest        *digestData
 	DigestRunning bool
+	DigestPrev    string // the digest before this one, or the last one when none is waiting
 	// What the server would write the next automatic summary in, so the page can
 	// say so when its own setting disagrees.
 	SumLang string
@@ -409,6 +412,11 @@ type digestData struct {
 	// what the page needs to know while it waits.
 	Stamp   string
 	Running bool // a run is going: this digest may be about to be rewritten
+	// One next has already cleared, which prev went back to: read again, so its
+	// next is a link to the one after it rather than a clear, and retry is left
+	// to the one waiting.
+	Cleared bool
+	Next    string
 }
 
 type cardData struct {
@@ -740,6 +748,7 @@ func buildPageData(in pageInput) pageData {
 		DigestView:    in.digestView,
 		Digest:        in.digest,
 		DigestRunning: in.digestRunning,
+		DigestPrev:    in.digestPrev,
 		SumLang:       in.sumLang,
 		Asc:           in.order != orderDesc,
 		SortWord:      sortWord(in.order),
@@ -1399,10 +1408,10 @@ func chipHref(q url.Values, sel feedSel) string {
 	out := url.Values{}
 	for k, v := range q {
 		switch k {
-		// The filter params this replaces, one no page carries, and the briefing
-		// flag: a pick is a page of cards, whatever the page it was tapped from
-		// happened to be showing.
-		case "app", "type", "rank", "gist", "digest", "mine", "x", "sub", "json", "summary":
+		// The filter params this replaces, one no page carries, the briefing flag
+		// and the cleared digest prev went back to: a pick is a page of cards,
+		// whatever the page it was tapped from happened to be showing.
+		case "app", "type", "rank", "gist", "digest", "mine", "x", "sub", "json", "summary", "at":
 		default:
 			out[k] = v
 		}
@@ -1430,6 +1439,16 @@ func chipHref(q url.Values, sel feedSel) string {
 		return "/"
 	}
 	return "/?" + out.Encode()
+}
+
+// digestHref is the summary chip's page on one digest next has cleared, or on
+// the one waiting when at is zero.
+func digestHref(q url.Values, at int64) string {
+	href := chipHref(q, feedSel{Kind: "digest", Key: "digest"})
+	if at == 0 {
+		return href
+	}
+	return href + "&at=" + strconv.FormatInt(at, 10)
 }
 
 // orderHref is where the header's sort toggle goes: this page with the order

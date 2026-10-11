@@ -663,20 +663,33 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		behindWant = func(e *feedEntry) bool { return e.gisting() }
 	}
 	// The summary chip is prose rather than cards: one digest on screen, the
-	// oldest one nobody has cleared, with next and retry under it. No items, so
-	// nothing here counts it or windows it.
+	// oldest one nobody has cleared (or with ?at, one prev went back to), with
+	// prev, next and retry under it. No items, so nothing here counts it or
+	// windows it.
 	var digest *digestData
 	digesting := sel.Kind == "digest"
+	digestPrev := ""
 	running := false
 	if j, ok := sum.job(digestKey); ok && j.State == "running" {
 		running = true
 	}
 	if digesting {
 		items = nil
-		if d, ok := sum.digests.waiting(); ok {
+		at, _ := strconv.ParseInt(q.Get("at"), 10, 64)
+		d, ok, prev, after := sum.digests.view(at)
+		if prev > 0 {
+			digestPrev = digestHref(q, prev)
+		}
+		if ok {
+			cleared := d.Marked != ""
+			// A run rewrites the one waiting, never one already cleared, so the
+			// page watches for it only there.
 			digest = &digestData{
 				ID: d.ID, Count: d.Count, Waiting: tally.digests, HTML: template.HTML(d.HTML),
-				Stamp: d.Generated, Running: running,
+				Stamp: d.Generated, Running: running && !cleared, Cleared: cleared,
+			}
+			if cleared {
+				digest.Next = digestHref(q, after)
 			}
 			if at, err := time.Parse(time.RFC3339, d.Generated); err == nil {
 				digest.When = humanAgo(at)
@@ -721,7 +734,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		sel: sel, tally: &tally, query: q, warn: warn, saved: saved, block: block,
 		swipe: deck, order: order, worth: worth, updated: cache.sweptAt(), fetching: sweep.sweeping(), capped: capped,
 		summaryOpen: q.Get("summary") == "1", interests: interests.words(),
-		digestView: digesting, digest: digest, digestRunning: running,
+		digestView: digesting, digest: digest, digestRunning: running, digestPrev: digestPrev,
 		sumLang: sum.digests.language(), skipped: cache.skippedCount(),
 	})
 }

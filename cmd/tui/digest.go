@@ -124,17 +124,49 @@ func (s *digestStore) covered() map[string]bool {
 // pile is read the way the backlog is, oldest first. Both of these answer for a
 // server that keeps no digests at all, which is what a page render asks of.
 func (s *digestStore) waiting() (storedDigest, bool) {
+	d, ok, _, _ := s.view(0)
+	return d, ok
+}
+
+// view is the digest the summary chip's page shows and the ids either side of
+// it, for prev and next to step to: the one waiting, or with at, one next has
+// already cleared, there to be read again. after is only ever a cleared one;
+// past those, next lands back on the one waiting. With nothing waiting, prev is
+// the last one cleared.
+func (s *digestStore) view(at int64) (d storedDigest, ok bool, prev, after int64) {
 	if s == nil {
-		return storedDigest{}, false
+		return storedDigest{}, false, 0, 0
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, d := range s.all {
-		if d.Marked == "" {
-			return d.clone(), true
+	i := -1
+	for j, d := range s.all {
+		if at != 0 && d.ID == at && d.Marked != "" {
+			i = j
+			break
 		}
 	}
-	return storedDigest{}, false
+	if i < 0 {
+		for j, d := range s.all {
+			if d.Marked == "" {
+				i = j
+				break
+			}
+		}
+	}
+	if i < 0 {
+		if n := len(s.all); n > 0 {
+			prev = s.all[n-1].ID
+		}
+		return storedDigest{}, false, prev, 0
+	}
+	if i > 0 {
+		prev = s.all[i-1].ID
+	}
+	if i+1 < len(s.all) && s.all[i+1].Marked != "" {
+		after = s.all[i+1].ID
+	}
+	return s.all[i].clone(), true, prev, after
 }
 
 func (s *digestStore) waitingCount() int {
