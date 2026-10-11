@@ -426,6 +426,8 @@ type cardData struct {
 	Share       string // ...signed, for the share button; blank with no password, when the original is what to send
 	Video       string // mp4 for the inline player: the app's own, or this server's bilibili route
 	Keep        string // where the footer's keep link saves that mp4 from
+	// The douban app's link to the same post: template.URL so douban:// survives escaping.
+	AppURL template.URL
 	// The server-side keep (see keep.go): what the download server is handed, the file it
 	// writes, and how that has gone. KeepServer is the page having one at all.
 	KeepSrc, KeepName    string
@@ -973,6 +975,7 @@ func buildCard(it core.Item, starred bool, cl clips) cardData {
 		Age:    it.Age,
 		Title:  title,
 		URL:    originalPostURL(it),
+		AppURL: doubanAppURL(it.App, it.URL),
 		Video:  it.Video,
 		Poster: it.Poster,
 		VidLen: vidLen(it.VidSecs),
@@ -1024,6 +1027,36 @@ func originalPostURL(it core.Item) string {
 		return "https://old.reddit.com/comments/" + url.PathEscape(it.ID) + "/"
 	}
 	return it.URL
+}
+
+// doubanAppPaths turn a douban web URL into the douban:// link the app opens,
+// as m.douban.com/to_app maps them. A shape not listed gets no app button.
+var doubanAppPaths = []struct {
+	re  *regexp.Regexp
+	app string
+}{
+	{regexp.MustCompile(`^https?://www\.douban\.com/people/[^/]+/status/(\d+)`), "status/"},
+	{regexp.MustCompile(`^https?://www\.douban\.com/topic/(\d+)`), "topic/"},
+	{regexp.MustCompile(`^https?://www\.douban\.com/group/topic/(\d+)`), "group/topic/"},
+	{regexp.MustCompile(`^https?://www\.douban\.com/photos/photo/(\d+)`), "photo/"},
+	{regexp.MustCompile(`^https?://www\.douban\.com/podcast_episode/(\d+)`), "podcast/episode/"},
+	{regexp.MustCompile(`^https?://www\.douban\.com/note/(\d+)`), "note/"},
+	{regexp.MustCompile(`^https?://(?:movie|book|music)\.douban\.com/review/(\d+)`), "review/"},
+	{regexp.MustCompile(`^https?://movie\.douban\.com/subject/(\d+)`), "movie/"},
+	{regexp.MustCompile(`^https?://book\.douban\.com/subject/(\d+)`), "book/"},
+	{regexp.MustCompile(`^https?://music\.douban\.com/subject/(\d+)`), "music/"},
+}
+
+func doubanAppURL(app, rawURL string) template.URL {
+	if app != "douban" {
+		return ""
+	}
+	for _, p := range doubanAppPaths {
+		if m := p.re.FindStringSubmatch(rawURL); m != nil {
+			return template.URL("douban://douban.com/" + p.app + m[1])
+		}
+	}
+	return ""
 }
 
 // biliVideoRe matches the bvid in a bilibili watch URL. A series episode
