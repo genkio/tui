@@ -92,8 +92,10 @@ func self() string {
 
 // appEnv is the current environment with the app's per-plugin .env applied on
 // top, for the dev/source-tree layout. A Homebrew install has no per-plugin
-// .env; there creds come from core.LoadUserEnv and are already in os.Environ().
+// .env; there creds come from core.LoadUserEnv, reloaded here so a re-auth
+// since the server started reaches the plugin.
 func appEnv(dir string) []string {
+	core.LoadUserEnv()
 	env := map[string]string{}
 	for _, e := range os.Environ() {
 		if k, v, ok := strings.Cut(e, "="); ok {

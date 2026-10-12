@@ -45,6 +45,7 @@ func TestParseEnvFileMissing(t *testing.T) {
 func TestLoadUserEnvSkipsSetKeys(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("TUI_SYNC_DIR", "")
 	if err := os.MkdirAll(filepath.Join(dir, "tui"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -62,5 +63,19 @@ func TestLoadUserEnvSkipsSetKeys(t *testing.T) {
 	}
 	if got := os.Getenv("TUI_TEST_PRESET"); got != "fromshell" {
 		t.Errorf("preset var was clobbered: %q, want fromshell", got)
+	}
+
+	// A re-auth rewrites the file; the next load picks it up for the key it
+	// loaded, and still leaves the shell's value alone.
+	body = "TUI_TEST_FROMFILE=newvalue\nTUI_TEST_PRESET=newfile\n"
+	if err := os.WriteFile(filepath.Join(dir, "tui", "env"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	LoadUserEnv()
+	if got := os.Getenv("TUI_TEST_FROMFILE"); got != "newvalue" {
+		t.Errorf("loaded var not refreshed: %q, want newvalue", got)
+	}
+	if got := os.Getenv("TUI_TEST_PRESET"); got != "fromshell" {
+		t.Errorf("preset var was clobbered on reload: %q, want fromshell", got)
 	}
 }

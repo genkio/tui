@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // userConfigDir is $XDG_CONFIG_HOME, else ~/.config; "" if the home is unknown.
@@ -36,13 +37,24 @@ func UserEnvPath() string {
 	return filepath.Join(dir, "tui", "env")
 }
 
+var (
+	userEnvMu     sync.Mutex
+	userEnvLoaded = map[string]bool{}
+)
+
 // LoadUserEnv applies UserEnvPath to the process environment, skipping keys
 // already set so a real shell export (or a value the launcher injected) wins. A
 // missing file is fine: it just means nothing is logged in yet.
+//
+// A key this loaded before is refreshed, so a long-running server picks up a
+// re-auth instead of handing its plugins the cookie it started with.
 func LoadUserEnv() {
+	userEnvMu.Lock()
+	defer userEnvMu.Unlock()
 	for k, v := range ParseEnvFile(UserEnvPath()) {
-		if os.Getenv(k) == "" {
+		if os.Getenv(k) == "" || userEnvLoaded[k] {
 			os.Setenv(k, v)
+			userEnvLoaded[k] = true
 		}
 	}
 }
