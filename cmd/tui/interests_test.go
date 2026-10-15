@@ -188,9 +188,10 @@ func TestMatchedItemsSurviveTheCutAndGetAChip(t *testing.T) {
 	}
 }
 
-// Editing the list drops every judgment behind it: they were answers about the
-// old list, and the next sift asks again from the top.
-func TestSavingInterestsForgetsEveryJudgment(t *testing.T) {
+// Editing the list drops the answers about it and nothing else: the cut and the
+// rung are about the item, so the skipped pile stays skipped while the next
+// sift asks the new list about it.
+func TestSavingInterestsForgetsOnlyTheMatches(t *testing.T) {
 	c := newTestCache(t)
 	now := time.Now()
 	c.upsert([]core.Item{item("x", "1", "one"), item("x", "2", "two")}, now)
@@ -198,7 +199,7 @@ func TestSavingInterestsForgetsEveryJudgment(t *testing.T) {
 		core.Key("x", "1"): {Worth: 0.9, Rank: 2, Interest: 0.9, InterestFor: "zig"},
 		core.Key("x", "2"): {Worth: 0.02, Rank: 1, Interest: -1},
 	}, now)
-	if c.unjudgedCount() != 0 {
+	if c.unjudgedCount(false) != 0 {
 		t.Fatal("both were judged")
 	}
 
@@ -213,11 +214,64 @@ func TestSavingInterestsForgetsEveryJudgment(t *testing.T) {
 	if got := store.list(); len(got) != 1 || got[0] != "the Fed's rate path" {
 		t.Fatalf("stored %q", got)
 	}
-	if got := c.unjudgedCount(); got != 2 {
-		t.Fatalf("unjudged is %d after the list changed, want both back", got)
+	if c.matchedCount() != 0 {
+		t.Error("nothing is matched on a list nothing has been asked about")
 	}
-	if c.skippedCount() != 0 || c.matchedCount() != 0 {
-		t.Error("nothing should be skipped or matched on a list nothing has been judged against")
+	if got := c.skippedCount(); got != 1 {
+		t.Fatalf("skipped is %d after the list changed, want the pile kept", got)
+	}
+	if got := c.unjudgedCount(true); got != 2 {
+		t.Fatalf("unjudged is %d, want both back for the subject", got)
+	}
+	if got := c.unjudgedCount(false); got != 0 {
+		t.Fatalf("unjudged is %d with no list, want nothing to ask", got)
+	}
+}
+
+// An item back only for the subject is asked the subject alone, and the answer
+// lands without moving it off its rung.
+func TestAJudgedItemIsAskedOnlyTheSubject(t *testing.T) {
+	list := []string{"anything about Zig"}
+	body := siftRequest(core.Item{App: "x", ID: "1", Title: "one", Rank: 1}, list)
+	if _, ok := body.Questions[siftInterestID]; len(body.Questions) != 1 || !ok {
+		t.Fatalf("questions = %v, want the subject alone", body.Questions)
+	}
+
+	c := newTestCache(t)
+	now := time.Now()
+	c.upsert([]core.Item{item("x", "1", "a zig post nobody rates"), item("x", "2", "plain filler")}, now)
+	c.judge(map[string]siftVerdict{
+		core.Key("x", "1"): {Worth: 0.05, Rank: 1, Interest: -1},
+		core.Key("x", "2"): {Worth: 0.05, Rank: 1, Interest: -1},
+	}, now)
+	store := &interestStore{}
+	if err := store.set(list[0]); err != nil {
+		t.Fatal(err)
+	}
+	s := testSifter(t, c, func(_ context.Context, it core.Item, interests []string) (siftVerdict, error) {
+		if it.Rank == 0 {
+			t.Errorf("%s came to the run off its rung", it.ID)
+		}
+		if it.ID == "1" {
+			return siftVerdict{Interest: 0.95, InterestFor: interests[0]}, nil
+		}
+		return siftVerdict{Interest: 0}, nil
+	})
+	s.interests = store
+	if err := s.start(); err != nil {
+		t.Fatal(err)
+	}
+	if job := settledSift(t, s); job.State != "done" || job.Done != 2 || job.Aside != 0 {
+		t.Fatalf("job = %+v", job)
+	}
+	if c.matchedCount() != 1 || c.skippedCount() != 1 || c.unjudgedCount(true) != 0 {
+		t.Fatalf("matched %d, skipped %d, unjudged %d: want the match rescued and the filler still aside",
+			c.matchedCount(), c.skippedCount(), c.unjudgedCount(true))
+	}
+	for _, it := range c.unread(now, "") {
+		if it.ID == "1" && it.Rank != 1 {
+			t.Errorf("rank = %d, want the rung kept", it.Rank)
+		}
 	}
 }
 

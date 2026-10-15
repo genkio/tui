@@ -81,7 +81,8 @@ type feedEntry struct {
 	// How well the item answers what the reader said they are following at the
 	// moment (see interestStore), 0 to 1, or below zero for an item nothing has
 	// asked about — which is every item when the list is empty, and every item
-	// again the moment the list is edited.
+	// again the moment the list is edited. Only this answer goes with an edit:
+	// the cut and the rung are about the item, not the list.
 	Interest float64 `json:"interest,omitempty"`
 	// Which subject on the list the item answers, as the reader wrote it: the
 	// chip on the card in the "for me" pick, so a match can be argued with.
@@ -99,6 +100,12 @@ func (e *feedEntry) matched() bool { return e.Interest >= interestCut }
 // required: a row from before the ladder existed carries a worth and no rung,
 // and half a judgment is one the next run should ask again rather than file.
 func (e *feedEntry) judged() bool { return e.JudgedAt != "" && e.Rank > 0 }
+
+// unsifted reports whether a run has anything to ask of this item: the whole
+// judgment, or only the subject when the list has changed since it was judged.
+func (e *feedEntry) unsifted(listed bool) bool {
+	return !e.Read && !e.gisting() && e.sifts() && (!e.judged() || listed && e.Interest < 0)
+}
 
 // skipped reports whether the sift set this item aside: judged, and judged not
 // worth the reading. It stays in the backlog table either way — this is a
@@ -303,9 +310,11 @@ func (c *feedCache) worths() map[string]float64 {
 
 // unjudged is what a sift run has left to do: the unread backlog no run has
 // reached yet, oldest first, so a run interrupted halfway is resumed by asking
-// again rather than started over.
-func (c *feedCache) unjudged(now time.Time) []core.Item {
-	items := c.pick(now, func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() && e.sifts() })
+// again rather than started over. listed says whether there is an interest
+// list, which adds the items judged before it last changed; those come out
+// still on their rung, which is how a run knows to ask only the subject.
+func (c *feedCache) unjudged(now time.Time, listed bool) []core.Item {
+	items := c.pick(now, func(e *feedEntry) bool { return e.unsifted(listed) })
 	sortItems(items, true)
 	return items
 }
@@ -390,7 +399,8 @@ func (c *feedCache) lastRead(now time.Time, want func(*feedEntry) bool) []core.I
 // judge records what a sift made of these items, by feed key, and returns how
 // many of them it set aside. An item read while the run was in flight keeps the
 // judgment: it costs nothing to hold, and it is the answer to "why was this one
-// not in the feed" long after the fact.
+// not in the feed" long after the fact. A verdict with no rung answered only
+// the subject, and leaves the rest of the judgment where it was.
 func (c *feedCache) judge(verdicts map[string]siftVerdict, now time.Time) int {
 	stamp := now.UTC().Format(time.RFC3339)
 	c.mu.Lock()
@@ -401,28 +411,32 @@ func (c *feedCache) judge(verdicts map[string]siftVerdict, now time.Time) int {
 		if !ok {
 			continue
 		}
-		e.JudgedAt, e.Worth, e.Rank = stamp, v.Worth, v.Rank
 		e.Interest, e.InterestFor = v.Interest, v.InterestFor
+		c.rev++
+		if v.Rank == 0 {
+			continue
+		}
+		e.JudgedAt, e.Worth, e.Rank = stamp, v.Worth, v.Rank
 		if e.skipped() {
 			aside++
 		}
-		c.rev++
 	}
 	return aside
 }
 
-// forget drops every judgment, which is what editing the interest list has to
-// do: an answer about a list is worth nothing once the list has changed, and
-// the three questions are asked together anyway. Returns how many it cleared.
+// forget drops every answer about the interest list, which is what editing it
+// has to do: an answer about a list is worth nothing once the list has changed.
+// The cut and the rung stay. Dropping them too put the whole skipped pile back
+// in the feed until a run of thousands of requests had judged it all again, to
+// arrive at the same answers. Returns how many it cleared.
 func (c *feedCache) forget() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n := 0
 	for _, e := range c.entries {
-		if e.JudgedAt == "" && e.Rank == 0 && e.Interest < 0 {
+		if !e.judged() || e.Interest < 0 {
 			continue
 		}
-		e.JudgedAt, e.Worth, e.Rank = "", 0, 0
 		e.Interest, e.InterestFor = -1, ""
 		n++
 	}
@@ -444,8 +458,8 @@ func (c *feedCache) skippedCount() int {
 	return c.count(func(e *feedEntry) bool { return !e.Read && e.skipped() && !e.gisting() })
 }
 
-func (c *feedCache) unjudgedCount() int {
-	return c.count(func(e *feedEntry) bool { return !e.Read && !e.judged() && !e.gisting() && e.sifts() })
+func (c *feedCache) unjudgedCount(listed bool) int {
+	return c.count(func(e *feedEntry) bool { return e.unsifted(listed) })
 }
 
 func (c *feedCache) count(want func(*feedEntry) bool) int {

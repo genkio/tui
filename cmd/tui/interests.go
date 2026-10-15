@@ -97,10 +97,10 @@ func parseInterests(text string) []string {
 	return out
 }
 
-// handleInterests (POST /interests) replaces the list. Every judgment in the
+// handleInterests (POST /interests) replaces the list. Every match in the
 // backlog goes with it: an answer about a list is worth nothing once the list
-// has changed, so the next sift asks again from the top rather than leaving a
-// chip full of what the old list caught.
+// has changed, so the next sift asks the new one rather than leaving a chip full
+// of what the old list caught. The rest of each judgment stays (see forget).
 func handleInterests(w http.ResponseWriter, r *http.Request, interests *interestStore, cache *feedCache) {
 	text := r.FormValue("interests")
 	if len([]rune(text)) > maxInterests*maxInterestLen {

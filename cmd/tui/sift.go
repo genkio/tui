@@ -247,7 +247,7 @@ func (s *sifter) start() error {
 	if strings.TrimSpace(os.Getenv(typesafeKey)) == "" {
 		return errNoKey
 	}
-	total := s.cache.unjudgedCount()
+	total := s.left()
 	if total == 0 {
 		return errors.New("every unread item has been judged already")
 	}
@@ -267,6 +267,11 @@ func (s *sifter) start() error {
 		s.mu.Unlock()
 		return errors.New("a sift is already waiting to start")
 	}
+}
+
+// left is what a run started now would have to get through.
+func (s *sifter) left() int {
+	return s.cache.unjudgedCount(s.interests != nil && len(s.interests.list()) > 0)
 }
 
 func (s *sifter) state() siftJob {
@@ -318,7 +323,7 @@ func (s *sifter) run(parent context.Context) {
 		}()
 	}
 feeding:
-	for _, it := range s.cache.unjudged(time.Now()) {
+	for _, it := range s.cache.unjudged(time.Now(), len(interests) > 0) {
 		select {
 		case queue <- it:
 		case <-ctx.Done():
@@ -375,7 +380,8 @@ type siftVerdict struct {
 }
 
 // typesafeJudge asks Jev about one item: the cut, the ladder, and — when the
-// reader has a list — which of their subjects it is about. One item to a
+// reader has a list — which of their subjects it is about. An item already on
+// a rung is asked only the last, and answers with no rung (see feedCache.judge). One item to a
 // request, which is the whole lesson of this file. Every one of the three
 // questions was tried in batches of twenty-five first, and every one of them
 // came back differently depending on the company the item kept: a two-word
@@ -408,6 +414,14 @@ func typesafeJudge(ctx context.Context, it core.Item, interests []string) (siftV
 	}
 	if err := json.Unmarshal(raw, &answer); err != nil {
 		return v, fmt.Errorf("typesafe returned something that is not an answer: %w", err)
+	}
+	if it.Rank > 0 {
+		match, ok := answer.Answers[siftInterestID]
+		if !ok {
+			return v, errors.New("typesafe did not say which subject that is about")
+		}
+		v.Interest, v.InterestFor = siftMatch(match.Choice, match.Probabilities, interests)
+		return v, nil
 	}
 	worth, ok := answer.Answers[siftAskID]
 	if !ok {
@@ -581,12 +595,16 @@ type siftBody struct {
 // siftRequest is one item's request: the item alone as the state, and the three
 // questions asked of it. The subjects ride as the options of the choice rather
 // than as state — the question is which of them this is about, and the options
-// are the only place that needs to say.
+// are the only place that needs to say. An item already on a rung is back only
+// because the list changed, so it is asked the subject alone.
 func siftRequest(it core.Item, interests []string) siftBody {
 	b := siftBody{
-		Model: typesafeModel,
-		State: siftState{Reader: siftReader, Item: siftEntryOf(it)},
-		Questions: map[string]siftAsk{
+		Model:     typesafeModel,
+		State:     siftState{Reader: siftReader, Item: siftEntryOf(it)},
+		Questions: map[string]siftAsk{},
+	}
+	if it.Rank == 0 {
+		b.Questions = map[string]siftAsk{
 			siftAskID: {
 				Type:         "noul",
 				Instructions: siftQuestion,
@@ -603,7 +621,7 @@ func siftRequest(it core.Item, interests []string) siftBody {
 				Instructions: siftRankQuestion,
 				Criteria:     siftRungs(),
 			},
-		},
+		}
 	}
 	// Only when there is a list. An empty one would be a question whose only
 	// possible answer is "none", asked of every item in the backlog.
@@ -670,7 +688,7 @@ func showSift(w http.ResponseWriter, sift *sifter) {
 		siftJob
 		Left    int `json:"left"`
 		Skipped int `json:"skipped"`
-	}{job, sift.cache.unjudgedCount(), sift.cache.skippedCount()})
+	}{job, sift.left(), sift.cache.skippedCount()})
 }
 
 func writeSiftJSON(w http.ResponseWriter, code int, job siftJob) {

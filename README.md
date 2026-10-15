@@ -649,8 +649,9 @@ What that catches gets a **for me** chip, first of the loose chips in the row,
 and is **never skipped** however little the rest of the sift made of it — you
 named the subject yourself, which outranks a model's opinion about whether there
 is much in this particular piece of it. **save** only saves: it drops every
-judgment in the backlog, because they were answers about the old list, and the
-header's **sift** is what asks them all again.
+match in the backlog, because they were answers about the old list, and the next
+sift asks the new list about every item again. The rest of the judgment stays,
+so the skipped pile stays skipped until a match pulls something out of it.
 
 That question is a **choice**, not a yes/no, and the difference is the whole
 reason it works. Asked as *is this about one of your subjects?* a Cantonese post

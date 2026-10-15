@@ -108,7 +108,7 @@ func TestSiftLeavesClipsInTheFeed(t *testing.T) {
 	clip.Video, ep.Audio = "https://v/1.mp4", "https://a/2.mp3"
 	c.upsert([]core.Item{clip, ep, item("x", "3", "gm")}, now)
 
-	if got := c.unjudgedCount(); got != 1 {
+	if got := c.unjudgedCount(false); got != 1 {
 		t.Fatalf("unjudged is %d, want only the text item", got)
 	}
 	c.judge(map[string]siftVerdict{
@@ -165,7 +165,7 @@ func TestAutoSiftWithoutAKeyStaysQuiet(t *testing.T) {
 	if job := s.state(); job.State != "" {
 		t.Fatalf("job = %+v, want no run at all", job)
 	}
-	if got := c.unjudgedCount(); got != 1 {
+	if got := c.unjudgedCount(false); got != 1 {
 		t.Fatalf("unjudged is %d, want the item left for a run that can happen", got)
 	}
 }
@@ -218,7 +218,7 @@ func TestSiftStopsAtTheFirstFailure(t *testing.T) {
 	if job.State != "failed" || !strings.Contains(job.Err, "401") {
 		t.Fatalf("job = %+v, want the service's own words", job)
 	}
-	if got := c.unjudgedCount(); got != 1 {
+	if got := c.unjudgedCount(false); got != 1 {
 		t.Fatalf("unjudged is %d: a failed run must leave the item for the next one", got)
 	}
 	// ...and on the banner, since nearly every sift is one a fetch asked for
@@ -529,7 +529,7 @@ func TestHalfJudgedItemsAreAskedAgain(t *testing.T) {
 	e := c.byKey[core.Key("x", "1")]
 	e.JudgedAt, e.Worth = now.UTC().Format(time.RFC3339), 0.8 // as an older run left it
 
-	if got := c.unjudgedCount(); got != 1 {
+	if got := c.unjudgedCount(false); got != 1 {
 		t.Fatalf("unjudged is %d: an item with no rung has not been judged", got)
 	}
 	s := testSifter(t, c, worthOf(map[string]float64{"1": 0.8}))
