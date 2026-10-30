@@ -149,8 +149,64 @@ func TestGistChipCollectsWhatIsReady(t *testing.T) {
 	if !strings.Contains(page, `<a class="fchip flink hid" href="/?gist=1" data-kind="gist"`) {
 		t.Errorf("an empty gist chip should be drawn hidden: %s", page)
 	}
-	if !strings.Contains(page, `if(chip.dataset.kind === 'gist') chip.classList.toggle('hid', count === 0);`) {
+	if !strings.Contains(page, `if(chip.dataset.kind === 'gist' && count > 0) chip.classList.remove('hid');`) {
 		t.Error("the chip should show itself as soon as it holds something")
+	}
+	// Read through, the pile keeps its chip, at nought, so a gist can be gone
+	// back to and asked for again.
+	plain.gistsKept = 2
+	page = renderInput(t, pageInput{
+		items: items[1:2], total: 1, apps: []string{"hn"}, now: time.Now(),
+		tally: &plain, query: url.Values{},
+	})
+	if !strings.Contains(page, `<a class="fchip flink" href="/?gist=1" data-kind="gist"`) {
+		t.Errorf("a pile read through should keep its chip: %s", page)
+	}
+	if !strings.Contains(page, `<span>gist</span><span class="fn">0</span><span class="fof" data-of0="2">/2</span>`) {
+		t.Errorf("the chip should say nothing is waiting out of the two there: %s", page)
+	}
+	if !strings.Contains(page, `<a class="fchip flink hid" href="/?gist=1" data-kind="gist" data-key="gist" data-on="0"><span>gist</span><span class="fn">0</span></a>`) {
+		t.Errorf("the quick row should keep a pile read through out of the way: %s", page)
+	}
+}
+
+// The pile's page in the list, read through: the read ones are still on it,
+// after anything unread and the one read last first, since the list has no back
+// arrow to reach them by.
+func TestGistPileListsTheReadOnes(t *testing.T) {
+	sel := feedSel{Kind: "gist", Key: "gist"}
+	page := renderInput(t, pageInput{
+		items:  []core.Item{{App: "hn", ID: "3", Title: "unread", Gisted: true}},
+		behind: []core.Item{{App: "hn", ID: "1", Title: "read first", Gisted: true}, {App: "hn", ID: "2", Title: "read last", Gisted: true}},
+		total:  1, apps: []string{"hn"}, now: time.Now(), sel: sel,
+		query: url.Values{"gist": {"1"}},
+	})
+	at := func(id string) int {
+		i := strings.Index(page, `data-id="`+id+`"`)
+		if i < 0 {
+			t.Fatalf("card %s is not on the page", id)
+		}
+		return i
+	}
+	if !(at("3") < at("2") && at("2") < at("1")) {
+		t.Errorf("want the unread, then the read last, then the read first")
+	}
+	if !strings.Contains(page, `class="card read" data-app="hn" data-id="2"`) {
+		t.Error("a read one should be drawn read")
+	}
+}
+
+// In the deck, a pile read through opens on the one read last rather than on
+// the end note, which would leave the read ones behind an arrow nobody thinks
+// to press.
+func TestGistDeckReadThroughOpensOnTheLastRead(t *testing.T) {
+	page := renderInput(t, pageInput{
+		behind: []core.Item{{App: "hn", ID: "1", Title: "read first", Gisted: true}, {App: "hn", ID: "2", Title: "read last", Gisted: true}},
+		apps:   []string{"hn"}, now: time.Now(), sel: feedSel{Kind: "gist", Key: "gist"},
+		query: url.Values{"gist": {"1"}, "deck": {"1"}}, swipe: true,
+	})
+	if !strings.Contains(page, `data-deckstart="1"`) {
+		t.Error("the deck should open on the one read last")
 	}
 }
 
@@ -416,5 +472,32 @@ func TestARestoredGistPutsItsItemBackInThePile(t *testing.T) {
 	}
 	if got := cache.unreadCount(); got != 0 {
 		t.Fatalf("unread = %d, want the set-aside item out of the feed", got)
+	}
+}
+
+// Un-gist is done with it: off the pile whether it was read there or not, and
+// not back in the feed either, so it does not come round a second time.
+func TestUngistTakesItOffThePile(t *testing.T) {
+	cache := newTestCache(t)
+	now := time.Now()
+	cache.upsert([]core.Item{{App: "hn", ID: "1", Title: "waiting"}, {App: "hn", ID: "2", Title: "read"}}, now)
+	cache.setGisting("hn", "1", now)
+	cache.setGisting("hn", "2", now)
+	cache.markRead("hn", []string{"2"}, now)
+
+	if was, unread := cache.ungist("hn", "1", now); !was || !unread {
+		t.Errorf("ungist(waiting) = %t, %t, want true, true", was, unread)
+	}
+	if was, unread := cache.ungist("hn", "2", now); !was || unread {
+		t.Errorf("ungist(read) = %t, %t, want true, false", was, unread)
+	}
+	if n := cache.gistKeptCount(); n != 0 {
+		t.Errorf("the pile still holds %d", n)
+	}
+	if n := cache.unreadCount(); n != 0 {
+		t.Errorf("unread = %d, want 0: un-gist should not put it back in the feed", n)
+	}
+	if was, _ := cache.ungist("hn", "1", now); was {
+		t.Error("a second un-gist should find nothing to take off")
 	}
 }

@@ -914,7 +914,11 @@ so a handful fired off while you were scrolling turns into a short reading list
 you go through one after another like any other page of the feed. The chip
 counts only what is finished — a run still going has nothing to point at — and
 the gists belong to the running server, so a restart empties the chip rather
-than offering prose it no longer holds.
+than offering prose it no longer holds. Reading the pile through leaves the chip
+in place, counting what is waiting out of everything gisted (`0/12`), with the
+read ones still on its page (the deck opens on the one read last and walks back
+from there without marking anything unread; the list has them below anything
+unread), so an old gist can be gone back to and its thread asked for **again**.
 
 Sound is the one media preference that is not the page's. The speed you read at
 is the same on every card, but whether a thing should be making noise is about

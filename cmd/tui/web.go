@@ -202,6 +202,14 @@ func runServer(root, addr string, dev, drain bool, every time.Duration) error {
 		}
 		handleUnmark(w, r, cache)
 	})
+	mux.HandleFunc("/ungist", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleUngist(w, r, cache, flusher)
+	})
 	mux.HandleFunc("/mark-all", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
@@ -643,12 +651,14 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	// has actually been read yet, which is what decides whether a card opens on
 	// arrival there or says it is still reading.
 	gisting := cache.gisting(now)
-	if gists := sum.gisted(); len(gists) > 0 {
-		for i := range gisting {
-			gisting[i].Gisted = gists[core.Key(gisting[i].App, gisting[i].ID)]
-		}
+	gists := sum.gisted()
+	for i := range gisting {
+		gisting[i].Gisted = gists[core.Key(gisting[i].App, gisting[i].ID)]
 	}
 	tally.gists = len(gisting)
+	// Read through, the pile keeps the chip: what was gisted once is worth going
+	// back to, and asking again is done from its card.
+	tally.gistsKept = cache.gistKeptCount()
 	// Likewise the digests a fetch wrote by itself: a pile of its own, counted
 	// off the store rather than out of the backlog, since a digest is prose
 	// about items rather than an item.
@@ -722,7 +732,14 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 	if len(items) > window {
 		items = items[:window]
 	}
-	behind := deckBehind(cache, now, deck, sel, behindWant)
+	// The gist pile carries its read ones in the list too, below the unread:
+	// they are what the chip is still there for once the pile is read through.
+	behind := deckBehind(cache, now, deck || sel.Kind == "gist", sel, behindWant)
+	if sel.Kind == "gist" {
+		for i := range behind {
+			behind[i].Gisted = gists[core.Key(behind[i].App, behind[i].ID)]
+		}
+	}
 	// Remember what this page showed so a save button can post back just an
 	// app+id and still persist the whole item, even one the cache has since
 	// pruned out from under the page it is on.
@@ -1090,6 +1107,29 @@ func handleUnmark(w http.ResponseWriter, r *http.Request, cache *feedCache) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"changed":%t}`, changed)
+}
+
+// handleUngist takes an item off the gist chip's page: a gist gone back to and
+// done with, or one never worth the minute.
+func handleUngist(w http.ResponseWriter, r *http.Request, cache *feedCache, flusher *markFlusher) {
+	app, id := r.FormValue("app"), r.FormValue("id")
+	if app == "" || id == "" {
+		http.Error(w, "missing app or id", http.StatusBadRequest)
+		return
+	}
+	was, unread := cache.ungist(app, id, time.Now())
+	if was {
+		if err := cache.save(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	// One taken off unread is a read like any other, and upstream hears of it.
+	if unread {
+		flusher.kick()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"ok":true,"changed":%t}`, was)
 }
 
 func handleMarkAll(w http.ResponseWriter, r *http.Request, cache *feedCache, flusher *markFlusher, sum *summarizer) {

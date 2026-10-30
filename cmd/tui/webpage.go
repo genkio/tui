@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,6 +107,9 @@ type feedTally struct {
 	gists   int
 	digests int
 	matched int
+	// Every item ever set aside for its discussion, read or not: the gist chip
+	// stays while any is left to go back to.
+	gistsKept int
 	// app -> subcategory -> count, for the services that have one (see subApps).
 	// Nested rather than flat because two services can name a stream the same
 	// thing, and a subcategory only ever narrows its own source.
@@ -372,6 +376,9 @@ type filterChip struct {
 	State string // "ok", "bad", or ""
 	Title string // what the state means, for a hover or long press
 	Pile  bool   // drawn as a page of its own (the quick row's copy of a pile chip)
+	// The whole pile, read or not, drawn after the count as "0/12": the gist
+	// chip's count is what is waiting, and this is what is there to go back to.
+	Of int
 }
 
 // quickChips are the ones kept over the first card, in the order they sit
@@ -389,6 +396,12 @@ func quickRow(filters []filterGroup) []filterChip {
 				if c.Kind == q.kind && c.Key == q.key {
 					// The sparkle stays in the dialog: one briefing control per source.
 					c.Summarize, c.Pile = false, g.Pile
+					// The pile read through is a place to go back to, which the
+					// dialog is for; over the cards the chip only says something is
+					// waiting.
+					if c.Kind == "gist" {
+						c.Of, c.Hidden = 0, c.Count == 0 && !c.On
+					}
 					out = append(out, c)
 				}
 			}
@@ -703,16 +716,26 @@ func buildPageData(in pageInput) pageData {
 	// The history tail goes in front of the cards, after everything that counts
 	// them: these items are read, they are off the header and the chips already,
 	// and a page that counted them again would report the backlog twice.
+	// The list has no back arrow, so there the gist pile's read ones go after
+	// the unread, the one read last first.
 	deckStart := 0
+	behind := make([]cardData, 0, len(in.behind))
+	for _, it := range in.behind {
+		card := build(it)
+		card.Read = true
+		behind = append(behind, card)
+	}
 	if swipe {
-		behind := make([]cardData, 0, len(in.behind))
-		for _, it := range in.behind {
-			card := build(it)
-			card.Read = true
-			behind = append(behind, card)
-		}
 		deckStart = len(behind)
+		// A gist pile read through opens on the one read last rather than on the
+		// deck's end note: going back to them is all its page is for now.
+		if in.sel.Kind == "gist" && len(cards) == 0 && deckStart > 0 {
+			deckStart--
+		}
 		cards = append(behind, cards...)
+	} else {
+		slices.Reverse(behind)
+		cards = append(cards, behind...)
 	}
 
 	return pageData{
@@ -1296,7 +1319,7 @@ func chipRow(t feedTally, apps []string, bad map[string]bool, sel feedSel, q url
 	// appear on a page that was loaded before the run finished.
 	if feed {
 		out = append(out, filterGroup{Pile: true, Chips: []filterChip{{
-			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists, Hidden: t.gists == 0,
+			Kind: "gist", Key: "gist", Label: "gist", Count: t.gists, Of: t.gistsKept, Hidden: t.gists == 0 && t.gistsKept == 0,
 		}, {
 			Kind: "digest", Key: "digest", Label: "summary", Count: t.digests, Hidden: t.digests == 0,
 		}}})

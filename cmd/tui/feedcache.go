@@ -243,6 +243,11 @@ func (c *feedCache) gistingCount() int {
 	return c.count(func(e *feedEntry) bool { return !e.Read && e.gisting() })
 }
 
+// gistKeptCount is every item ever set aside, read or not.
+func (c *feedCache) gistKeptCount() int {
+	return c.count(func(e *feedEntry) bool { return e.gisting() })
+}
+
 // setGisting sets one item aside for its discussion. False means there was
 // nothing in the feed to take out: an item the cache has never heard of, which
 // is a gist asked for from the saved list or from an item's own page, or one
@@ -266,12 +271,35 @@ func (c *feedCache) clearGisting(app, id string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.byKey[core.Key(app, id)]
-	if !ok || !e.gisting() {
+	// A read one is not in the feed to go back to; it keeps its place in the
+	// pile, and the gist it already had.
+	if !ok || !e.gisting() || e.Read {
 		return false
 	}
 	e.GistAt = ""
 	c.rev++
 	return true
+}
+
+// ungist takes one out of the gist pile for good, which is the reader saying
+// they are done with it rather than a reading that failed: read, so it does not
+// come round in the feed again either, and so a restart's restore leaves it out
+// (setGisting passes over a read one). Reports whether it was in the pile, and
+// whether it was still unread there.
+func (c *feedCache) ungist(app, id string, now time.Time) (was, unread bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.byKey[core.Key(app, id)]
+	if !ok || !e.gisting() {
+		return false, false
+	}
+	unread = !e.Read
+	e.GistAt = ""
+	if unread {
+		e.Read, e.ReadAt = true, now.UTC().Format(time.RFC3339)
+	}
+	c.rev++
+	return true, unread
 }
 
 // skipped is the pile the sift set aside, newest judgment first: read like the

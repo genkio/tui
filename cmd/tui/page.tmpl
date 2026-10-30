@@ -207,6 +207,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
 }
 .fchip[data-on="1"]{border-color:var(--accent);color:var(--fg)}
 .fchip .fn{font-variant-numeric:tabular-nums;opacity:.65}
+.fchip .fof{font-variant-numeric:tabular-nums;opacity:.65;margin-left:-5px} /* "0/12": the pile behind the gist chip's count */
 /* a source chip's count is that service's status light too, which is what the
    header's separate row of dots used to be: green means the last sweep of it
    worked, red means it didn't and this number is stale */
@@ -332,6 +333,7 @@ h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.02em}
   margin-left:auto;padding:0;border:0;background:none;font-family:inherit;font-size:12px;font-weight:600;
   color:var(--accent);white-space:nowrap;cursor:pointer;text-decoration:underline;text-underline-offset:2px;
 }
+.gagain+.gagain{margin-left:0}
 .rgv:disabled{opacity:.6;cursor:default}
 .rgv[data-on="1"]{color:var(--accent)}
 .loop[data-on="1"]{color:var(--accent)}
@@ -562,8 +564,8 @@ video.ffs{object-fit:cover !important}
 {{end}}<div class="warn mishap hid" id="mishap" data-id="">⚠ <span class="msay" id="mishapsays"></span><button class="mishapx" id="mishapx" type="button" title="dismiss until the next one" aria-label="dismiss">×</button></div>
 <div class="warn hid" id="offwarn"></div>
 <div class="warn hid" id="offline">⚠ {{if .SavedView}}Offline — this is the saved list as it stood when the server was last in reach, and nothing here can be saved, tagged or played until it is again.{{else}}Offline — the server is not in reach. The saved list is the part that reads without it.{{end}}</div>
-{{if not .Guest}}<div class="filters quick" id="quick">{{range .Quick}}<a class="fchip{{if .Pile}} flink{{end}}{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{end}}</div>
-<dialog class="filtersdlg" id="filtersdlg"><div class="filters{{if .Subs}} focus{{end}}" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup{{if .Sources}} fsrc{{end}}">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn savedn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div></dialog>
+{{if not .Guest}}<div class="filters quick" id="quick">{{range .Quick}}<a class="fchip{{if .Pile}} flink{{end}}{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}{{if .Capped}}+{{end}}</span>{{if .Of}}<span class="fof" data-of0="{{.Of}}">/{{.Of}}</span>{{end}}</a>{{end}}</div>
+<dialog class="filtersdlg" id="filtersdlg"><div class="filters{{if .Subs}} focus{{end}}" id="filters">{{range .Filters}}{{if not .Pile}}<div class="fgroup{{if .Sources}} fsrc{{end}}">{{range .Chips}}{{if .Summarize}}<span class="fpair">{{end}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}>{{if .Color}}<span class="chip" style="background:{{.Color}}">{{.Label}}</span>{{else}}<span>{{.Label}}</span>{{end}}<span class="fn{{if .State}} {{.State}}{{end}}">{{.Count}}{{if .Capped}}+{{end}}</span></a>{{if .Summarize}}<button class="fsum" id="fsum-{{.Key}}" type="button" data-app="{{.Key}}" data-says="{{.Says}}" data-state="idle" title="summarize {{.Says}}'s unread backlog" aria-label="summarize {{.Says}}'s unread backlog"><svg class="fsumi" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l1.85 4.45L18.3 9.5l-4.45 1.85L12 15.8l-1.85-4.45L5.7 9.5l4.45-1.85z"/><path d="M18.1 15.1l.78 1.87 1.87.78-1.87.78-.78 1.87-.78-1.87-1.87-.78 1.87-.78z"/></svg><span class="fspin" aria-hidden="true"></span></button></span>{{end}}{{end}}</div>{{end}}{{end}}{{if and .Filters .TagFilters}}<span class="filtersep">|</span>{{end}}{{if .TagFilters}}<span class="fgroup tagfilters" id="tagfilters">{{range .TagFilters}}<a class="fchip{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="tag" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"><span>{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}<div class="fgroup"><a class="fchip flink" href="{{if .SavedView}}/{{else}}/?saved=1{{end}}" data-on="{{if .SavedView}}1{{else}}0{{end}}"><span>saved</span><span class="fn savedn">{{.Saved}}</span></a>{{range .Filters}}{{if .Pile}}{{range .Chips}}<a class="fchip flink{{if .Hidden}} hid{{end}}" href="{{.Href}}" data-kind="{{.Kind}}" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}"{{if .Title}} title="{{.Title}}"{{end}}><span>{{.Label}}</span><span class="fn">{{.Count}}</span>{{if .Of}}<span class="fof" data-of0="{{.Of}}">/{{.Of}}</span>{{end}}</a>{{end}}{{end}}{{end}}<a class="fchip flink" href="{{if .SkippedView}}/{{else}}/?skipped=1{{end}}" data-on="{{if .SkippedView}}1{{else}}0{{end}}" title="what the sift skipped for you — read them here to check it"><span>skipped</span><span class="fn">{{.Skipped}}</span></a><a class="fchip flink" href="{{if .BlockedView}}/{{else}}/?blocked=1{{end}}" data-on="{{if .BlockedView}}1{{else}}0{{end}}"><span>blocked</span><span class="fn">{{.Blocked}}</span></a></div>{{if .Subs}}<span class="fgroup subs" id="subs">{{range .Subs}}<a class="fchip" href="{{.Href}}" data-kind="sub" data-key="{{.Key}}" data-on="{{if .On}}1{{else}}0{{end}}" title="{{.Title}}"><span class="slabel">{{.Label}}</span><span class="fn">{{.Count}}</span></a>{{end}}</span>{{end}}</div></dialog>
 {{end}}{{if .SummaryApp}}<div class="summary" id="summary" data-app="{{.SummaryApp}}" data-open="{{if .SummaryOpen}}1{{else}}0{{end}}"></div>
 {{end}}{{if .BlockedView}}{{if not .Cards}}<div class="note">{{if .Sel}}Nothing blocked from that chip.{{else}}Nothing blocked yet. Add a <b>keyword</b> and any post whose title carries it is kept out of the feed and filed here instead.{{end}}</div>
 {{end}}{{else if .SavedView}}{{if not .Cards}}<div class="note">{{if or .Sel .TagSelected}}Nothing saved from that chip.{{else}}Nothing saved yet. Tap <b>save</b> on any item to keep it here.{{end}}</div>
@@ -838,7 +840,10 @@ function recountChips(){
     var off = whole ? gone.all : (group && group[chip.dataset.key] || 0);
     var count = Math.max(0, base - off + (chip.dataset.kind === 'gist' ? aside : 0));
     n.textContent = count;
-    if(chip.dataset.kind === 'gist') chip.classList.toggle('hid', count === 0);
+    var of = chip.querySelector('.fof');
+    if(of) of.textContent = '/' + (parseInt(of.dataset.of0, 10) + aside);
+    // Shown, never hidden again: read through, the pile is still there to go back to.
+    if(chip.dataset.kind === 'gist' && count > 0) chip.classList.remove('hid');
   });
 }
 // The gist pile as the server has it now. A gist asked for in another tab (a
@@ -1828,13 +1833,24 @@ if (SWIPE) (function(){
     at--;
     show();
     var card = current();
-    queueUnread(card);
+    // Going back over a gist is rereading it, not asking for it to wait again.
+    if (!GIST_PILE) queueUnread(card);
     return true;
   }
   function read(){
     var card = current();
     if(card) mark(card);
   }
+  // A card taken out from under the deck (un-gist): the one after it moves up.
+  document.addEventListener('tui:dropcard', function(e){
+    var i = cards.indexOf(e.detail);
+    if (i < 0) return;
+    quiet(e.detail);
+    cards.splice(i, 1);
+    if (i < at) at--;
+    e.detail.remove();
+    show();
+  });
   if (prevBtn) prevBtn.addEventListener('click', function(){ back(); });
   if (nextBtn) nextBtn.addEventListener('click', function(){ read(); });
 
@@ -2453,6 +2469,16 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     again.title = 'summarize the discussion as it stands now';
     again.addEventListener('click', function(){ start(card); });
     meta.appendChild(again);
+    // Only on the pile's own page: that is the list this takes it off.
+    if (GIST_PILE){
+      var drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'gagain';
+      drop.textContent = 'un-gist';
+      drop.title = 'take this off the gist list';
+      drop.addEventListener('click', function(){ ungist(card, drop); });
+      meta.appendChild(drop);
+    }
     var body = document.createElement('div');
     body.className = 'body';
     // Server-rendered from Markdown by the renderer the cards use, so the model's
@@ -2486,6 +2512,30 @@ if(clearBlockedBtn) clearBlockedBtn.addEventListener('click', function(){
     decCount(-1);
     decBulkCount(-1);
     scheduleRecount();
+  }
+
+  function ungist(card, btn){
+    btn.disabled = true;
+    var fd = new FormData();
+    fd.append('app', card.dataset.app);
+    fd.append('id', card.dataset.id);
+    fetch('/ungist', {method:'POST', body:fd})
+      .then(function(res){ if(!res.ok) throw 0; return res.json(); })
+      .then(function(d){
+        if (!d || !d.ok) throw 0;
+        // Off the pile's total, and off what is waiting if it was waiting when
+        // the page was drawn. One read since is in recountChips' tally of read
+        // cards, which drops it again as the card goes.
+        document.querySelectorAll('#filters .fchip[data-kind=gist], #quick .fchip[data-kind=gist]').forEach(function(chip){
+          var of = chip.querySelector('.fof');
+          if (of) of.dataset.of0 = Math.max(0, parseInt(of.dataset.of0, 10) - 1);
+          if (!card.dataset.history) chip.dataset.n0 = Math.max(0, parseInt(chip.dataset.n0, 10) - 1);
+        });
+        if (SWIPE) document.dispatchEvent(new CustomEvent('tui:dropcard', {detail: card}));
+        else card.remove();
+        scheduleRecount();
+      })
+      .catch(function(){ btn.disabled = false; toast('could not take that off the gist list'); });
   }
 
   function start(card){
