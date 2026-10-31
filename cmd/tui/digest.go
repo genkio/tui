@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/genkio/tui/core"
 )
 
@@ -509,4 +512,46 @@ func nextDigest(w http.ResponseWriter, sum *summarizer, cache *feedCache, flushe
 		Marked  int  `json:"marked"`
 		Waiting int  `json:"waiting"`
 	}{true, len(items), sum.digests.waitingCount()})
+}
+
+// digestRows ends every bullet that cites an item with that item's link and
+// save, so one worth keeping or opening needs no trip through its page. Done
+// at render rather than stored with the prose: whether it is saved changes
+// after the digest is written. The row carries app and id for save's handler.
+func digestRows(src string, find func(app, id string) (core.Item, bool), saved func(app, id string) bool) string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(src))
+	if err != nil {
+		return src
+	}
+	doc.Find("li").Each(func(_ int, li *goquery.Selection) {
+		href, _ := li.Find(`a[href^="/item?"]`).First().Attr("href")
+		u, err := url.Parse(href)
+		if href == "" || err != nil {
+			return
+		}
+		app, id := u.Query().Get("app"), u.Query().Get("id")
+		it, ok := find(app, id)
+		if !ok {
+			return
+		}
+		var b strings.Builder
+		b.WriteString(`<span class="dacts">`)
+		if link := originalPostURL(it); link != "" {
+			fmt.Fprintf(&b, `<a class="open" href="%s" target="_blank" rel="noopener" title="open original"><span>link</span></a>`, html.EscapeString(link))
+		}
+		if saved(app, id) {
+			b.WriteString(`<button class="save" type="button" data-saved="1" title="keep this item in the saved list">saved</button>`)
+		} else {
+			b.WriteString(`<button class="save" type="button" data-saved="0" title="keep this item in the saved list">save</button>`)
+		}
+		b.WriteString(`</span>`)
+		li.SetAttr("data-app", app)
+		li.SetAttr("data-id", id)
+		li.AppendHtml(b.String())
+	})
+	out, err := doc.Find("body").Html()
+	if err != nil {
+		return src
+	}
+	return out
 }

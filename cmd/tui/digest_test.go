@@ -505,3 +505,26 @@ func TestDigestLeavesTheBacklogAlone(t *testing.T) {
 		t.Errorf("backlog = %d, want all five still unread", n)
 	}
 }
+
+func TestDigestRowsGetLinkAndSave(t *testing.T) {
+	src := linkify("- [a post](/item?app=x&id=1): what it says\n- [gone](/item?app=x&id=2): no longer here\n- plain row\n")
+	find := func(app, id string) (core.Item, bool) {
+		if id != "1" {
+			return core.Item{}, false
+		}
+		return core.Item{App: app, ID: id, URL: "https://x.com/a/status/1?a=1&b=2"}, true
+	}
+	out := digestRows(src, find, func(app, id string) bool { return id == "1" })
+	for _, want := range []string{
+		`<li data-app="x" data-id="1">`,
+		`href="https://x.com/a/status/1?a=1&amp;b=2"`,
+		`data-saved="1"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, `class="dacts"`); n != 1 {
+		t.Errorf("%d rows got actions, want only the one found:\n%s", n, out)
+	}
+}

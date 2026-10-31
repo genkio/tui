@@ -695,7 +695,10 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 			// A run rewrites the one waiting, never one already cleared, so the
 			// page watches for it only there.
 			digest = &digestData{
-				ID: d.ID, Count: d.Count, Waiting: tally.digests, HTML: template.HTML(d.HTML),
+				ID: d.ID, Count: d.Count, Waiting: tally.digests,
+				HTML: template.HTML(digestRows(d.HTML, func(app, id string) (core.Item, bool) {
+					return findItem(app, id, now, cache, saved, rendered)
+				}, saved.has)),
 				Stamp: d.Generated, Running: running && !cleared, Cleared: cleared,
 			}
 			if cleared {

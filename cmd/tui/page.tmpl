@@ -442,6 +442,8 @@ body.sumon .summary{display:block}
 /* a cited item wears a label, not a URL: nothing here wants breaking mid-word
    the way a bare link in a post's body does */
 .summary .body .link{word-break:normal;text-underline-offset:2px}
+.dacts{display:inline-flex;gap:14px;margin-left:10px;vertical-align:middle}
+.dacts .open,.dacts .save{min-height:28px;font-size:13px}
 /* What the briefing stands in for is hidden while it is open. #markAll is not on
    this list: having read a briefing and decided the items behind it are not worth
    opening, clearing them is the next thing you do, so the button stays where the
@@ -545,7 +547,7 @@ video.ffs{object-fit:cover !important}
   background:rgba(0,0,0,.72);color:#fff;font-size:12px;font-weight:700;
   padding:2px 7px;border-radius:6px;font-variant-numeric:tabular-nums;
 }
-.guest .footer .save,.guest .footer .keep,.guest .footer .gist{display:none}
+.guest .dacts .save,.guest .footer .save,.guest .footer .keep,.guest .footer .gist{display:none}
 </style>
 </head><body{{if .Guest}} class="guest"{{end}}>
 <div id="state" data-savedview="{{if .SavedView}}true{{else}}false{{end}}" data-blockedview="{{if .BlockedView}}true{{else}}false{{end}}" data-skippedview="{{if .SkippedView}}true{{else}}false{{end}}" data-itemview="{{if .ItemView}}true{{else}}false{{end}}" data-guest="{{if .Guest}}true{{else}}false{{end}}" data-swipe="{{if .Swipe}}true{{else}}false{{end}}" data-deckstart="{{.DeckStart}}" data-more="{{if .More}}true{{else}}false{{end}}" data-sel="{{.Sel}}" data-sumlang="{{.SumLang}}" hidden></div>
@@ -974,7 +976,7 @@ function setSaved(card, on){
 document.addEventListener('click', function(e){
   var b = e.target.closest ? e.target.closest('button.save') : null;
   if (!b) return;
-  setSaved(b.closest('article.card'), b.dataset.saved !== '1');
+  setSaved(b.closest('[data-app][data-id]'), b.dataset.saved !== '1');
 });
 
 // Keep hands the video to the server, which has a download server fetch it into
