@@ -524,6 +524,12 @@ func TestDigestRowsGetLinkAndSave(t *testing.T) {
 			t.Errorf("missing %s in\n%s", want, out)
 		}
 	}
+	bad := digestRows(src, func(app, id string) (core.Item, bool) {
+		return core.Item{App: app, ID: id, URL: "javascript:alert(1)"}, true
+	}, func(string, string) bool { return false })
+	if strings.Contains(bad, "javascript:") {
+		t.Errorf("a javascript: URL made it into a link:\n%s", bad)
+	}
 	if n := strings.Count(out, `class="dacts"`); n != 1 {
 		t.Errorf("%d rows got actions, want only the one found:\n%s", n, out)
 	}

@@ -536,7 +536,9 @@ func digestRows(src string, find func(app, id string) (core.Item, bool), saved f
 		}
 		var b strings.Builder
 		b.WriteString(`<span class="dacts">`)
-		if link := originalPostURL(it); link != "" {
+		// Written by hand, so html/template's href check is not there to keep a
+		// feed's javascript: URL out.
+		if link := originalPostURL(it); webURL(link) {
 			fmt.Fprintf(&b, `<a class="open" href="%s" target="_blank" rel="noopener" title="open original"><span>link</span></a>`, html.EscapeString(link))
 		}
 		if saved(app, id) {
@@ -554,4 +556,9 @@ func digestRows(src string, find func(app, id string) (core.Item, bool), saved f
 		return src
 	}
 	return out
+}
+
+func webURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
