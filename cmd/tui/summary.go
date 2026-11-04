@@ -23,7 +23,7 @@ import (
 // what this work wants — the reading is the cost, not the thinking.
 const (
 	summaryProvider  = "openai-codex"
-	summaryModel     = "gpt-5.6-luna"
+	summaryModel     = "gpt-6-luna"
 	summaryReasoning = "medium"
 	// A run reads a whole backlog and thinks about it, which is minutes rather
 	// than the milliseconds every other route here answers in.

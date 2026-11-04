@@ -703,7 +703,7 @@ else, and the header's **unread** link goes back to the feed.
 
 Every chip with a backlog carries a ✦ beside it, **all** included. Tapping it
 hands that chip's unread items to [pi](https://pi.dev) driving OpenAI's
-`gpt-5.6-luna` at medium thinking — and nothing else happens to your
+`gpt-6-luna` at medium thinking — and nothing else happens to your
 page: the icon starts spinning and you carry on reading. That is the point of it.
 A run takes a minute or two, so waiting on a blank screen for one would be the
 worst way to spend it, and several sources can be spinning at once.
