@@ -136,7 +136,18 @@ func RunAuth(ctx context.Context, loginURL string, capture func(*Session) (map[s
 	fmt.Println("\n  1. Log in to the site in the browser window that just opened.")
 	fmt.Println("  2. Reach the logged-in page.")
 	fmt.Println("  3. Come back here and press Enter to capture the session.")
-	bufio.NewReader(os.Stdin).ReadString('\n')
+	// The read can't be interrupted, and the plugins catch SIGINT to cancel ctx,
+	// so a bare read here would leave Ctrl-C doing nothing.
+	enter := make(chan struct{})
+	go func() {
+		bufio.NewReader(os.Stdin).ReadString('\n')
+		close(enter)
+	}()
+	select {
+	case <-enter:
+	case <-ctx.Done():
+		return errors.New("login cancelled")
+	}
 
 	var cookies []*network.Cookie
 	if err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
