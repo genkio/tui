@@ -267,8 +267,11 @@ func (s *summarizer) serve(ctx context.Context) {
 			// discussion, and the digests a fetch writes by itself, which have no
 			// reader at all to tell. A run cut short by the server stopping is not
 			// trouble and says nothing.
-			if job.State == "failed" && ctx.Err() == nil {
+			switch {
+			case job.State == "failed" && ctx.Err() == nil:
 				s.mishaps.note("summary", job.Err)
+			case job.State == "done":
+				s.mishaps.clear("summary")
 			}
 			if ask.id != "" {
 				s.settle(ask, job)

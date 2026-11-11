@@ -94,3 +94,55 @@ func TestAFailedBriefingReachesTheBanner(t *testing.T) {
 		t.Errorf("mishap = %+v, want the failure the run reported", m)
 	}
 }
+
+// A run of the same kind that goes through puts the banner away; one of the
+// other kind leaves it, and the next failure still gets a name of its own.
+func TestASuccessClearsItsOwnKindOfMishap(t *testing.T) {
+	m := &mishapLog{}
+	m.note("summary", "token expired")
+	first, _ := m.latest()
+	m.clear("sift")
+	if _, ok := m.latest(); !ok {
+		t.Fatal("a sift going through cleared a summary's failure")
+	}
+	m.clear("summary")
+	if got, ok := m.latest(); ok {
+		t.Fatalf("mishap = %+v after a summary went through", got)
+	}
+	m.note("summary", "token expired")
+	if again, _ := m.latest(); again.ID == first.ID {
+		t.Errorf("the failure after a clear reused the dismissed name %q", first.ID)
+	}
+}
+
+// The re-login case: a briefing fails, the next one is written, and the banner
+// goes without anyone dismissing it.
+func TestAWrittenBriefingClearsTheBanner(t *testing.T) {
+	cache := newTestCache(t)
+	cache.upsert([]core.Item{{App: "reddit", ID: "1", Title: "a post"}}, time.Now())
+	mishaps := &mishapLog{}
+	expired := true
+	sum := testSummarizer(t, cache, func(context.Context, string) (string, error) {
+		if expired {
+			return "", errors.New("pi failed: Your authentication token has expired.")
+		}
+		return "- a post", nil
+	})
+	sum.mishaps = mishaps
+
+	post(t, sum, "app=reddit")
+	settled(t, sum, "reddit")
+	if _, ok := mishaps.latest(); !ok {
+		t.Fatal("the failed briefing left no mishap")
+	}
+	expired = false
+	if rec := post(t, sum, "app=reddit"); rec.Code != http.StatusAccepted {
+		t.Fatalf("summarize = %d %s", rec.Code, rec.Body.String())
+	}
+	if j := settled(t, sum, "reddit"); j.State != "done" {
+		t.Fatalf("job = %+v, want a written briefing", j)
+	}
+	if m, ok := mishaps.latest(); ok {
+		t.Errorf("mishap = %+v still standing after a briefing was written", m)
+	}
+}

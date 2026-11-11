@@ -20,7 +20,9 @@ import (
 // failing and why, and the latest reason is the truest one. Every note takes a
 // name, which is what a dismissal is remembered against — the same trouble on
 // the next fetch is a new name, so the banner comes back rather than staying
-// dismissed for a thing that is still happening.
+// dismissed for a thing that is still happening. A later run of the same kind
+// that goes through puts it away again: the trouble it named is over, and a
+// banner still saying so after a re-login reads as the re-login not working.
 //
 // The name carries the server's start time as well as the count, so a browser
 // that dismissed the third mishap of yesterday's server is not still dismissing
@@ -57,6 +59,19 @@ func (m *mishapLog) note(kind, msg string) {
 	m.last = mishap{
 		ID:   strconv.FormatInt(m.boot, 10) + "-" + strconv.FormatInt(m.n, 10),
 		Kind: kind, Msg: msg, At: now,
+	}
+}
+
+// clear puts away the standing mishap if it is of this kind. The count carries
+// on, so a fresh failure after it still gets a name no browser has dismissed.
+func (m *mishapLog) clear(kind string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.last.Kind == kind {
+		m.last = mishap{}
 	}
 }
 

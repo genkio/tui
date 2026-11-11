@@ -350,6 +350,7 @@ feeding:
 		s.job.State, s.job.Err = "failed", "the server stopped before the sift finished"
 	default:
 		s.job.State = "done"
+		s.mishaps.clear("sift")
 	}
 }
 
