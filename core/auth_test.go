@@ -9,6 +9,7 @@ import (
 
 func TestUpsertUserEnv(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TUI_SYNC_DIR", "")
 
 	if err := UpsertUserEnv(map[string]string{"XTUI_AUTH_TOKEN": "tok", "XTUI_CT0": "csrf"}); err != nil {
 		t.Fatal(err)
@@ -42,6 +43,7 @@ func TestUpsertUserEnv(t *testing.T) {
 
 func TestUpsertUserEnvRoundTripsTrickyValue(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TUI_SYNC_DIR", "")
 	if err := UpsertUserEnv(map[string]string{"K": "a'b c=d"}); err != nil {
 		t.Fatal(err)
 	}
