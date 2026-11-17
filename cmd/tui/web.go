@@ -581,7 +581,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, savedView: true,
-			savedCompact: compact, block: block, skipped: cache.skippedCount(), swipe: deck, sel: sel, tally: &tally, query: q,
+			savedCompact: compact, block: block, skipped: cache.skippedCount(), feedUnread: cache.unreadCount(), swipe: deck, sel: sel, tally: &tally, query: q,
 			tags: itemTags, tagFilters: savedTagFilters(all, itemTags, tag, q),
 		})
 		return
@@ -600,8 +600,8 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		}
 		writePage(w, tmpl, pageInput{
 			items: items, total: len(items), now: now, saved: saved, block: block, blockedView: true,
-			skipped: cache.skippedCount(),
-			sel:     sel, tally: &tally, query: q,
+			skipped: cache.skippedCount(), feedUnread: cache.unreadCount(),
+			sel: sel, tally: &tally, query: q,
 		})
 		return
 	}
@@ -636,7 +636,7 @@ func handleAll(w http.ResponseWriter, r *http.Request, root string, loader *page
 		writePage(w, tmpl, pageInput{
 			items: items, behind: behind, total: total, apps: apps, now: now, sel: sel, tally: &tally,
 			query: q, saved: saved, block: block, swipe: deck, order: order,
-			skippedView: true, skipped: len(all), worth: worth,
+			skippedView: true, skipped: len(all), worth: worth, feedUnread: cache.unreadCount(),
 		})
 		return
 	}

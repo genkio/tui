@@ -227,6 +227,9 @@ type pageInput struct {
 	skippedView bool
 	skipped     int
 	worth       map[string]float64
+	// The feed's own unread, for the all chip on the saved, skipped and blocked
+	// pages, whose tally is of the pile.
+	feedUnread int
 	// One item on a page of its own, reached by its own URL (see itemHref).
 	itemView bool
 	guest    bool // ...opened through a shared link, by somebody without the password
@@ -322,6 +325,8 @@ type pageData struct {
 	// say so when its own setting disagrees.
 	SumLang string
 	Filters []filterGroup
+	// Where the saved, skipped or blocked chip goes while its pile is the page.
+	PileHref string
 	// The second row: this source's subcategories, busiest first. Only ever
 	// filled when a source chip that has them is the one on.
 	Subs []filterChip
@@ -624,14 +629,29 @@ func buildPageData(in pageInput) pageData {
 		tally = *in.tally
 	}
 	filters := chipRow(tally, in.apps, bad, in.sel, in.query)
+	pileView := in.savedView || in.skippedView || in.blockedView
 	// The whole feed's chip carries the "+" the header used to: with a service's
 	// backlog deeper than the sweep reached, even that number is short.
+	// On a pile's page it is still the feed, not all of the pile: that is the
+	// pile's own chip (pileHref).
 	for i := range filters {
 		for j := range filters[i].Chips {
-			if filters[i].Chips[j].Kind == allApp {
-				filters[i].Chips[j].Capped = in.capped
+			c := &filters[i].Chips[j]
+			if c.Kind != allApp {
+				continue
+			}
+			if pileView {
+				c.Count, c.Href, c.On, c.Summarize = in.feedUnread, "/", false, false
+			} else {
+				c.Capped = in.capped
 			}
 		}
+	}
+	// The pile's chip, while a pick inside the pile is on, is the whole pile
+	// again; otherwise it is the way out to the feed.
+	pileHref := "/"
+	if pileView && in.sel.on() {
+		pileHref = chipHref(in.query, feedSel{})
 	}
 	subs := subChips(tally, in.sel, in.query)
 
@@ -696,8 +716,7 @@ func buildPageData(in pageInput) pageData {
 	}
 	for _, g := range filters {
 		for _, c := range g.Chips {
-			// Beside a pile's name, "all" is the absence of a narrowing, not a word.
-			if c.On && !(c.Kind == allApp && picked != nil) {
+			if c.On {
 				picked = append(picked, c)
 			}
 		}
@@ -762,6 +781,7 @@ func buildPageData(in pageInput) pageData {
 		KeywordText:   keywordText,
 		Interests:     in.interests,
 		Filters:       filters,
+		PileHref:      pileHref,
 		Subs:          subs,
 		Picked:        picked,
 		Quick:         quickRow(filters),

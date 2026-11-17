@@ -541,3 +541,38 @@ func TestHalfJudgedItemsAreAskedAgain(t *testing.T) {
 		t.Fatalf("rank is %d after a run, want a rung", got)
 	}
 }
+
+// On the skipped page the all chip is still the feed: its own count, a link
+// home, never on. All of the pile is the pile's own chip, which leads back to
+// the whole pile from a pick inside it and out to the feed from the whole pile.
+func TestSkippedViewAllChipIsTheFeed(t *testing.T) {
+	items := []core.Item{{App: "x", ID: "1", Title: "a"}, {App: "reddit", ID: "2", Title: "b"}}
+	all := tallyItems(items)
+	whole := renderInput(t, pageInput{
+		items: items, total: 2, apps: []string{"x", "reddit"}, now: time.Now(), skippedView: true,
+		tally: &all, query: url.Values{"skipped": {"1"}}, feedUnread: 41,
+	})
+	if !strings.Contains(whole, `href="/" data-kind="all" data-key="all" data-on="0"`) {
+		t.Error("the all chip should be off and lead to the feed")
+	}
+	if !strings.Contains(whole, `<span>all</span><span class="fn">41</span>`) {
+		t.Error("the all chip should count the feed, not the pile")
+	}
+	if strings.Contains(whole, `id="fsum-all"`) {
+		t.Error("the all chip should carry no briefing on a pile's page")
+	}
+	if !strings.Contains(whole, `href="/?app=reddit&amp;skipped=1" data-kind="app" data-key="reddit"`) {
+		t.Error("the source chips should still narrow the pile")
+	}
+	if !strings.Contains(whole, `href="/" data-on="1" title="what the sift skipped`) {
+		t.Error("on the whole pile, its chip should lead back to the feed")
+	}
+
+	picked := renderInput(t, pageInput{
+		items: items[1:], total: 1, apps: []string{"x", "reddit"}, now: time.Now(), skippedView: true,
+		sel: feedSel{Kind: "app", Key: "reddit"}, tally: &all, query: url.Values{"skipped": {"1"}, "app": {"reddit"}},
+	})
+	if !strings.Contains(picked, `href="/?skipped=1" data-on="1" title="what the sift skipped`) {
+		t.Error("from a pick inside the pile, its chip should lead to the whole pile")
+	}
+}
